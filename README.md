@@ -1,8 +1,12 @@
 # SpawnWear
 
-.NET nanoFramework firmware (C#) for the **Waveshare ESP32-S3 Touch AMOLED 2.06" Watch**, paired with a Blazor WebAssembly PWA companion that provisions and controls it over BLE.
+A small wearable OS — written in C# on .NET nanoFramework — for the **Waveshare ESP32-S3 Touch AMOLED 2.06" Watch**.
 
-C# on the watch. C# in the browser. Same language end-to-end.
+Think Android, but watch-sized and ESP32-shaped: a kernel/HAL layer of C# drivers for the watch hardware, system services for radios / audio / power, a UI framework for drawing and input, a launcher home screen, and a small set of built-in apps (Settings, Clock, etc.) that talk to the system services. No single C++ binary, no single fixed UI — apps come and go, services run in the background.
+
+It comes with a complementary **Blazor WebAssembly PWA** that mirrors the watch UI over BLE + WiFi for headless setup, debugging, and remote control. Same C# language on both sides.
+
+Constrained by the silicon: ESP32-S3R8 with 8MB PSRAM and 32MB flash. Everything — kernel, drivers, services, framework, apps, user data — fits in that envelope.
 
 ---
 
@@ -122,69 +126,148 @@ Authoritative source: vendor `pin_config.h` (cloned to `_vendor-waveshare-demo/`
 
 ---
 
-## What This Project Builds
+## OS Architecture
 
 ```
-┌──────────────────────────────┐         BLE          ┌──────────────────────────┐
-│  SpawnWear (nanoFramework)   │◄────────────────────►│  Blazor WASM PWA          │
-│  on ESP32-S3-AMOLED-2.06     │                      │  (browser / installable)  │
-│                              │                      │                           │
-│  • BLE GATT server           │                      │  • Web Bluetooth          │
-│  • WiFi client + AP          │                      │  • SpawnDev.BlazorJS      │
-│  • OTA updates               │                      │  • Device dashboard       │
-│  • AXP2101 battery / charge  │                      │  • Live IMU / RTC view    │
-│  • QMI8658 IMU notify        │                      │  • WiFi provisioning UI   │
-│  • PCF85063 RTC sync         │                      │  • OTA trigger            │
-│  • Debug log over BLE notify │                      │                           │
-│                              │                      │                           │
-└──────────────┬───────────────┘                      └──────────────┬────────────┘
-               │ WiFi (after BLE config)                             │
-               ▼                                                     │
-        ┌──────────────────┐         HTTP / WebRTC                   │
-        │  HTTP server     │◄────────────────────────────────────────┘
-        │  WebRTC peer     │
-        └──────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Apps (managed C#, run in-process under the SpawnWear app host)              │
+│  • Launcher (home / clock / app grid)    • Settings        • Clock           │
+│  • AI Assistant (voice + text → home PC over WebRTC)                         │
+│  • Media Player                          • Voice Recorder  • Activity (IMU)  │
+│  • [user-installable later via OTA-style app payloads]                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  UI Framework                                                                │
+│  • Drawing primitives + framebuffer    • Touch / button input dispatch       │
+│  • Navigation stack + lifecycle        • Theme + system widgets              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  System Services (singletons, started at boot)                               │
+│  • Power (AXP2101)        • WiFi (station + soft-AP)    • BLE (GATT server) │
+│  • RTC (PCF85063)         • Audio (ES8311 + ES7210)     • Storage (TF/flash)│
+│  • Sensors (QMI8658)      • Update (OTA, app payloads)  • Logger            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  HAL / Drivers (hand-rolled C# unless upstream nanoFramework already covers) │
+│  • CO5300 AMOLED via QSPI              • FT3168 touch via I²C                │
+│  • AXP2101 PMIC                        • PCF85063 RTC                        │
+│  • QMI8658 IMU                         • ES8311 + ES7210 audio + PDM mics    │
+│  • TF / microSD via SDMMC              • USB-CDC                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  .NET nanoFramework runtime                                                  │
+│  • Wi-Fi stack (System.Device.Wifi)    • BLE stack (Device.Bluetooth)        │
+│  • System.Net / IO / Threading         • Hardware.Esp32                      │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Espressif ESP32-S3 firmware (managed by nanoFramework, not SpawnWear)       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                BLE (always-available)            WiFi (when configured)
+                       │                                  │
+                       ▼                                  ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  Blazor WebAssembly PWA — companion / remote UI        │
+        │  • Mirrors every built-in app over BLE + WiFi          │
+        │  • Adds a comfortable laptop-grade keyboard for setup  │
+        │  • Not required to use the watch                       │
+        └────────────────────────────────────────────────────────┘
 ```
 
-BLE is the **provisioning + control** plane (low bandwidth, always available, no network needed). WiFi is the **bandwidth** plane (OTA, HTTP, eventually WebRTC video / audio via SpawnDev.RTC).
+**The watch is the primary device.** Everything ships with a touchscreen UI on the AMOLED. The PWA is a complementary remote — convenient for first-time WiFi provisioning before the on-device keyboard exists, for live debugging from a laptop, and for showing off the watch's API surface from a browser. Nothing on the PWA is required to use the watch.
+
+### What "OS-shaped" means here
+
+- **Apps are not fixed.** The launcher hosts a list of apps; built-in ones are compiled into the firmware initially, but the long-term aim is OTA-installable app payloads (limited by what nanoFramework's assembly loader can do at runtime — likely an in-place re-flash of a partition slice, not true dynamic loading).
+- **Services are background daemons,** consumed by apps via interfaces. Only one PMIC, one BLE stack, one display backlight — the system service owns it, apps ask politely.
+- **Lifecycle is Android-flavored.** Apps have `OnCreate` / `OnResume` / `OnPause` / `OnDestroy`. The launcher decides what's foregrounded. Background services keep ticking through pause/resume.
+- **Resource budgets are explicit.** PSRAM (8 MB), heap, flash slots, BLE MTU, WiFi airtime. Apps that hog get killed.
+- **Power-aware by default.** AXP2101 + display-rail control + WiFi/BLE radio gating are first-class system concerns, not afterthoughts.
+
+---
+
+## Apps Catalog (built-in)
+
+The watch ships with a small core set of first-party apps. They're listed here so the launcher's job is concrete and so the system services know who their consumers are.
+
+| App | What it does | Primary services it uses |
+|---|---|---|
+| **Launcher** | Home screen — clock face, app grid, status row (battery / WiFi / BLE / time). Foreground default after boot. | UI Framework, Power, RTC, Storage |
+| **Settings** | Bluetooth, BLE, WiFi, Battery, Display, Sound, Time, About, OTA. Each subsystem is one page. | All system services |
+| **Clock** | Watch faces, alarms, timer, stopwatch. Several faces selectable. | RTC, UI Framework, Power |
+| **AI Assistant** | **The flagship app.** Voice + text conversation with an AI running on TJ's home PC over WebRTC (SpawnDev.RTC). Push-to-talk button, live transcript on screen, TTS replies through the speaker, on-screen keyboard for typed messages, history scrollback. Works whenever the watch can reach the PC over WiFi (LAN or via signaling relay). | Audio (ES8311 playback + ES7210 PDM mic), WiFi, UI Framework, RTC (timestamps), Storage (history) |
+| **Media Player** | Local audio playback from microSD or streamed over WiFi. Play / pause / next / volume on screen. | Audio (ES8311), Storage (TF), WiFi |
+| **Voice Recorder** | Capture mic to a file on the microSD. Listen back, delete, share to PC over WiFi. | Audio (ES7210 PDM), Storage |
+| **Activity** | IMU-driven step count, motion log, simple charts. | Sensors (QMI8658), RTC, Storage, UI Framework |
+
+The PWA companion mirrors every one of these as a remote-UI page reachable via Web Bluetooth + WiFi, so a developer or anyone with the watch's IP can drive any app from a browser.
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Boot + BLE foundation
-- [x] Project scaffolding (nanoFramework solution)
-- [ ] BLE GATT server: Device Info + WiFi config + Debug console (mirrors NanoFrameTest1 layout, custom SpawnWear UUIDs)
-- [ ] Companion Blazor WASM PWA scaffolded with SpawnDev.BlazorJS
-- [ ] Round-trip BLE message: log line ESP32 → browser; command browser → ESP32
+The display is the user interface, so it leads. Plumbing (radios, sensors, audio, OTA) is still needed - a watch with no radios is a fancy clock - but each piece gets exposed THROUGH an app or Settings page, not as a substitute for one.
 
-### Phase 2 — Power + sensors
+### Phase 1 — Display + touch + input (the UI substrate)
+- [ ] CO5300 QSPI driver in C# — research nanoFramework's QSPI surface; if absent, contribute a managed QSPI bus + CO5300 panel driver upstream
+- [ ] FT3168 touch I²C driver
+- [ ] Frame-buffer + drawing primitives (probably sit on top of `nanoFramework.Graphics` if its surface fits the 410×502 panel; otherwise hand-roll)
+- [ ] Touch + button input dispatcher feeding a UI message loop
+- [ ] BOOT button polling on GPIO0 (single / double / long press dispatch)
+
+### Phase 2 — UI Framework + Launcher
+- [ ] Drawing primitives: text, rounded rects, gradients, icons, scrollable lists, keyboard
+- [ ] Navigation stack + app lifecycle (`OnCreate` / `OnResume` / `OnPause` / `OnDestroy`)
+- [ ] Theme + system widgets (status bar, dialog, toast, list view, slider, switch)
+- [ ] **Launcher app**: clock face + app grid + status row (battery / WiFi / BLE / time)
+
+### Phase 3 — System Services + power/sensors plumbing
+- [x] Project scaffolding (nanoFramework solution, BLE GATT layout, gitignore, repo at github.com/LostBeard/SpawnWear)
+- [ ] Service host: singletons, lifecycle, inter-service events
 - [ ] AXP2101 driver: battery V / I / SOC, charge state, USB-VBUS detect, PWR button via EXIO6
-- [ ] PCF85063 RTC driver: read / set time, periodic sync from browser-supplied timestamp over BLE
-- [ ] QMI8658 IMU driver: enable accel + gyro, stream samples over BLE notify
+- [ ] PCF85063 RTC driver: read / set time, weekday, alarms
+- [ ] QMI8658 IMU driver: accel + gyro + step-count
+- [ ] Storage service: TF/microSD mount + simple key-value store in internal flash for settings persistence
+- [ ] Logger service: ring buffer + USB-CDC sink + BLE notify sink
 
-### Phase 3 — WiFi + OTA
-- [ ] WiFi client provisioning (mirrors NanoFrameTest1)
-- [ ] WiFi soft-AP fallback (when no station credentials)
-- [ ] Stored credentials in flash, auto-reconnect on boot
-- [ ] OTA pull triggered over BLE → ESP32 fetches firmware over WiFi
+### Phase 4 — Settings app
+- [ ] Page: **Battery** — level, charging state, USB-VBUS, charge target slider
+- [ ] Page: **Display** — brightness slider (CO5300 reg 0x51), sleep timeout, rotation
+- [ ] Page: **Time / RTC** — read PCF85063, set fields, sync-from-NTP toggle
+- [ ] Page: **About** — firmware version, MAC, IP, free heap, uptime
+- [ ] Page: **WiFi** — toggle, SSID list, on-screen keyboard for password, current connection details
+- [ ] Page: **Bluetooth** — radio toggle, paired devices, scan
+- [ ] Page: **BLE** — GATT-server visibility toggle, advertised name editor
 
-### Phase 4 — Debug console
-- [ ] BLE notify characteristic streams `Debug.WriteLine` to the PWA
-- [ ] Command input characteristic from PWA → ESP32 (REPL-style)
+### Phase 5 — Clock app
+- [ ] Multiple watch faces (analog, digital, complications)
+- [ ] Alarms (RTC alarm interrupt → wake from low-power)
+- [ ] Timer + stopwatch
 
-### Phase 5 — Display
-- [ ] CO5300 QSPI driver in C# (no nanoFramework upstream support today — needs a custom data-bus path; verify whether `nanoFramework.Hardware.Esp32` exposes anything usable)
-- [ ] If C# QSPI path is not viable, document the gap and ship Phases 1-4 + 6 first; revisit display when there's a clear technical path
+### Phase 6 — Audio service + Voice Recorder + Media Player
+- [ ] ES8311 playback driver (I²S) — depends on `nanoFramework.Hardware.Esp32` I²S surface
+- [ ] ES7210 capture driver (PDM dual mic + echo cancel ADC)
+- [ ] Audio service: shared pipeline, volume, mute, mic gain, format negotiation
+- [ ] Page: Settings → **Sound** (volume / mic gain / test-tone / mic-level meter)
+- [ ] **Voice Recorder app**: capture to TF, listen back, delete, share over WiFi
+- [ ] **Media Player app**: play files from TF, basic transport controls; HTTP streaming if airtime allows
 
-### Phase 6 — Audio
-- [ ] ES8311 + I²S playback (depends on `nanoFramework.Hardware.Esp32` I²S surface)
-- [ ] ES7210 + dual PDM mic capture
-- [ ] Wake-word / voice idea is downstream of capture working
+### Phase 7 — WebRTC service + AI Assistant app (flagship)
+- [ ] WebRTC peer service: SpawnDev.RTC integration; signaling via the companion PWA or a small HTTP signaling relay; ICE / SDP plumbing
+- [ ] **AI Assistant app**: push-to-talk button, on-screen keyboard for text, live transcript display, TTS playback through speaker, conversation history persisted to TF
+- [ ] PC-side counterpart: a small Blazor / .NET host on TJ's PC that the watch dials, runs the assistant model, returns audio + text
 
-### Phase 7 — WebRTC peer
-- [ ] Use SpawnDev.RTC + signaling over the companion PWA to make the watch a video/audio peer
-- [ ] Camera-less so video is stub-only; audio path is the real target
+### Phase 8 — OTA + app install
+- [ ] OTA firmware update path (nanoFramework standard)
+- [ ] Page: **About → Update** — pull URL field, "Check for update" button, download + reboot flow
+- [ ] App install: ship apps as separate managed payloads where the runtime allows; otherwise treat "install an app" as "OTA the firmware with an updated app set"
+
+### Phase 9 — Activity app + later
+- [ ] **Activity app**: step count, daily totals, motion log
+- [ ] User-contributed apps via the install path
+- [ ] Polish, theming, watchface marketplace ideas
+
+### Companion Blazor WASM PWA (parallel track, starts in Phase 4)
+- [ ] Scaffolded with SpawnDev.BlazorJS
+- [ ] Mirrors every Settings page over BLE (provisioning + diagnostics work even before the on-device keyboard is comfortable)
+- [ ] Mirrors every built-in app (remote launcher)
+- [ ] Live system log viewer over BLE notify
+- [ ] PWA installable so it lives on a phone home screen
 
 ---
 
