@@ -83,6 +83,7 @@ Authoritative source: vendor `pin_config.h` (cloned to `_vendor-waveshare-demo/`
 | SCLK  | **GPIO11** |
 | CS    | **GPIO12** |
 | RESET | **GPIO8** |
+| TE (Tearing-Effect sync, optional) | **GPIO13** |
 
 #### I²C bus (shared by FT3168, QMI8658, PCF85063, AXP2101, ES8311, ES7210)
 | Signal | GPIO |
@@ -95,6 +96,13 @@ Authoritative source: vendor `pin_config.h` (cloned to `_vendor-waveshare-demo/`
 |---|---|
 | INT   | **GPIO38** |
 | RESET | **GPIO9**  |
+
+#### Sensor / RTC interrupts
+| Signal | GPIO |
+|---|---|
+| QMI8658 INT (motion / data-ready) | **GPIO21** |
+| PCF85063 INT (alarm)              | **GPIO39** |
+| AXP2101 IRQ output (PWR button + charge events, falls when AXP raises any IRQ) | **GPIO10** |
 
 #### TF / microSD card (SDMMC)
 | Signal | GPIO |
@@ -283,6 +291,10 @@ SpawnWear/                              ← REPO ROOT (this folder)
 ├── SpawnWear.slnx                      ← .NET nanoFramework solution
 ├── SpawnWear/                          ← firmware project (.nfproj)
 ├── packages/                           ← NuGet packages (committed for offline builds)
+├── Notes/                              ← living documentation: gotchas, chip quirks, flashing recipes
+│   ├── README.md                       ← Notes index (start here)
+│   ├── flashing.md                     ← step-by-step nanoFramework flash recipe with every gotcha
+│   └── co5300-quirks.md                ← AMOLED driver reverse-engineering notes
 ├── BlazorWasmSpawnWear/                ← companion Blazor WASM PWA (TBD)
 └── SpawnWear.Tests/                    ← Playwright + smoke tests for the PWA (TBD)
 ```
@@ -291,12 +303,15 @@ Outside the repo, in the parent folder (`D:\users\tj\Projects\SpawnWear\`):
 
 ```
 _vendor-waveshare-demo/                 ← upstream Arduino + ESP-IDF demos (cloned)
+_vendor-rust-watch/                     ← Rust port of the firmware - canonical CO5300 reference
+_vendor-nanoframework-iot/              ← nanoFramework IoT.Device repo (Axp2101 driver lives here)
+_vendor-nanoframework-hardware-esp32/   ← nanoFramework.Hardware.Esp32 source (no QSPI yet)
 _wiki-decoded.{html,txt}                ← decoded copy of the Waveshare wiki page
 ESP32-S3-Touch-AMOLED-2.06 - Waveshare Wiki.mhtml  ← raw archived wiki page
 _extract-wiki.cs                        ← script that decoded the .mhtml
 ```
 
-These reference files exist so pin numbers and IC behavior can be verified against the vendor's own working code without bloating the repo or violating their license.
+These reference files exist so pin numbers and IC behavior can be verified against the vendor's own working code without bloating the repo or violating their license. **Document everything we learn from them inside `Notes/`** so the repo stays self-contained.
 
 ---
 
@@ -311,6 +326,7 @@ These are the realities of running C# on this board today. None of them are bloc
 | OTA firmware update | **Supported** | nanoFramework has standard OTA (verify package API surface during Phase 3) |
 | I²C device control (AXP2101 / QMI8658 / PCF85063 / FT3168) | **Supported** | `nanoFramework.Hardware.Esp32` + `System.Device.I2c` — drivers written by hand against the chip datasheets |
 | PCF85063 RTC | **Supported (community driver)** | `nanoFramework.IoT.Device.Pcf85063` exists |
+| AXP2101 PMIC | **Supported (community driver)** | `nanoFramework.IoT.Device.Axp2101` is comprehensive — see `_vendor-nanoframework-iot/devices/Axp2101/` |
 | QMI8658 IMU | **Hand-roll driver** | No upstream nanoFramework driver; protocol is plain I²C register reads |
 | FT3168 touch | **Hand-roll driver** | Same — datasheet linked above |
 | AXP2101 PMIC | **Hand-roll driver** | Datasheet linked; XPowersLib (C++) is a useful reference |
@@ -320,18 +336,32 @@ These are the realities of running C# on this board today. None of them are bloc
 
 ---
 
-## Building (Phase 0 status)
+## Status / Milestones
+
+| Date | Milestone | Notes |
+|---|---|---|
+| 2026-04-28 | Repo scaffolded, OS architecture documented | Initial commit, README + CLAUDE + BLE GATT scaffold mirroring NanoFrameTest1 |
+| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-1.16.0.568 on a Waveshare 2.06 watch (MAC `1C:DB:D4:7B:03:0C`). See `Notes/flashing.md` for the full recipe |
+| | Phase 1 next: CO5300 QSPI + FT3168 touch + frame-buffer + input dispatch | Reverse-engineering notes already captured in `Notes/co5300-quirks.md` |
+
+## Building
+
+Step-by-step recipes with every gotcha live in **[`Notes/flashing.md`](Notes/flashing.md)** — read that before flashing a fresh watch.
+
+Quick reference (assumes a watch that has already had `dotnet tool install -g nanoff` run once on this machine):
 
 ```bash
-# Flash the nanoFramework runtime to the watch (one-time)
-dotnet tool install -g nanoff
-nanoff --target ESP32_S3_BLE --serialport COMx --update
+# First flash on a brand-new watch (mass-erase required - see Notes/flashing.md for why)
+nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase
 
-# Build firmware (Visual Studio 2022 with the nanoFramework extension)
-# (msbuild via CLI also works once the VS extension is installed)
+# Subsequent runtime updates
+nanoff --target ESP32_S3_BLE --serialport COM10 --update
+
+# Deploy SpawnWear app: Visual Studio 2022 with the nanoFramework extension
+# Open SpawnWear.slnx, F5 to deploy + run
 ```
 
-Phase 1 deploy + first BLE round-trip is the next milestone — see roadmap.
+The COM port number changes between bootloader mode and runtime mode — re-run `nanoff --listports` if a port "disappears".
 
 ---
 
