@@ -163,15 +163,75 @@ Once the runtime is on the watch:
 
 `Debug.WriteLine` output streams to the Output pane, and to any external serial terminal at 921600 baud on the same COM port (only one process can hold the port at a time).
 
-## Recovery - if the watch becomes unresponsive
+## Re-flashing while the runtime is already on the chip
 
-If a deploy goes wrong and the runtime stops responding:
+Once the chip is running nanoFramework, **`nanoff --update` cannot reach the bootloader on its own** for native-USB ESP32-S3 boards. esptool talks to the ROM bootloader; the runtime exposes a different USB-CDC class and answers its own debug protocol. nanoff trying to chip-detect against the runtime port returns:
 
-1. **Hold BOOT (GPIO0) and tap RESET** to force the chip into ROM bootloader mode.
-2. The COM port number flips back to the bootloader-class one (typically the same one as during the original flash).
-3. Re-flash: `nanoff --target ESP32_S3_BLE --serialport COMx --update --masserase`.
+```
+A fatal error occurred: Failed to connect to Espressif device:
+Invalid head of packet (0x4E): Possible serial noise or corruption.
+```
+
+That `0x4E` IS the proof the runtime is alive (it is the start byte of a nanoFramework packet), but esptool cannot interpret it. To re-flash:
+
+1. **Hold the BOOT button** (silkscreened "BOOT" on the side of the case) and **press RESET** (the other side button), then release both. The chip reboots into ROM bootloader mode.
+   - Alternative: hold BOOT, then briefly unplug + re-plug USB. Same effect.
+2. The COM port number **flips back** to the bootloader-class port (the same number you saw during the original first flash).
+3. Re-run `nanoff --listports` to confirm the new port number.
+4. Re-flash:
+   - For a runtime upgrade / downgrade: `nanoff --target ESP32_S3_BLE --serialport COMx --update [--fwversion X.Y.Z.W]`
+   - For a clean reset: `nanoff --target ESP32_S3_BLE --serialport COMx --update --masserase`
 
 There is no way to permanently brick the chip from software - the ROM bootloader lives in mask ROM and is not flashable. Worst case: full mass-erase + re-flash.
+
+## The matched-runtime / matched-libraries gotcha
+
+**Each nanoFramework runtime image expects specific native checksums for the managed class libraries.** Mixing stable class libraries (1.x.x) with a too-new runtime fails at deploy time with:
+
+```
+The connected target has the wrong version for the following assembly(ies):
+    'System.Net' requires native v100.2.0.11, checksum 0xD82C1452.
+    Connected target has v100.2.0.12, checksum 0x6DFA71D6.
+```
+
+**This is normal, not a packaging bug.** When the nanoFramework team bumps a native interop interface they:
+
+1. Release a new runtime image with the bumped native checksum
+2. Release matching managed class libraries (often as `2.0.0-preview.X` while the new ABI is stabilizing)
+3. Eventually graduate the previews to a new stable line that targets the bumped checksum
+
+**Two valid responses:**
+
+A. **Pin a runtime that matches the stable libraries you want to use.**
+   `nanoff --target ESP32_S3_BLE --serialport COMx --update --fwversion 1.16.0.567`
+   (Pick the highest runtime whose stable libraries you can find on nuget.org.)
+
+B. **Adopt the preview class libraries** that match the latest runtime.
+   Update `packages.config` to use `2.0.0-preview.X` versions of the runtime-coupled packages (System.Net, System.IO.Streams, System.Threading, Runtime.Events, Runtime.Native, etc).
+   Trade-off: preview API surface may change before stable.
+
+For SpawnWear we currently take path **A** - pin to the runtime that matches stable libraries.
+
+### How to find a matched-runtime version
+
+1. List nuget.org versions for the affected package:
+   `curl -s https://api.nuget.org/v3-flatcontainer/nanoframework.system.net/index.json`
+2. Find the latest STABLE version (no `-preview`, no `-alpha`).
+3. Look in `_vendor-nanoframework-iot/devices/<DeviceName>/packages.config` for any device whose CI uses that stable version - their tested runtime is implicitly the runtime your stable libraries match.
+4. Use `nanoff --listtargets --platform esp32` to see which runtime versions are available; pick one slightly older than the latest if the latest broke compatibility.
+
+### A clarifying example
+
+When this repo was first scaffolded:
+- We flashed `ESP32_S3_BLE-1.16.0.568` (the latest at the time).
+- VS deploy failed with `System.Net requires native v100.2.0.11 / target has v100.2.0.12`.
+- We confirmed `nanoFramework.System.Net 1.11.50` (latest stable) ships native `v100.2.0.11`, while `1.16.0.568` runtime expects `v100.2.0.12`.
+- Bumping all stable libraries to latest stable (1.x) did not fix it - the native bump is in 568.
+- Re-flashing `1.16.0.567` (one version older) brought the runtime back into stable-library compatibility.
+
+## Recovery - if the watch becomes unresponsive
+
+Same as above: hold BOOT + tap RESET to force ROM bootloader mode, then re-flash.
 
 ## Recipe summary (copy / paste)
 
