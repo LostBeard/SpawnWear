@@ -234,6 +234,20 @@ call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat
 python -m pip install "click<8.2"
 ```
 
+### Gotcha: install.bat may fail to install all venv packages even when it exits 0
+
+After our install + click-fix dance, `export.bat` was STILL failing — this time with `markdown_it_py`, `colorama`, `pyyaml`, `pyserial` missing from the venv. The venv was incomplete despite `install.bat all` reporting success.
+
+Fix: force-install the full requirements file directly into the venv:
+
+```batch
+"C:\Espressif\python_env\idf5.5_py3.13_env\Scripts\python.exe" -m pip install ^
+  -r "C:\Espressif\frameworks\esp-idf-v5.5.4\tools\requirements\requirements.core.txt" ^
+  -c "C:\Espressif\espidf.constraints.v5.5.txt"
+```
+
+The constraint file (`-c`) keeps versions pinned to ESP-IDF's spec so we don't re-introduce the click 8.3.1 problem. After this, `export.bat` activates cleanly and `cmake --preset ESP32_S3_BLE` finds its toolchain.
+
 ### Gotcha: Python user-site-packages shadows the IDF venv
 
 Even after `install.bat` correctly downgrades `click` to 8.1.8 inside the IDF venv, `export.bat` may STILL fail with the same `click 8.3.1` error. The reason: Python's `user-site-packages` directory at `C:\Users\<you>\AppData\Roaming\Python\Python313\site-packages` is searched BEFORE the venv's site-packages, and any global pip install (`pip install --user click`) puts a different version there that shadows the venv's pinned copy.
