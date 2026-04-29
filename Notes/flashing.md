@@ -240,13 +240,37 @@ The connected target has the wrong version for the following assembly(ies):
 
 **Two valid responses:**
 
-A. **Pin a runtime that matches the stable libraries you want to use.** Try `--fwversion X.Y.Z.W` with progressively older runtimes until VS deploy stops complaining about the native ABI. **In our 2026-04 testing this did NOT work** - 1.16.0.568 AND 1.16.0.567 (the only two runtimes nanoff offered for ESP32_S3_BLE in addition to 1.16.0.563) both have native v100.2.0.12, while the latest STABLE class libraries (1.x.x line) ship v100.2.0.11. We did not try 1.16.0.563. The bump from v100.2.0.11 to v100.2.0.12 happened earlier than 567, and stable libraries had not yet caught up.
+A. **Pin a runtime that matches the stable libraries you want to use.** Try `--fwversion X.Y.Z.W` with progressively older runtimes until VS deploy stops complaining about the native ABI. The default `nanoff --listtargets` only shows the most recent few; the full list lives on cloudsmith and you can iterate older builds with explicit `--fwversion`:
 
-B. **Adopt the 2.0.0-preview class libraries** that match the v100.2.0.12 native ABI.
-   Update `packages.config` to use `2.0.0-preview.X` versions of every runtime-coupled package (CoreLibrary, System.Net, System.IO.Streams, System.Threading, Runtime.Events, Runtime.Native, System.Collections, System.Text, System.Device.Wifi, Device.Bluetooth, etc.). Note `nanoFramework.Runtime.Events` already has a stable `2.0.1`. Update the `<HintPath>` values in the .nfproj to point to the new versioned package directories.
-   Trade-off: preview API surface may change before stable.
+   ```bash
+   curl -s "https://api.cloudsmith.io/v1/packages/net-nanoframework/nanoframework-images/?query=name:ESP32_S3_BLE&page_size=30" \
+     | python -c "import json,sys; [print(p['version']) for p in json.load(sys.stdin) if 'ESP32_S3_BLE' in p['name'] and 'UART' not in p['name']]"
+   ```
 
-**For SpawnWear we take path B.** All `<package>` versions in `SpawnWear/packages.config` and `<HintPath>` values in `SpawnWear/SpawnWear.nfproj` are pinned to the 2.0.0-preview line.
+B. **Adopt the 2.0.0-preview class libraries** that match the latest runtime's native ABI.
+   Update `packages.config` to use `2.0.0-preview.X` versions of every runtime-coupled package, and update `<HintPath>` in the .nfproj. **In our testing this did NOT work today** - the 2.0.0-preview class libraries actually demand a much newer native ABI (mscorlib v100.22.0.4, System.Net v100.20.0.0, etc.) than ANY currently-released ESP32_S3_BLE runtime image provides. The 2.0 preview is ahead of the runtime side too. Path B is unusable until the v2 runtime releases catch up.
+
+**For SpawnWear we take path A.** All `<package>` versions in `SpawnWear/packages.config` and `<HintPath>` values in `SpawnWear/SpawnWear.nfproj` are stable 1.x.x. The matching ESP32_S3_BLE runtime version is being identified by trial.
+
+### Worked example - chasing the matched 1.x.x runtime
+
+Each row is a flash + VS-deploy cycle (each cycle requires the buttons-into-bootloader dance from the previous section, plus a power-cycle to runtime, plus a VS deploy attempt). The stable class libraries demand:
+- `mscorlib v100.5.0.24` (CoreLibrary 1.17.11)
+- `System.Net v100.2.0.11` (System.Net 1.11.47)
+- `nanoFramework.System.Text v100.0.0.1` (System.Text 1.3.42)
+- `System.Device.Wifi v100.0.6.5` (System.Device.Wifi 1.5.139)
+- `nanoFramework.Runtime.Native v100.0.10.0` (Runtime.Native 1.7.11)
+- `nanoFramework.Device.Bluetooth v100.0.5.0` (Device.Bluetooth 1.1.115)
+- `nanoFramework.Runtime.Events v100.0.8.0` (Runtime.Events 1.11.32)
+- `nanoFramework.System.Collections v100.0.2.0` (System.Collections 1.5.67)
+
+| Runtime | Result | Native delta seen by VS |
+|---|---|---|
+| 1.16.0.568 | mismatch | System.Net v100.2.0.12 (need .11), other natives also off |
+| 1.16.0.567 | mismatch | Same as 568 - bump was older than 567 |
+| 1.16.0.563 | (testing) |  |
+
+If 563 also mismatches, drop further: 1.16.0.546, then 1.16.0.498, then 1.16.0.490, ... Cloudsmith lists down through the 1.15.x line.
 
 ### How to find a matched-runtime version
 
