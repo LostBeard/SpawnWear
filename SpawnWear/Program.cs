@@ -1,8 +1,12 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.Threading;
 using nanoFramework.Device.Bluetooth;
 using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
+using nanoFramework.Presentation.Media;
+using nanoFramework.UI;
+using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Touch;
 
@@ -14,10 +18,59 @@ namespace SpawnWear
         {
             Debug.WriteLine("[SpawnWear] Boot - Waveshare ESP32-S3-Touch-AMOLED-2.06 watch firmware");
 
+            StartDisplay();
             StartTouchProbe();
             StartBleAdvertising();
 
             Thread.Sleep(Timeout.Infinite);
+        }
+
+        // -------------------------------------------------------------------
+        // Display (CO5300 over hybrid QSPI). Initialized via DisplayControl with
+        // the Co5300 GraphicDriver descriptor. Pin numbers for SCLK + 4 data lines
+        // + CS come from the runtime's target-local target_qspi_display_config.h
+        // (Waveshare 2.06 watch defaults baked in for now); only Reset comes
+        // through the SpiConfiguration.
+        // -------------------------------------------------------------------
+        static void StartDisplay()
+        {
+            try
+            {
+                var spi = new SpiConfiguration(
+                    spiBus: 0,                   // ignored on QSPI variant - target-local QSPI_DISPLAY_HOST wins
+                    chipselect: BoardPins.LcdCs, // ignored on QSPI variant - target-local QSPI_DISPLAY_CS wins
+                    dataCommand: -1,             // QSPI has no DC pin - encoded in cmd byte instead
+                    reset: BoardPins.LcdReset,   // ignored on QSPI variant - target-local QSPI_DISPLAY_RST wins
+                    backLight: -1);              // CO5300 brightness via panel register 0x51
+
+                var screen = new ScreenConfiguration(
+                    x: BoardPins.LcdColumnOffset,  // CO5300 410 panel sits inside a wider RAM region
+                    y: 0,
+                    width: BoardPins.LcdWidth,
+                    height: BoardPins.LcdHeight,
+                    graphicDriver: Co5300.GraphicDriver);
+
+                uint maxBuffer = DisplayControl.Initialize(spi, screen);
+                Debug.WriteLine("[Display] Initialized. Max buffer: " + maxBuffer + " bytes");
+
+                // First-pixels test: solid red full-screen, then "Hello SpawnWear" centered.
+                Bitmap fb = DisplayControl.FullScreen;
+                if (fb != null)
+                {
+                    fb.Clear();
+                    fb.DrawRectangle(new Pen(Color.Red), 0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                    fb.Flush();
+                    Debug.WriteLine("[Display] First flush: red border");
+                }
+                else
+                {
+                    Debug.WriteLine("[Display] FullScreen bitmap unavailable (insufficient memory?)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Display] init failed: " + ex.Message);
+            }
         }
 
         // -------------------------------------------------------------------
