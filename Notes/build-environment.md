@@ -303,6 +303,66 @@ Each pass takes ~13 s; we observed 40+ passes in 9 minutes with no actual compil
 
 Fix is one of the two options above. SpawnWear takes option 2 currently (build at commit `53be3026`, IDF 5.4.x era). Final upstream contribution will be rebased onto whatever `main` wants at PR time.
 
+## The big one: Ninja "manifest 'build.ninja' still dirty after 100 tries" — root cause is FUTURE-DATED timestamps in IDF components
+
+This is the worst gotcha and the one that ate the most time. The symptom looks like a generic cmake / ninja problem on Windows; it isn't. It's specifically that **some files in `C:\Espressif\frameworks\esp-idf-vX.Y.Z\components\` have modification timestamps in the future** (e.g. tomorrow or a year ahead). Ninja sees them as newer-than-everything-else, treats `build.ninja` as perpetually out-of-date, runs cmake to regenerate, gets a new `build.ninja`, sees the future-dated input files as STILL newer, and loops 100 times before giving up with:
+
+```
+ninja: error: manifest 'build.ninja' still dirty after 100 tries, perhaps system time is not set
+```
+
+The "perhaps system time is not set" part of the error is misleading — the system clock is fine. It's the FILES that are time-traveling.
+
+### Where the future-dated files come from
+
+nf-interpreter downloads several IDF components from Espressif's component registry on first cmake configure (using `nf_install_idf_component_from_registry` in `CMake/binutils.ESP32.cmake`). Components currently fetched: `esp_tinyusb`, `tinyusb`, `littlefs`. The ZIP archives those URLs serve contain files with future-dated `mtime` entries; ZIP extraction preserves those timestamps. The result is component sources sitting on disk dated months in the future.
+
+In our case (built 2026-04-28), every file inside `components/esp_tinyusb/`, `components/tinyusb/`, and `components/littlefs/` had `mtime = Apr 29 2026` (one day in the future). 1800 files affected.
+
+### Diagnosis
+
+Run:
+
+```batch
+:: from inside an activated IDF environment, in the nf-interpreter directory
+ninja -C build -d explain 2>&1 | head -1
+```
+
+If the first line looks like:
+
+```
+ninja explain: output build.ninja older than most recent input C:/Espressif/frameworks/esp-idf-vX.Y.Z/components/<component>/CMakeLists.txt (XXX vs YYY)
+```
+
+then this is exactly the issue. The named CMakeLists.txt is future-dated.
+
+### Fix: touch all future-dated component files
+
+```bash
+# from a Git Bash shell. The reference file is build.ninja from the most recent cmake configure;
+# any file newer than it gets its mtime reset to NOW.
+find "C:/Espressif/frameworks/esp-idf-v5.5.4/components" -newer "C:/nf/_vendor-nf-interpreter/build/build.ninja" -type f -exec touch {} +
+```
+
+Or if you don't have a current `build.ninja` yet, touch all the registry-installed components directly:
+
+```bash
+find "C:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_tinyusb" \
+     "C:/Espressif/frameworks/esp-idf-v5.5.4/components/tinyusb" \
+     "C:/Espressif/frameworks/esp-idf-v5.5.4/components/littlefs" \
+     -type f -exec touch {} +
+```
+
+After touching, blow away `build/` and re-run cmake configure + cmake build. The build proceeds normally — Ninja sees the newly-built `build.ninja` as newer than all source files (because they're now dated NOW, and `build.ninja` is dated NOW + a few seconds), so no perpetual dirty.
+
+### Long-term fix (upstream contribution opportunity)
+
+`nf_install_idf_component_from_registry` could `find ... -exec touch {} +` after every `file(ARCHIVE_EXTRACT)` to neutralize the future-date issue at install time, so the next build doesn't loop. This would be a one-line addition to `CMake/binutils.ESP32.cmake`. Worth proposing alongside the QSPI PR.
+
+### Reference
+
+Ninja issue [#1704: Dates in the future cause "still dirty after 100 tries"](https://github.com/ninja-build/ninja/issues/1704) covers the underlying behavior. The nf-interpreter community apparently doesn't hit this on Linux because tar (used in their CI) handles ZIP archive timestamps differently than Windows file extraction.
+
 ## Known warnings
 
 - **CMAKE_OBJECT_PATH_MAX warning** on Windows: cmake warns that some intermediate object paths exceed 250 characters and the build "may not work correctly". In practice the build completes, but if it fails on a long-path link error, move the entire `_vendor-nf-interpreter` clone to a shorter root (e.g. `C:\nf-interpreter\`).
