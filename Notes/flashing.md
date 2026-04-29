@@ -240,15 +240,13 @@ The connected target has the wrong version for the following assembly(ies):
 
 **Two valid responses:**
 
-A. **Pin a runtime that matches the stable libraries you want to use.**
-   `nanoff --target ESP32_S3_BLE --serialport COMx --update --fwversion 1.16.0.567`
-   (Pick the highest runtime whose stable libraries you can find on nuget.org.)
+A. **Pin a runtime that matches the stable libraries you want to use.** Try `--fwversion X.Y.Z.W` with progressively older runtimes until VS deploy stops complaining about the native ABI. **In our 2026-04 testing this did NOT work** - 1.16.0.568 AND 1.16.0.567 (the only two runtimes nanoff offered for ESP32_S3_BLE in addition to 1.16.0.563) both have native v100.2.0.12, while the latest STABLE class libraries (1.x.x line) ship v100.2.0.11. We did not try 1.16.0.563. The bump from v100.2.0.11 to v100.2.0.12 happened earlier than 567, and stable libraries had not yet caught up.
 
-B. **Adopt the preview class libraries** that match the latest runtime.
-   Update `packages.config` to use `2.0.0-preview.X` versions of the runtime-coupled packages (System.Net, System.IO.Streams, System.Threading, Runtime.Events, Runtime.Native, etc).
+B. **Adopt the 2.0.0-preview class libraries** that match the v100.2.0.12 native ABI.
+   Update `packages.config` to use `2.0.0-preview.X` versions of every runtime-coupled package (CoreLibrary, System.Net, System.IO.Streams, System.Threading, Runtime.Events, Runtime.Native, System.Collections, System.Text, System.Device.Wifi, Device.Bluetooth, etc.). Note `nanoFramework.Runtime.Events` already has a stable `2.0.1`. Update the `<HintPath>` values in the .nfproj to point to the new versioned package directories.
    Trade-off: preview API surface may change before stable.
 
-For SpawnWear we currently take path **A** - pin to the runtime that matches stable libraries.
+**For SpawnWear we take path B.** All `<package>` versions in `SpawnWear/packages.config` and `<HintPath>` values in `SpawnWear/SpawnWear.nfproj` are pinned to the 2.0.0-preview line.
 
 ### How to find a matched-runtime version
 

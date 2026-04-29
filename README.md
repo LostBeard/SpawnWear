@@ -341,7 +341,7 @@ These are the realities of running C# on this board today. None of them are bloc
 | Date | Milestone | Notes |
 |---|---|---|
 | 2026-04-28 | Repo scaffolded, OS architecture documented | Initial commit, README + CLAUDE + BLE GATT scaffold mirroring NanoFrameTest1 |
-| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-**1.16.0.567** (NOT 568 - 568 bumped a native ABI ahead of stable libraries; see `Notes/flashing.md`). Watch MAC `1C:DB:D4:7B:03:0C`, runtime port COM9. |
+| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-1.16.0.567 (1.16.0.568 also tested - both have native ABI v100.2.0.12, ahead of the latest stable class libraries). Watch MAC `1C:DB:D4:7B:03:0C`, runtime port COM9. SpawnWear uses the **2.0.0-preview** class libraries to match - see `Notes/flashing.md`. |
 | | Phase 1 next: CO5300 QSPI + FT3168 touch + frame-buffer + input dispatch | Reverse-engineering notes already captured in `Notes/co5300-quirks.md` |
 
 ## Building
@@ -351,11 +351,11 @@ Step-by-step recipes with every gotcha live in **[`Notes/flashing.md`](Notes/fla
 Quick reference (assumes a watch that has already had `dotnet tool install -g nanoff` run once on this machine):
 
 ```bash
-# First flash on a brand-new watch - pin the matched-libraries runtime version
-nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase --fwversion 1.16.0.567
+# First flash on a brand-new watch (chip must be in bootloader mode - see Notes/flashing.md)
+nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase
 
-# Subsequent runtime updates (chip must be in bootloader mode - see Notes/flashing.md)
-nanoff --target ESP32_S3_BLE --serialport COM10 --update --fwversion 1.16.0.567
+# Subsequent runtime updates (chip must be in bootloader mode)
+nanoff --target ESP32_S3_BLE --serialport COM10 --update
 
 # Deploy SpawnWear app: Visual Studio 2022 with the nanoFramework extension
 # Open SpawnWear.slnx, F5 to deploy + run
@@ -363,7 +363,7 @@ nanoff --target ESP32_S3_BLE --serialport COM10 --update --fwversion 1.16.0.567
 
 Two important gotchas — full details in **[`Notes/flashing.md`](Notes/flashing.md)**:
 
-- **Runtime version is pinned.** Don't take "latest" automatically: 1.16.0.568 bumps a native ABI ahead of stable class libraries and a stable-package deploy will fail with `System.Net requires native v100.2.0.11`. Pin to 1.16.0.567 until the matched 2.0.x stable libraries ship.
+- **Class libraries are on the 2.0.0-preview line** (not the latest stable 1.x). Current ESP32_S3_BLE runtimes (1.16.0.567 and 1.16.0.568) ship native ABI v100.2.0.12; the latest stable class libraries still ship v100.2.0.11. The 2.0.0-preview packages are built for v100.2.0.12 and are the matched set for current runtimes. Trade-off: preview API surface may change.
 - **The COM port number changes** between bootloader mode and runtime mode (this watch presents different USB descriptors). Re-run `nanoff --listports` whenever a port "disappears". Re-flash requires the chip to be in bootloader mode (hold BOOT during cold boot via PWR power-cycle).
 
 ---
