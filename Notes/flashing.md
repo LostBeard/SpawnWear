@@ -165,22 +165,56 @@ Once the runtime is on the watch:
 
 ## Re-flashing while the runtime is already on the chip
 
-Once the chip is running nanoFramework, **`nanoff --update` cannot reach the bootloader on its own** for native-USB ESP32-S3 boards. esptool talks to the ROM bootloader; the runtime exposes a different USB-CDC class and answers its own debug protocol. nanoff trying to chip-detect against the runtime port returns:
+Once the chip is running nanoFramework, **`nanoff --update` cannot reach the bootloader on its own** for native-USB ESP32-S3 boards. esptool talks to the ROM bootloader; the runtime exposes a different USB-CDC endpoint and answers its own debug protocol. nanoff trying to chip-detect against the runtime port returns:
 
 ```
 A fatal error occurred: Failed to connect to Espressif device:
 Invalid head of packet (0x4E): Possible serial noise or corruption.
 ```
 
-That `0x4E` IS the proof the runtime is alive (it is the start byte of a nanoFramework packet), but esptool cannot interpret it. To re-flash:
+That `0x4E` IS the proof the runtime is alive (it is the start byte of a nanoFramework packet), but esptool cannot interpret it.
 
-1. **Hold the BOOT button** (silkscreened "BOOT" on the side of the case) and **press RESET** (the other side button), then release both. The chip reboots into ROM bootloader mode.
-   - Alternative: hold BOOT, then briefly unplug + re-plug USB. Same effect.
-2. The COM port number **flips back** to the bootloader-class port (the same number you saw during the original first flash).
-3. Re-run `nanoff --listports` to confirm the new port number.
-4. Re-flash:
-   - For a runtime upgrade / downgrade: `nanoff --target ESP32_S3_BLE --serialport COMx --update [--fwversion X.Y.Z.W]`
-   - For a clean reset: `nanoff --target ESP32_S3_BLE --serialport COMx --update --masserase`
+### Buttons on this watch (important - there is no separate RESET button)
+
+Both buttons are on the **right edge** of the case:
+
+- **Top-right button = BOOT** (wired to GPIO0).
+  - Held during chip power-up: ROM enters download mode (USB-Serial-JTAG bootloader).
+  - Pressed during runtime: a normal user button event (GPIO0 goes low while pressed).
+- **Bottom-right button = PWR** (toggles the watch's main power through the AXP2101 PMIC).
+  - Tap (short press) when off: power on.
+  - Hold 6+ seconds when on: power off (AXP2101 cuts every rail).
+
+If you press BOOT while the chip is already booted into runtime, **nothing changes** - it is just a user-button event. To enter the bootloader you have to power-cycle the chip with BOOT held during the cold boot.
+
+If the buttons feel identical and you cannot tell which is which, confirm by elimination: the one that powers the watch off when held 6+ seconds is PWR; the other is BOOT.
+
+### To enter the bootloader (download mode)
+
+1. **Power the watch fully off** by holding PWR for 6+ seconds. The screen goes black and the COM port disappears entirely from `nanoff --listports`. Wait 2-3 seconds.
+2. **Hold BOOT** (and keep holding it).
+3. With BOOT still held, **tap PWR** to power back on. The AXP2101 raises the rails; the ESP32-S3 ROM samples GPIO0 at boot, sees BOOT low, and stays in download mode.
+4. Wait 2 seconds, **release BOOT**. The screen stays black (no firmware running) - this is correct.
+5. Run `nanoff --listports`. The bootloader-class COM port appears (typically the lower number, e.g. `COM10`).
+6. Re-flash:
+   - Runtime upgrade / downgrade: `nanoff --target ESP32_S3_BLE --serialport COMx --update [--fwversion X.Y.Z.W]`
+   - Clean reset: `nanoff --target ESP32_S3_BLE --serialport COMx --update --masserase`
+
+### After a flash, the chip may stay in bootloader mode
+
+Because of the same USB re-enumeration / RTS-reset issue that produces the cosmetic `Error E4000: Hard resetting via RTS pin... The handle is invalid.` at the end of a successful flash, the chip sometimes does not automatically boot the freshly-written firmware. It just sits idle on the bootloader-class port (COM10 in our setup).
+
+Symptom: after `nanoff` reports verified hashes for all three partitions, `nanoff --listports` still shows the same bootloader port (no flip), and probing it with `nanoff --devicedetails` succeeds (esptool replies, which means it is still in bootloader, not runtime).
+
+Recovery is a clean PMIC power-cycle:
+
+1. **Hold PWR 6+ seconds** to cut all rails.
+2. Wait 2-3 seconds.
+3. **Tap PWR briefly** to power back on (do NOT hold BOOT - we want a normal boot now, not a download-mode boot).
+4. The chip boots from flash into nanoFramework. The runtime swings the USB descriptor, the COM port re-enumerates (COM9 in our setup).
+5. Probe to confirm: `nanoff --serialport COM9 --platform esp32 --devicedetails` should fail with `Invalid head of packet (0x4E)` - that error is the proof the runtime is up.
+
+`esptool ... --after hard_reset run` was tried as a software-only alternative; on this watch it issues the reset but the chip stays in bootloader. The PMIC power-cycle is the only reliable path.
 
 There is no way to permanently brick the chip from software - the ROM bootloader lives in mask ROM and is not flashable. Worst case: full mass-erase + re-flash.
 

@@ -341,7 +341,7 @@ These are the realities of running C# on this board today. None of them are bloc
 | Date | Milestone | Notes |
 |---|---|---|
 | 2026-04-28 | Repo scaffolded, OS architecture documented | Initial commit, README + CLAUDE + BLE GATT scaffold mirroring NanoFrameTest1 |
-| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-1.16.0.568 on a Waveshare 2.06 watch (MAC `1C:DB:D4:7B:03:0C`). See `Notes/flashing.md` for the full recipe |
+| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-**1.16.0.567** (NOT 568 - 568 bumped a native ABI ahead of stable libraries; see `Notes/flashing.md`). Watch MAC `1C:DB:D4:7B:03:0C`, runtime port COM9. |
 | | Phase 1 next: CO5300 QSPI + FT3168 touch + frame-buffer + input dispatch | Reverse-engineering notes already captured in `Notes/co5300-quirks.md` |
 
 ## Building
@@ -351,17 +351,20 @@ Step-by-step recipes with every gotcha live in **[`Notes/flashing.md`](Notes/fla
 Quick reference (assumes a watch that has already had `dotnet tool install -g nanoff` run once on this machine):
 
 ```bash
-# First flash on a brand-new watch (mass-erase required - see Notes/flashing.md for why)
-nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase
+# First flash on a brand-new watch - pin the matched-libraries runtime version
+nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase --fwversion 1.16.0.567
 
-# Subsequent runtime updates
-nanoff --target ESP32_S3_BLE --serialport COM10 --update
+# Subsequent runtime updates (chip must be in bootloader mode - see Notes/flashing.md)
+nanoff --target ESP32_S3_BLE --serialport COM10 --update --fwversion 1.16.0.567
 
 # Deploy SpawnWear app: Visual Studio 2022 with the nanoFramework extension
 # Open SpawnWear.slnx, F5 to deploy + run
 ```
 
-The COM port number changes between bootloader mode and runtime mode — re-run `nanoff --listports` if a port "disappears".
+Two important gotchas — full details in **[`Notes/flashing.md`](Notes/flashing.md)**:
+
+- **Runtime version is pinned.** Don't take "latest" automatically: 1.16.0.568 bumps a native ABI ahead of stable class libraries and a stable-package deploy will fail with `System.Net requires native v100.2.0.11`. Pin to 1.16.0.567 until the matched 2.0.x stable libraries ship.
+- **The COM port number changes** between bootloader mode and runtime mode (this watch presents different USB descriptors). Re-run `nanoff --listports` whenever a port "disappears". Re-flash requires the chip to be in bootloader mode (hold BOOT during cold boot via PWR power-cycle).
 
 ---
 
