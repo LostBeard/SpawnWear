@@ -188,6 +188,41 @@ nanoff --target ESP32_S3_BLE --serialport COMxx --update --masserase \
 
 (Recipe to be confirmed during first custom-build flash; alternative is to call esptool directly with the same partition layout.)
 
+## ESP-IDF version pinning
+
+nf-interpreter ties itself to a specific ESP-IDF version via `set(ESP32_IDF_TAG "X.Y.Z" ...)` near the top of `targets/ESP32/CMakeLists.txt`. Each commit on `main` targets exactly one version.
+
+| nf-interpreter commit / range | ESP-IDF version |
+|---|---|
+| `main` (current at 2026-04-28) - commit `b9a29ca` | **5.5.4** |
+| commit `463e6ee9` ("Update IDF v5.5.4") and ahead | 5.5.4 |
+| commit `f0c7f761` ("Migrate to v5.5.3") to before `463e6ee9` | 5.5.3 |
+| commit `53be3026` ("Update to IDF 5.4.2") to before `f0c7f761` | **5.4.2** |
+| commit `4e446673` to before `53be3026` | 5.2.3 |
+| earlier | 5.1.x and below |
+
+If your installed ESP-IDF doesn't match what `main` wants, you have two options:
+
+1. **Install the matching ESP-IDF**: re-run the Espressif Tools Installer with the right version, or `git fetch && git checkout v5.5.4` inside the existing `C:\Espressif\frameworks\esp-idf-v5.4.1\` clone (and re-run `install.bat` to refresh the bundled tools + Python venv).
+2. **Check out an older nf-interpreter commit that matches your ESP-IDF**: `cd _vendor-nf-interpreter && git checkout 53be3026` (the IDF 5.4.2 era). Cleanly recovers without installing more software. Apply your own changes on top, rebase to `main` later when you upgrade IDF.
+
+### Symptom of a mismatch
+
+cmake configures successfully but `cmake --build` enters a perpetual reconfig loop:
+
+```
+[0/1] Re-running CMake...
+... configuring (12-15s) ...
+[0/2] Re-running CMake...
+... configuring (12-15s) ...
+[0/3] Re-running CMake...
+...
+```
+
+Each pass takes ~13 s; we observed 40+ passes in 9 minutes with no actual compilation step ever starting. The signature in the configure output is a line like `ESP32 IDF v5.5.4 source from: C:/Espressif/frameworks/esp-idf-v5.4.1` — nf detects a mismatch (it wants v5.5.4 but the path is v5.4.1) and keeps trying to reconcile.
+
+Fix is one of the two options above. SpawnWear takes option 2 currently (build at commit `53be3026`, IDF 5.4.x era). Final upstream contribution will be rebased onto whatever `main` wants at PR time.
+
 ## Known warnings
 
 - **CMAKE_OBJECT_PATH_MAX warning** on Windows: cmake warns that some intermediate object paths exceed 250 characters and the build "may not work correctly". In practice the build completes, but if it fails on a long-path link error, move the entire `_vendor-nf-interpreter` clone to a shorter root (e.g. `C:\nf-interpreter\`).
