@@ -1,0 +1,48 @@
+diff --git a/nanoFramework.Graphics/Primitive/GraphicDriver.cs b/nanoFramework.Graphics/Primitive/GraphicDriver.cs
+index 0af9905..572a0d0 100644
+--- a/nanoFramework.Graphics/Primitive/GraphicDriver.cs
++++ b/nanoFramework.Graphics/Primitive/GraphicDriver.cs
+@@ -24,6 +24,10 @@ namespace nanoFramework.UI
+         private byte _brightness;
+         private DisplayOrientation _defaultOrientation;
+         private SetWindowType _setWindowType;
++        private DisplayBusType _busType;
++        private byte _qspiRegisterWriteCommand;
++        private byte _qspiMemoryWriteCommand;
++        private uint _qspiMemoryWriteAddress;
+ 
+         /// <summary>
+         /// Gets or sets the width of the driver, it does override the Screen one if specified.
+@@ -157,6 +161,32 @@ namespace nanoFramework.UI
+         /// Gets or sets the Set Windowing type.
+         /// </summary>
+         public SetWindowType SetWindowType { get => _setWindowType; set => _setWindowType = value; }
++
++        /// <summary>
++        /// Gets or sets the display bus type. Defaults to <see cref="DisplayBusType.Spi"/> for
++        /// backward compatibility - existing managed drivers (ILI9341, ST7789, GC9A01, ...) need
++        /// no change.
++        /// </summary>
++        public DisplayBusType BusType { get => _busType; set => _busType = value; }
++
++        /// <summary>
++        /// QSPI mode: command byte that prefixes register-write transactions on the wire (e.g. 0x02
++        /// for CO5300). The register address is sent in the 24-bit address phase that follows.
++        /// Ignored when <see cref="BusType"/> != <see cref="DisplayBusType.Qspi"/>.
++        /// </summary>
++        public byte QspiRegisterWriteCommand { get => _qspiRegisterWriteCommand; set => _qspiRegisterWriteCommand = value; }
++
++        /// <summary>
++        /// QSPI mode: command byte that prefixes memory-write (pixel-stream) transactions on the
++        /// wire (e.g. 0x32 for CO5300). Ignored when <see cref="BusType"/> != <see cref="DisplayBusType.Qspi"/>.
++        /// </summary>
++        public byte QspiMemoryWriteCommand { get => _qspiMemoryWriteCommand; set => _qspiMemoryWriteCommand = value; }
++
++        /// <summary>
++        /// QSPI mode: 24-bit address payload that accompanies memory-write transactions
++        /// (e.g. 0x003C00 for CO5300). Ignored when <see cref="BusType"/> != <see cref="DisplayBusType.Qspi"/>.
++        /// </summary>
++        public uint QspiMemoryWriteAddress { get => _qspiMemoryWriteAddress; set => _qspiMemoryWriteAddress = value; }
+ #pragma warning restore S4487
+     }
+ }
