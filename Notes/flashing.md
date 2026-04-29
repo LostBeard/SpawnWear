@@ -185,6 +185,10 @@ Both buttons are on the **right edge** of the case:
   - Tap (short press) when off: power on.
   - Hold 6+ seconds when on: power off (AXP2101 cuts every rail).
 
+Waveshare's labeled interface diagram confirms this layout:
+<https://www.waveshare.com/wiki/File:ESP32-S3-Touch-AMOLED-2.06-details-inter.jpg>
+(linked from the "Hardware Description" section of the wiki page)
+
 If you press BOOT while the chip is already booted into runtime, **nothing changes** - it is just a user-button event. To enter the bootloader you have to power-cycle the chip with BOOT held during the cold boot.
 
 If the buttons feel identical and you cannot tell which is which, confirm by elimination: the one that powers the watch off when held 6+ seconds is PWR; the other is BOOT.
