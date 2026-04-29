@@ -341,7 +341,8 @@ These are the realities of running C# on this board today. None of them are bloc
 | Date | Milestone | Notes |
 |---|---|---|
 | 2026-04-28 | Repo scaffolded, OS architecture documented | Initial commit, README + CLAUDE + BLE GATT scaffold mirroring NanoFrameTest1 |
-| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | ESP32_S3_BLE-1.16.0.567 (1.16.0.568 also tested - both have native ABI v100.2.0.12, ahead of the latest stable class libraries). Watch MAC `1C:DB:D4:7B:03:0C`, runtime port COM9. SpawnWear uses the **2.0.0-preview** class libraries to match - see `Notes/flashing.md`. |
+| 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | Watch MAC `1C:DB:D4:7B:03:0C`. Final matched combo: runtime **ESP32_S3_BLE 1.16.0.563** + stable 1.x class libraries with **System.Net bumped to 1.11.50** (1.11.47 lagged the runtime's System.Net native v100.2.0.12 by one patch). Three runtimes tested (568, 567, 563); all have native v100.2.0.12. The 2.0-preview library line is currently ahead of every released runtime, so unusable. |
+| 2026-04-28 | **First SpawnWear deploy succeeded** | 11 assemblies, 153 KB total. Watch advertises as `SpawnWear` over BLE per `Program.cs`. |
 | | Phase 1 next: CO5300 QSPI + FT3168 touch + frame-buffer + input dispatch | Reverse-engineering notes already captured in `Notes/co5300-quirks.md` |
 
 ## Building
@@ -363,7 +364,7 @@ nanoff --target ESP32_S3_BLE --serialport COM10 --update
 
 Two important gotchas — full details in **[`Notes/flashing.md`](Notes/flashing.md)**:
 
-- **Class libraries are on the 2.0.0-preview line** (not the latest stable 1.x). Current ESP32_S3_BLE runtimes (1.16.0.567 and 1.16.0.568) ship native ABI v100.2.0.12; the latest stable class libraries still ship v100.2.0.11. The 2.0.0-preview packages are built for v100.2.0.12 and are the matched set for current runtimes. Trade-off: preview API surface may change.
+- **Matched runtime + library combo (2026-04-28).** Runtime image **ESP32_S3_BLE 1.16.0.563** + stable 1.x class libraries with **`nanoFramework.System.Net` bumped to 1.11.50** (the latest stable). 1.11.47 lags the runtime by one System.Net native patch. Don't take "latest" runtime automatically: 1.16.0.567 and 1.16.0.568 also have System.Net v100.2.0.12 but their other assemblies move ahead of stable libs in different ways. The 2.0.0-preview library line is currently AHEAD of every released runtime, so it is unusable today.
 - **The COM port number changes** between bootloader mode and runtime mode (this watch presents different USB descriptors). Re-run `nanoff --listports` whenever a port "disappears". Re-flash requires the chip to be in bootloader mode (hold BOOT during cold boot via PWR power-cycle).
 
 ---

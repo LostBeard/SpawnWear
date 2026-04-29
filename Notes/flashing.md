@@ -266,11 +266,28 @@ Each row is a flash + VS-deploy cycle (each cycle requires the buttons-into-boot
 
 | Runtime | Result | Native delta seen by VS |
 |---|---|---|
-| 1.16.0.568 | mismatch | System.Net v100.2.0.12 (need .11), other natives also off |
-| 1.16.0.567 | mismatch | Same as 568 - bump was older than 567 |
-| 1.16.0.563 | (testing) |  |
+| 1.16.0.568 | mismatch | System.Net v100.2.0.12 (need .11), every other assembly also off |
+| 1.16.0.567 | mismatch | Same as 568 |
+| 1.16.0.563 | **SOLVES every assembly except System.Net.** | Only System.Net delta remained (v100.2.0.12 vs v100.2.0.11). Other assemblies (mscorlib, Bluetooth, Runtime.Events, Wifi, etc.) all aligned with the stable libs. |
+| 1.16.0.563 + System.Net 1.11.50 | **MATCH.** First successful deploy. | The latest stable System.Net (1.11.50) is built for v100.2.0.12, so swapping just that one package over 1.11.47 closed the last delta - no further runtime steps back were needed. |
 
-If 563 also mismatches, drop further: 1.16.0.546, then 1.16.0.498, then 1.16.0.490, ... Cloudsmith lists down through the 1.15.x line.
+### Final matched combo (2026-04-28)
+
+```
+Runtime image:          ESP32_S3_BLE 1.16.0.563
+nanoFramework.CoreLibrary           1.17.11
+nanoFramework.Device.Bluetooth      1.1.115
+nanoFramework.Runtime.Events        1.11.32
+nanoFramework.Runtime.Native        1.7.11
+nanoFramework.System.Collections    1.5.67
+nanoFramework.System.Device.Wifi    1.5.139
+nanoFramework.System.IO.Streams     1.1.96
+nanoFramework.System.Net            1.11.50   <-- bumped from 1.11.47 to match runtime native
+nanoFramework.System.Text           1.3.42
+nanoFramework.System.Threading      1.1.52
+```
+
+When the nanoFramework team graduates the 2.0.0-preview wave to stable AND ships a matching ESP32_S3_BLE runtime image with the bumped natives, this combo can be replaced wholesale.
 
 ### How to find a matched-runtime version
 
