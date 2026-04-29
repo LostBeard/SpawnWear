@@ -8,6 +8,7 @@ When you discover something non-obvious - a chip quirk, a flashing gotcha, a reg
 
 ### Setup + tooling
 - **[flashing.md](flashing.md)** - First-flash recipe with every gotcha (USB re-enumeration, COM port flips, the cosmetic E4000 errors, why `--masserase` is required on factory boards)
+- **[build-environment.md](build-environment.md)** - Building custom nf-interpreter firmware on Windows: ESP-IDF v5.4.x setup, MSYSTEM / Python 3.11 vs 3.13 gotchas, cmake preset config files, build flow, flashing custom builds
 
 ### Reverse-engineered chip behavior
 - **[co5300-quirks.md](co5300-quirks.md)** - AMOLED display driver: QSPI hybrid protocol, 2-pixel minimum writes, even-aligned address windows, init sequence, command table
