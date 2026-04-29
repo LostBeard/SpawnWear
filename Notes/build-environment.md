@@ -234,6 +234,26 @@ call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat
 python -m pip install "click<8.2"
 ```
 
+### Gotcha: Python user-site-packages shadows the IDF venv
+
+Even after `install.bat` correctly downgrades `click` to 8.1.8 inside the IDF venv, `export.bat` may STILL fail with the same `click 8.3.1` error. The reason: Python's `user-site-packages` directory at `C:\Users\<you>\AppData\Roaming\Python\Python313\site-packages` is searched BEFORE the venv's site-packages, and any global pip install (`pip install --user click`) puts a different version there that shadows the venv's pinned copy.
+
+Fix: set `PYTHONNOUSERSITE=1` before invoking `export.bat` in any wrapper script:
+
+```batch
+@echo off
+set PYTHONNOUSERSITE=1
+call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat
+```
+
+This tells Python to ignore user-site-packages entirely, so the venv's exact pinned versions win. Verify with:
+
+```batch
+"C:\Espressif\python_env\idf5.5_py3.13_env\Scripts\python.exe" -m pip show click
+```
+
+The version reported there is what the venv has; if `export.bat` is reading something different, user-site-packages is the culprit.
+
 ## ESP-IDF version pinning
 
 nf-interpreter ties itself to a specific ESP-IDF version via `set(ESP32_IDF_TAG "X.Y.Z" ...)` near the top of `targets/ESP32/CMakeLists.txt`. Each commit on `main` targets exactly one version.
