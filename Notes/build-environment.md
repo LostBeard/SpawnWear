@@ -188,6 +188,52 @@ nanoff --target ESP32_S3_BLE --serialport COMxx --update --masserase \
 
 (Recipe to be confirmed during first custom-build flash; alternative is to call esptool directly with the same partition layout.)
 
+## Installing a second ESP-IDF version side-by-side
+
+When `main` of nf-interpreter advances ahead of your installed ESP-IDF (we hit this with v5.5.4 vs v5.4.1), you can install the newer ESP-IDF without removing the older one. The Espressif tools layout supports multiple frameworks under one tools tree.
+
+```batch
+@echo off
+set MSYSTEM=
+set MSYS=
+set "IDF_TOOLS_PATH=C:\Espressif"
+
+cd /d C:\Espressif\frameworks
+git clone -b v5.5.4 --depth 1 --recurse-submodules --shallow-submodules https://github.com/espressif/esp-idf.git esp-idf-v5.5.4
+
+cd /d C:\Espressif\frameworks\esp-idf-v5.5.4
+call C:\Espressif\frameworks\esp-idf-v5.5.4\install.bat all
+```
+
+`install.bat all` downloads the matching toolchain (xtensa-esp-elf, riscv32-esp-elf, openocd, etc.), creates a Python venv (`C:\Espressif\python_env\idf5.5_py3.13_env\` because the installer picks up your system Python 3.13.x), and pins the Python deps to ESP-IDF's constraints file.
+
+The clone is heavy (1+ GB) and the toolchain download adds another ~1 GB; expect 10-30 minutes total.
+
+After install, point nf-interpreter's user config at the new framework path:
+
+```json
+// config/user-tools-repos.json
+"ESP32_IDF_PATH": "C:/Espressif/frameworks/esp-idf-v5.5.4",
+```
+
+### Gotcha: install.bat may install Python deps at versions that don't match the constraint file
+
+After we ran `install.bat all` the first time, `export.bat` failed with:
+
+```
+* Checking python dependencies ... FAILED
+Requirement 'click<8.2,>=7.0' was not met. Installed version: 8.3.1
+```
+
+The first install pulled `click 8.3.1` (current latest), but ESP-IDF v5.5.4's `espidf.constraints.v5.5.txt` pins `click<8.2`. **Re-running `install.bat all` fixes this** - it sees the installed-but-out-of-spec packages and downgrades them to match.
+
+If `install.bat` is reluctant, manually pin the offending package:
+
+```batch
+call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat
+python -m pip install "click<8.2"
+```
+
 ## ESP-IDF version pinning
 
 nf-interpreter ties itself to a specific ESP-IDF version via `set(ESP32_IDF_TAG "X.Y.Z" ...)` near the top of `targets/ESP32/CMakeLists.txt`. Each commit on `main` targets exactly one version.
