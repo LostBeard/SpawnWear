@@ -12,6 +12,9 @@ When you discover something non-obvious - a chip quirk, a flashing gotcha, a reg
 ### Reverse-engineered chip behavior
 - **[co5300-quirks.md](co5300-quirks.md)** - AMOLED display driver: QSPI hybrid protocol, 2-pixel minimum writes, even-aligned address windows, init sequence, command table
 
+### Design docs (upstream contributions)
+- **[qspi-display-driver-design.md](qspi-display-driver-design.md)** - End-to-end design for adding hybrid-QSPI display panel support to .NET nanoFramework. Covers managed descriptor extension, native bus binding, ESP-IDF quad-mode plumbing, custom firmware target. CO5300 lands as the first consumer.
+
 ### Planned (will land as we hit them)
 
 - `axp2101-driver-notes.md` - PMIC: charging, rails, IRQ multiplexing, PWR button via the IRQ output line on GPIO10
