@@ -5,7 +5,16 @@ The actual source files for the upstream contribution to nanoFramework, captured
 1. **`nf-interpreter`** (the runtime — native C++) - one new file + one patched header
 2. **`nanoFramework.Graphics`** (the managed driver library) - two new files + one patched class
 
-Each file in this folder is either a unified diff to apply with `git apply` or a complete new source file to drop in. They're presented here as preserved artifacts in the SpawnWear repo until we set up proper forks on GitHub.
+Each file in this folder is either a unified diff to apply with `git apply` or a complete new source file to drop in. They're preserved here in the SpawnWear repo as a self-contained set in case the upstream forks change shape.
+
+## Live forks
+
+Working forks with the QSPI changes already applied to a feature branch:
+
+- **<https://github.com/LostBeard/nanoFramework.Graphics/tree/feature/qspi-display-driver>** — `DisplayBusType.cs` enum, `GraphicDriver.cs` extension, full `Co5300` managed driver project.
+- **<https://github.com/LostBeard/nf-interpreter/tree/feature/qspi-display-driver>** — `Qspi_To_Display.cpp` native runtime side, `DisplayInterface.h` header extension.
+
+The patches in this folder mirror what's on those branches; either is a valid starting point. When the implementation is verified working end-to-end, we open draft PRs from the LostBeard forks against `nanoframework/main`.
 
 ## Apply order
 

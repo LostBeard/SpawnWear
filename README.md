@@ -343,7 +343,9 @@ These are the realities of running C# on this board today. None of them are bloc
 | 2026-04-28 | Repo scaffolded, OS architecture documented | Initial commit, README + CLAUDE + BLE GATT scaffold mirroring NanoFrameTest1 |
 | 2026-04-28 | **nanoFramework runtime flashed to first physical watch** | Watch MAC `1C:DB:D4:7B:03:0C`. Final matched combo: runtime **ESP32_S3_BLE 1.16.0.563** + stable 1.x class libraries with **System.Net bumped to 1.11.50** (1.11.47 lagged the runtime's System.Net native v100.2.0.12 by one patch). Three runtimes tested (568, 567, 563); all have native v100.2.0.12. The 2.0-preview library line is currently ahead of every released runtime, so unusable. |
 | 2026-04-28 | **First SpawnWear deploy succeeded** | 11 assemblies, 153 KB total. Watch advertises as `SpawnWear` over BLE per `Program.cs`. |
-| | Phase 1 next: CO5300 QSPI + FT3168 touch + frame-buffer + input dispatch | Reverse-engineering notes already captured in `Notes/co5300-quirks.md` |
+| 2026-04-28 | **FT3168 touch driver written + integrated** | `SpawnWear/Drivers/Touch/Ft3168Driver.cs`. Pure managed C# against `System.Device.I2c`. Probes device-id at boot + `TouchEvent` event fires on every touch. |
+| 2026-04-28 | **QSPI display contribution forks pushed** | [`LostBeard/nanoFramework.Graphics@feature/qspi-display-driver`](https://github.com/LostBeard/nanoFramework.Graphics/tree/feature/qspi-display-driver) (managed: `DisplayBusType` enum + `GraphicDriver` extension + `Co5300` driver project). [`LostBeard/nf-interpreter@feature/qspi-display-driver`](https://github.com/LostBeard/nf-interpreter/tree/feature/qspi-display-driver) (native: `Qspi_To_Display.cpp` + `DisplayInterface.h` extension). Build-environment work to compile a custom firmware with the QSPI path enabled is in progress; PRs to upstream once verified end-to-end on the watch. |
+| | Phase 1 next: build custom firmware + flash + drive CO5300 from SpawnWear | |
 
 ## Building
 
