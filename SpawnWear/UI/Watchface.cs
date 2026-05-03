@@ -111,14 +111,32 @@ namespace SpawnWear.UI
             {
                 // Partial repaint: clear the digits strip to black, redraw,
                 // and flush ONLY that rectangle. ~25 KB at 16bpp instead of 411 KB.
-                _fb.FillRectangle(_digitsX, _digitsY, _digitsWidth, _digitsHeight, Color.Black);
+                //
+                // CO5300 alignment quirk (per hackaday.com/2026/04/11 comment thread by
+                // the waveshare-watch-rs author + our Notes/co5300-quirks.md):
+                //   * CASET / PASET window MUST round x_start / y_start DOWN to even
+                //   * x_end / y_end MUST round UP to odd
+                //   * minimum 2-pixel write width and height
+                // None of this is in the datasheet; the chip silently snaps the address
+                // window and any pixel-write whose actual landed bounds disagree with
+                // what we drew leaves stale pixels at the edge. The bug surfaces as
+                // "small bits of the previous digits left behind" when we flush an
+                // odd-aligned window.
+                int alignedX = _digitsX & ~1;
+                int alignedY = _digitsY & ~1;
+                int alignedRight = (_digitsX + _digitsWidth - 1) | 1;
+                int alignedBottom = (_digitsY + _digitsHeight - 1) | 1;
+                int alignedW = alignedRight - alignedX + 1;
+                int alignedH = alignedBottom - alignedY + 1;
+
+                _fb.FillRectangle(alignedX, alignedY, alignedW, alignedH, Color.Black);
                 SegmentFont.DrawHhMmSs(
                     _fb, h, m, s,
                     _digitsX, _digitsY,
                     DigitWidth, DigitHeight,
                     ColonWidth, Spacing,
                     Thickness, Color.White);
-                _fb.Flush(_digitsX, _digitsY, _digitsWidth, _digitsHeight);
+                _fb.Flush(alignedX, alignedY, alignedW, alignedH);
             }
 
             _lastH = h;
