@@ -28,6 +28,18 @@ namespace SpawnWear
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
 
+        // Power-state machine driven by time-since-last-touch. Mirrors waveshare-watch-rs
+        // main.rs:613-620 multi-tier tick budget.
+        enum ScreenState { Active, Dim, Sleep }
+        static ScreenState _screenState = ScreenState.Active;
+
+        // Idle thresholds. Tunable - 15 s / 30 s gives a snappy demo without burning power
+        // on a stationary face. For production these will move into a Settings page.
+        const long DimAfterSeconds = 15;
+        const long SleepAfterSeconds = 30;
+        const byte BrightnessActive = 0xFF;
+        const byte BrightnessDim = 0x40;
+
         public static void Main()
         {
             // Build #19 (2026-05-03): event-driven main loop + HH:MM:SS watchface.
@@ -52,6 +64,11 @@ namespace SpawnWear
             if (fb != null)
             {
                 _watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                // Seed last-touch with boot time so the idle countdown to Dim / Sleep
+                // starts NOW. Without this, the first OnTick computes idle as
+                // "nowTicks since DateTime epoch" (huge), and the state machine snaps
+                // straight to Sleep on the first iteration.
+                _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
                 _eventLoop = new EventLoop(OnTick);
                 Debug.WriteLine("[SpawnWear] M1 - Entering EventLoop");
                 _eventLoop.Run();
@@ -66,22 +83,78 @@ namespace SpawnWear
         }
 
         /// <summary>
-        /// Called by EventLoop on every wake. Repaints the watch face (partial flush)
-        /// and returns the desired next-tick timeout. Tick budget:
-        ///   * Finger held       = 16 ms  (smooth 60 Hz - matches Rust port main.rs:612)
-        ///   * Idle watchface    = 1000 ms (only seconds digit changes)
+        /// Called by EventLoop on every wake. Drives the Active / Dim / Sleep state machine
+        /// based on time-since-last-touch, repaints the watch face when visible, and
+        /// returns the desired next-tick timeout. Tick budget:
+        ///   * Finger held       = 16 ms   (smooth 60 Hz - matches Rust port main.rs:612)
+        ///   * Active watchface  = 1000 ms (only seconds digit changes per tick)
+        ///   * Dim watchface     = 1000 ms (still ticking; just dimmer)
+        ///   * Asleep            = 30000 ms (housekeeping only - touch INT wakes early)
+        ///
+        /// Power model:
+        ///   * Active:  AMOLED black bg = ~0 mA per off pixel + partial flush ~25 KB/s
+        ///   * Dim:     same as Active but brightness drops to 0x40 (~1/4 of full)
+        ///   * Asleep:  CO5300 SLPIN + DISPOFF -> panel ~uA, no flushes, CPU
+        ///              tickless-idle for the full 30 s
         /// </summary>
         static int OnTick(EventLoop.WakeReason reason)
         {
             try
             {
-                _watchface.Tick();
+                long nowTicks = DateTime.UtcNow.Ticks;
+                long idleSeconds = (nowTicks - _lastTouchUtcTicks) / TimeSpan.TicksPerSecond;
+
+                ScreenState desired;
+                if (_fingerDown || idleSeconds < DimAfterSeconds) desired = ScreenState.Active;
+                else if (idleSeconds < SleepAfterSeconds) desired = ScreenState.Dim;
+                else desired = ScreenState.Sleep;
+
+                if (desired != _screenState)
+                {
+                    TransitionTo(desired);
+                }
+
+                if (_screenState != ScreenState.Sleep)
+                {
+                    _watchface.Tick();
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[Watchface] EX " + ex.GetType().Name + ": " + ex.Message);
+                Debug.WriteLine("[Tick] EX " + ex.GetType().Name + ": " + ex.Message);
             }
-            return _fingerDown ? 16 : 1000;
+
+            if (_fingerDown) return 16;
+            switch (_screenState)
+            {
+                case ScreenState.Sleep: return 30000;
+                default: return 1000;
+            }
+        }
+
+        static void TransitionTo(ScreenState desired)
+        {
+            ScreenState prev = _screenState;
+            Debug.WriteLine("[Screen] " + prev + " -> " + desired);
+            _screenState = desired;
+
+            switch (desired)
+            {
+                case ScreenState.Active:
+                    if (prev == ScreenState.Sleep)
+                    {
+                        DisplayControl.Wake();
+                        _watchface.Invalidate();
+                    }
+                    DisplayControl.SetBrightness(BrightnessActive);
+                    break;
+                case ScreenState.Dim:
+                    DisplayControl.SetBrightness(BrightnessDim);
+                    break;
+                case ScreenState.Sleep:
+                    DisplayControl.Sleep();
+                    break;
+            }
         }
 
         static void EnablePowerRails()
