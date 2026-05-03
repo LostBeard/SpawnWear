@@ -25,6 +25,7 @@ namespace SpawnWear
         // pair around every read/write provides happens-before ordering anyway.
         static EventLoop _eventLoop;
         static Watchface _watchface;
+        static Axp2101Driver _axp;
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
 
@@ -63,7 +64,7 @@ namespace SpawnWear
 
             if (fb != null)
             {
-                _watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                _watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
@@ -163,10 +164,14 @@ namespace SpawnWear
             {
                 Debug.WriteLine("[Power] P1 - Opening AXP2101 I2C device @ 0x" + BoardPins.AxpI2cAddress.ToString("X2"));
                 var axpI2c = BoardSetup.OpenI2cDevice(BoardPins.AxpI2cAddress);
-                var axp = new Axp2101Driver(axpI2c);
+                _axp = new Axp2101Driver(axpI2c);
                 Debug.WriteLine("[Power] P2 - Defensive rail enable (DC1 + ALDO1/2/3)");
-                axp.EnableDisplayRails();
-                Debug.WriteLine("[Power] P3 - Display rails up");
+                _axp.EnableDisplayRails();
+                Debug.WriteLine("[Power] P3 - Enabling ADC channels");
+                _axp.EnableAdc();
+                int batPct = _axp.ReadBatteryPercent();
+                int batMv = _axp.ReadBatteryMillivolts();
+                Debug.WriteLine("[Power] P4 - bat=" + batPct + "% " + batMv + "mV vbus=" + (_axp.IsVbusPresent() ? "in" : "out"));
             }
             catch (Exception ex)
             {
