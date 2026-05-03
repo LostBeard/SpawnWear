@@ -62,17 +62,43 @@ Console.WriteLine($"Using VS bundled DLL: {dllPath}");
 
 var asm = Assembly.LoadFrom(dllPath);
 
-var peFiles = Directory.GetFiles(binDir, "*.pe", SearchOption.TopDirectoryOnly).OrderBy(p => p).ToArray();
+// Collect .pe files: bin/Debug first (covers SpawnWear.pe + standard refs), then
+// scan packages/*/lib/*.pe to pick up package-shipped PEs that MSBuild's nfproj
+// targets failed to copy (warning MSB3030 fires for any package missing a .pdbx
+// file, which silently breaks the .pe copy step). De-dupe by filename, bin/Debug
+// wins on collision (project's own build output is freshest).
+var peByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+foreach (var f in Directory.GetFiles(binDir, "*.pe", SearchOption.TopDirectoryOnly))
+{
+    peByName[Path.GetFileName(f)] = f;
+}
+
+// Scan ../packages OR the project parent's packages folder for additional .pe files.
+// Resolve relative to binDir: typical nfproj layout is <repo>/<proj>/bin/Debug, with
+// packages at <repo>/packages.
+var projectDir = Path.GetDirectoryName(Path.GetDirectoryName(binDir));
+var packagesDir = projectDir != null ? Path.Combine(Path.GetDirectoryName(projectDir) ?? "", "packages") : null;
+if (packagesDir != null && Directory.Exists(packagesDir))
+{
+    foreach (var f in Directory.GetFiles(packagesDir, "*.pe", SearchOption.AllDirectories))
+    {
+        var name = Path.GetFileName(f);
+        if (!peByName.ContainsKey(name)) peByName[name] = f;
+    }
+}
+
+var peFiles = peByName.Values.OrderBy(p => Path.GetFileName(p)).ToArray();
 if (peFiles.Length == 0)
 {
-    Console.WriteLine($"No .pe files in {binDir}. Build the project first.");
+    Console.WriteLine($"No .pe files found in {binDir} or packages/. Build the project first.");
     return 1;
 }
-Console.WriteLine($"Found {peFiles.Length} .pe assemblies in {binDir}.");
+Console.WriteLine($"Found {peFiles.Length} .pe assemblies (bin + packages).");
 foreach (var p in peFiles)
 {
     var fi = new FileInfo(p);
-    Console.WriteLine($"  {fi.Name,-50} {fi.Length,8} bytes  {fi.LastWriteTime:HH:mm:ss}");
+    var src = p.Contains("packages", StringComparison.OrdinalIgnoreCase) ? "[pkg]" : "[bin]";
+    Console.WriteLine($"  {src} {fi.Name,-50} {fi.Length,8} bytes  {fi.LastWriteTime:HH:mm:ss}");
 }
 
 // Reflect: PortBase.CreateInstanceForSerial(true)

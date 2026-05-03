@@ -1,8 +1,11 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.Threading;
 using nanoFramework.Device.Bluetooth;
 using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
+using nanoFramework.UI;
+using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Touch;
 
@@ -11,20 +14,20 @@ namespace SpawnWear
     public class Program
     {
         // Boot status markers encoded into the BLE device name. Pattern: 'SW-<displayStatus>-<touchStatus>'.
-        // displayStatus="Skip" until the custom nanoCLR-with-CO5300-Graphics is built and flashed
-        // (see Notes/qspi-display-driver-design.md). Until then the spawnwear-1 Graphics PEs cannot
-        // link against the standard nanoCLR runtime (native version mismatch).
-        static string _displayStatus = "Skip";
+        static string _displayStatus = "?";
         static string _touchStatus = "?";
 
         public static void Main()
         {
-            // Build #9 (2026-05-03): full original minus display.
-            // Touch + BLE all enabled. Display remains parked behind the custom-runtime build.
+            // Build #11 (2026-05-03): start BLE FIRST so its small GATT allocations land
+            // before the display framebuffer (~410 KB) consumes the heap. Build #10 fired
+            // OutOfMemoryException at GattLocalCharacteristic::.ctor when display ran first.
+            // Touch can run anywhere; we run it before BLE so the BLE name reflects its status.
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             StartTouchProbe();
             StartBleAdvertising();
+            StartDisplay();
 
             int beat = 0;
             while (true)
@@ -32,6 +35,58 @@ namespace SpawnWear
                 Debug.WriteLine("[SpawnWear] heartbeat #" + beat);
                 beat++;
                 Thread.Sleep(5000);
+            }
+        }
+
+        static void StartDisplay()
+        {
+            try
+            {
+                Debug.WriteLine("[Display] D1 - Building SpiConfiguration");
+                var spi = new SpiConfiguration(
+                    spiBus: 0,                   // ignored on QSPI - target_qspi_display_config.h wins
+                    chipselect: BoardPins.LcdCs, // ignored on QSPI
+                    dataCommand: -1,             // QSPI has no DC pin
+                    reset: BoardPins.LcdReset,   // ignored on QSPI
+                    backLight: -1);              // CO5300 brightness via panel register 0x51
+
+                Debug.WriteLine("[Display] D2 - Building ScreenConfiguration");
+                var screen = new ScreenConfiguration(
+                    x: BoardPins.LcdColumnOffset,
+                    y: 0,
+                    width: BoardPins.LcdWidth,
+                    height: BoardPins.LcdHeight,
+                    graphicDriver: Co5300.GraphicDriver);
+
+                _displayStatus = "I";
+                Debug.WriteLine("[Display] D3 - DisplayControl.Initialize");
+                uint maxBuffer = DisplayControl.Initialize(spi, screen);
+                Debug.WriteLine("[Display] D4 - Initialize returned, maxBuffer=" + maxBuffer);
+                _displayStatus = "F";
+
+                Bitmap fb = DisplayControl.FullScreen;
+                if (fb == null)
+                {
+                    _displayStatus = "NoFb";
+                    Debug.WriteLine("[Display] D5-fail - FullScreen bitmap null");
+                    return;
+                }
+
+                _displayStatus = "P";
+                Debug.WriteLine("[Display] D5 - Painting solid red");
+                fb.Clear();
+                fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, Color.Red);
+                fb.Flush();
+
+                _displayStatus = "OK";
+                Debug.WriteLine("[Display] D6 - Solid red flushed, status=OK");
+            }
+            catch (Exception ex)
+            {
+                string t = ex.GetType().Name;
+                if (t.Length > 12) t = t.Substring(0, 12);
+                _displayStatus = "EX:" + t;
+                Debug.WriteLine("[Display] EX " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
