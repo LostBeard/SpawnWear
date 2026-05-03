@@ -1,3 +1,5 @@
+#:package System.IO.Ports@9.0.0
+
 // Deploy a built nanoFramework project to a watch in runtime mode and capture
 // Debug.WriteLine output. Same wire-protocol path Visual Studio uses; works
 // without the bootloader-mode dance.
@@ -8,6 +10,10 @@
 // IncrementalDeployment=False (which our custom ESP32_S3_BLE_QSPI runtime
 // does). VS's bundled 2.5.0.0 DLL deploys to the same runtime fine, so we use
 // THAT DLL directly. (Path resolved at runtime - fallback search order below.)
+//
+// We bring System.IO.Ports along for the ride because the VS DLL's
+// PortSerialManager has it as a transitive dependency that .NET 10 file-scripts
+// don't pick up automatically when loading the DLL via Assembly.LoadFrom.
 //
 // Usage:
 //   dotnet run tools/nf-deploy.cs                       # uses defaults: SpawnWear/bin/Debug + COM9 + 25s capture
@@ -101,35 +107,18 @@ foreach (var p in peFiles)
     Console.WriteLine($"  {src} {fi.Name,-50} {fi.Length,8} bytes  {fi.LastWriteTime:HH:mm:ss}");
 }
 
-// Reflect: PortBase.CreateInstanceForSerial(true)
+// Reflect: PortBase.CreateInstanceForSerial(false) - we don't need the watcher,
+// we'll register the device explicitly by COM port via AddDevice. This avoids all
+// the watcher-timing flakiness that has been biting us after multiple failed deploys.
 var portBaseType = asm.GetType("nanoFramework.Tools.Debugger.PortBase");
 var createForSerial = portBaseType.GetMethod("CreateInstanceForSerial", new[] { typeof(bool) });
-object portBase = createForSerial.Invoke(null, new object[] { true });
+object portBase = createForSerial.Invoke(null, new object[] { false });
 
-// Get NanoFrameworkDevices observable collection (it implements IList).
-var nanoDevicesProp = portBaseType.GetProperty("NanoFrameworkDevices");
-var devicesList = (System.Collections.IList)nanoDevicesProp.GetValue(portBase);
-for (int i = 0; i < 40 && devicesList.Count == 0; i++)
-{
-    await Task.Delay(250);
-}
-Console.WriteLine($"Discovered {devicesList.Count} device(s).");
-
-object device = null;
-foreach (var d in devicesList)
-{
-    var connectionId = (string)d.GetType().GetProperty("ConnectionId").GetValue(d);
-    var description = (string)d.GetType().GetProperty("Description").GetValue(d);
-    Console.WriteLine($"  {connectionId} - {description}");
-    if (connectionId.IndexOf(port, StringComparison.OrdinalIgnoreCase) >= 0)
-    {
-        device = d;
-        break;
-    }
-}
+var addDeviceMi = portBaseType.GetMethod("AddDevice", new[] { typeof(string) });
+object device = addDeviceMi.Invoke(portBase, new object[] { port });
 if (device == null)
 {
-    Console.WriteLine($"No nanoFramework device on {port}.");
+    Console.WriteLine($"AddDevice({port}) returned null - device not present or holder of port.");
     return 1;
 }
 var deviceDesc = (string)device.GetType().GetProperty("Description").GetValue(device);
@@ -160,6 +149,18 @@ if (connectMi == null)
 object[] connectArgs = connectMi.GetParameters().Length == 3
     ? new object[] { 5000, true, true }
     : new object[] { true, true };
+// Bump DefaultTimeout BEFORE Connect - the deploy's last commit block (the 824-byte
+// trailer) needs the runtime to flush flash + checksum, which takes longer than the
+// default wire-protocol timeout. Empirically reached "Error writing 824 bytes ... No
+// reply from nanoDevice" at the deploy tail; bigger timeout gives the runtime time
+// to finalize.
+var defaultTimeoutProp = engineType.GetProperty("DefaultTimeout");
+if (defaultTimeoutProp != null && defaultTimeoutProp.CanWrite)
+{
+    defaultTimeoutProp.SetValue(engine, 30000);
+    Console.WriteLine("Set DefaultTimeout=30000ms");
+}
+
 bool connected = (bool)connectMi.Invoke(engine, connectArgs);
 if (!connected) { Console.WriteLine("Connect failed."); return 1; }
 Console.WriteLine("Connected.");
@@ -211,9 +212,32 @@ var assemblyBytes = peFiles.Select(p => File.ReadAllBytes(p)).ToList();
 var paramsForDeploy = deploymentExecute.GetParameters();
 object[] callArgs = new object[paramsForDeploy.Length];
 callArgs[0] = assemblyBytes;
-callArgs[1] = true;  // rebootAfterDeploy
-if (paramsForDeploy.Length >= 3) callArgs[2] = false; // skipErase
-for (int i = 3; i < paramsForDeploy.Length; i++) callArgs[i] = null;
+callArgs[1] = false;  // rebootAfterDeploy - reboot manually after
+if (paramsForDeploy.Length >= 3) callArgs[2] = false; // skipErase = false (full erase + write)
+
+// Build IProgress<MessageWithProgress> + IProgress<string> instances so the deploy
+// internals stream their per-step status back. Without these the only visible failure
+// mode was "DeploymentExecute returned false" with no detail.
+for (int i = 3; i < paramsForDeploy.Length; i++)
+{
+    var pType = paramsForDeploy[i].ParameterType;
+    if (pType.IsGenericType && pType.GetGenericTypeDefinition() == typeof(IProgress<>))
+    {
+        var argType = pType.GetGenericArguments()[0];
+        if (argType == typeof(string))
+        {
+            callArgs[i] = new ReflectProgress<string>(s => Console.WriteLine($"[deploy-log] {s}"));
+        }
+        else
+        {
+            callArgs[i] = Activator.CreateInstance(typeof(ReflectProgressUntyped<>).MakeGenericType(argType), new object[] { (Action<object>)(o => Console.WriteLine($"[deploy-progress] {o}")) });
+        }
+    }
+    else
+    {
+        callArgs[i] = null;
+    }
+}
 
 Console.WriteLine($"Deploying {assemblyBytes.Count} assemblies via VS DLL DeploymentExecute (reboot=true)...");
 bool ok;
@@ -232,7 +256,28 @@ if (!ok)
     return 1;
 }
 
-Console.WriteLine($"Deploy + reboot OK. Capturing Debug.WriteLine output for {captureSeconds}s...");
+// Manual reboot via the wire protocol's RebootDevice. NormalReboot does a chip-level reset.
+Console.WriteLine("Deploy OK. Rebooting CLR manually...");
+var rebootOptionsType = asm.GetType("nanoFramework.Tools.Debugger.RebootOptions");
+var normalReboot = Enum.Parse(rebootOptionsType, "NormalReboot");
+var rebootMi = engineType.GetMethods().First(m => m.Name == "RebootDevice" && m.GetParameters().Length == 2);
+rebootMi.Invoke(engine, new object[] { normalReboot, null });
+
+Console.WriteLine($"Reboot sent. Capturing Debug.WriteLine output for {captureSeconds}s...");
 await Task.Delay(captureSeconds * 1000);
 Console.WriteLine("Done.");
 return 0;
+
+class ReflectProgress<T> : IProgress<T>
+{
+    readonly Action<T> _on;
+    public ReflectProgress(Action<T> on) { _on = on; }
+    public void Report(T value) => _on(value);
+}
+
+class ReflectProgressUntyped<T> : IProgress<T>
+{
+    readonly Action<object> _on;
+    public ReflectProgressUntyped(Action<object> on) { _on = on; }
+    public void Report(T value) => _on(value);
+}

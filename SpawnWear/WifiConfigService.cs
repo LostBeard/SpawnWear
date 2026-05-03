@@ -1,5 +1,6 @@
 using System;
 using System.Device.Wifi;
+using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
@@ -54,7 +55,23 @@ namespace SpawnWear
             _profile = profile;
         }
 
+        /// <summary>
+        /// Initialize WiFi characteristics only (no WatchProfile, no DebugConsole).
+        /// Use when the BLE host can't fit the full ~10-characteristic layout - currently
+        /// the case on the QSPI nanoCLR build, where adding all helper services hits
+        /// OutOfMemoryException at GattLocalCharacteristic::.ctor.
+        /// </summary>
+        public bool InitializeWifiOnly()
+        {
+            return InitializeInternal(false);
+        }
+
         public bool Initialize()
+        {
+            return InitializeInternal(true);
+        }
+
+        bool InitializeInternal(bool attachHelpers)
         {
             var result = GattServiceProvider.Create(BleUuids.WifiServiceUuid);
             if (result.Error != BluetoothError.Success)
@@ -112,18 +129,25 @@ namespace SpawnWear
             _commandChar = cmdResult.Characteristic;
             _commandChar.WriteRequested += OnCommandWriteRequested;
 
-            // Attach watch profile + debug characteristics to the same provider.
-            if (!_profile.Initialize(service))
+            // Attach watch profile + debug characteristics only when caller asked for them
+            // AND the helper instances were supplied. Both are skipped under InitializeWifiOnly().
+            if (attachHelpers)
             {
-                return false;
+                if (_profile != null && !_profile.Initialize(service))
+                {
+                    return false;
+                }
+                if (_debug != null && !_debug.Initialize(service))
+                {
+                    return false;
+                }
+                if (_debug != null) _debug.Log("[WiFi] Service initialized (full)");
+            }
+            else
+            {
+                Debug.WriteLine("[WiFi] Service initialized (wifi-only, helpers skipped)");
             }
 
-            if (!_debug.Initialize(service))
-            {
-                return false;
-            }
-
-            _debug.Log("[WiFi] Service initialized");
             return true;
         }
 
