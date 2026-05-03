@@ -7,6 +7,7 @@ using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
 using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
+using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Touch;
 
 namespace SpawnWear
@@ -26,6 +27,7 @@ namespace SpawnWear
             // the deploy/heap budget is sorted (parked task).
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
+            EnablePowerRails();
             StartTouchProbe();
             StartBleAdvertising();
             StartDisplay();
@@ -36,6 +38,23 @@ namespace SpawnWear
                 Debug.WriteLine("[SpawnWear] heartbeat #" + beat);
                 beat++;
                 Thread.Sleep(5000);
+            }
+        }
+
+        static void EnablePowerRails()
+        {
+            try
+            {
+                Debug.WriteLine("[Power] P1 - Opening AXP2101 I2C device @ 0x" + BoardPins.AxpI2cAddress.ToString("X2"));
+                var axpI2c = BoardSetup.OpenI2cDevice(BoardPins.AxpI2cAddress);
+                var axp = new Axp2101Driver(axpI2c);
+                Debug.WriteLine("[Power] P2 - Enabling DC1 + ALDO1 @ 3300mV (display rails)");
+                axp.EnableDisplayRails();
+                Debug.WriteLine("[Power] P3 - Display rails up");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Power] EX " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 

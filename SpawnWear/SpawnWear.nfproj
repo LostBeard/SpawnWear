@@ -21,6 +21,7 @@
     <Compile Include="BleUuids.cs" />
     <Compile Include="Drivers\BoardPins.cs" />
     <Compile Include="Drivers\BoardSetup.cs" />
+    <Compile Include="Drivers\Power\Axp2101Driver.cs" />
     <Compile Include="Drivers\Touch\Ft3168Driver.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
