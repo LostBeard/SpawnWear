@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Threading;
 using nanoFramework.Device.Bluetooth;
 using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
 using nanoFramework.UI;
@@ -9,6 +8,8 @@ using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Touch;
+using SpawnWear.Services;
+using SpawnWear.UI;
 
 namespace SpawnWear
 {
@@ -18,13 +19,24 @@ namespace SpawnWear
         static string _displayStatus = "?";
         static string _touchStatus = "?";
 
+        // V1 watch-face state. Owned by Main, accessed from the touch callback to wake the loop.
+        // _fingerDown is plain bool because nanoFramework's CoreLibrary doesn't ship
+        // System.Runtime.CompilerServices.IsVolatile - the AutoResetEvent.Set + WaitOne
+        // pair around every read/write provides happens-before ordering anyway.
+        static EventLoop _eventLoop;
+        static Watchface _watchface;
+        static bool _fingerDown;
+        static long _lastTouchUtcTicks;
+
         public static void Main()
         {
-            // Build #16 (2026-05-03): display + touch + advertise-only BLE.
-            // Helper services + System.Net + System.Device.Wifi removed to keep deploy total
-            // under the apparent 271 KB ceiling. BLE advertises with the SpawnWear UUID but
-            // no GATT characteristics yet - WiFi provisioning + watch profile come back when
-            // the deploy/heap budget is sorted (parked task).
+            // Build #19 (2026-05-03): event-driven main loop + HH:MM:SS watchface.
+            // Replaces the heartbeat polling loop with an AutoResetEvent-driven select
+            // pattern modeled on waveshare-watch-rs main.rs:603. CPU sleeps in
+            // FreeRTOS tickless-idle between wakes; touch INT (or 1 Hz timeout)
+            // re-arms the loop. Power note: AMOLED black background = ~0 mA per
+            // off pixel; partial Flush of just the digits region pushes ~25 KB/s
+            // instead of 411 KB for the full panel.
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             EnablePowerRails();
@@ -33,17 +45,43 @@ namespace SpawnWear
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
             // when it starts; if BLE wins the race for PSRAM the graphics heap gets
             // whatever scraps remain (~100KB observed) and FullScreen Bitmap OOMs.
-            // Order: power -> touch -> display (claims PSRAM) -> BLE.
-            StartDisplay();
+            // Order: power -> touch -> display (claims PSRAM) -> BLE -> watchface.
+            Bitmap fb = StartDisplay();
             StartBleAdvertising();
 
-            int beat = 0;
-            while (true)
+            if (fb != null)
             {
-                Debug.WriteLine("[SpawnWear] heartbeat #" + beat);
-                beat++;
-                Thread.Sleep(5000);
+                _watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                _eventLoop = new EventLoop(OnTick);
+                Debug.WriteLine("[SpawnWear] M1 - Entering EventLoop");
+                _eventLoop.Run();
             }
+            else
+            {
+                // Display init failed - keep BLE alive so the device is still discoverable
+                // for diagnostics. No watch face means no event loop, so we park.
+                Debug.WriteLine("[SpawnWear] M1-fallback - No framebuffer, parking on Sleep loop");
+                while (true) { System.Threading.Thread.Sleep(60000); }
+            }
+        }
+
+        /// <summary>
+        /// Called by EventLoop on every wake. Repaints the watch face (partial flush)
+        /// and returns the desired next-tick timeout. Tick budget:
+        ///   * Finger held       = 16 ms  (smooth 60 Hz - matches Rust port main.rs:612)
+        ///   * Idle watchface    = 1000 ms (only seconds digit changes)
+        /// </summary>
+        static int OnTick(EventLoop.WakeReason reason)
+        {
+            try
+            {
+                _watchface.Tick();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Watchface] EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return _fingerDown ? 16 : 1000;
         }
 
         static void EnablePowerRails()
@@ -53,7 +91,7 @@ namespace SpawnWear
                 Debug.WriteLine("[Power] P1 - Opening AXP2101 I2C device @ 0x" + BoardPins.AxpI2cAddress.ToString("X2"));
                 var axpI2c = BoardSetup.OpenI2cDevice(BoardPins.AxpI2cAddress);
                 var axp = new Axp2101Driver(axpI2c);
-                Debug.WriteLine("[Power] P2 - Enabling DC1 + ALDO1 @ 3300mV (display rails)");
+                Debug.WriteLine("[Power] P2 - Defensive rail enable (DC1 + ALDO1/2/3)");
                 axp.EnableDisplayRails();
                 Debug.WriteLine("[Power] P3 - Display rails up");
             }
@@ -63,7 +101,7 @@ namespace SpawnWear
             }
         }
 
-        static void StartDisplay()
+        static Bitmap StartDisplay()
         {
             try
             {
@@ -101,36 +139,21 @@ namespace SpawnWear
                 }
                 catch (OutOfMemoryException)
                 {
-                    Debug.WriteLine("[Display] D5-fallback - FullScreen OOM, will use direct Write");
+                    Debug.WriteLine("[Display] D5-fail - FullScreen OOM");
+                    _displayStatus = "EX:NoFB";
+                    return null;
                 }
 
-                if (fb != null)
+                if (fb == null)
                 {
-                    _displayStatus = "P";
-                    Debug.WriteLine("[Display] D5 - Painting solid WHITE via FullScreen Bitmap");
-                    fb.Clear();
-                    fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, Color.White);
-                    fb.Flush();
-                    _displayStatus = "OK";
-                    Debug.WriteLine("[Display] D6 - Solid white flushed, status=OK");
+                    Debug.WriteLine("[Display] D5-fail - FullScreen returned null");
+                    _displayStatus = "EX:NoFB";
+                    return null;
                 }
-                else
-                {
-                    // FullScreen unavailable - graphics heap too small for the per-pixel PAL
-                    // bitmap. Fall back to direct DisplayControl.Write with a small WHITE
-                    // square so we still see SOMETHING on the panel and confirm the bus works.
-                    // 100x100 = 20KB ushort[], small enough to fit in any managed heap.
-                    Debug.WriteLine("[Display] D5b - Allocating 100x100 white pixel array");
-                    ushort[] white = new ushort[100 * 100];
-                    for (int i = 0; i < white.Length; i++)
-                    {
-                        white[i] = 0xFFFF;
-                    }
-                    Debug.WriteLine("[Display] D6b - DisplayControl.Write(155, 200, 100, 100, white)");
-                    DisplayControl.Write(155, 200, 100, 100, white);
-                    _displayStatus = "Wsq";
-                    Debug.WriteLine("[Display] D7b - 100x100 white square written, status=Wsq");
-                }
+
+                _displayStatus = "OK";
+                Debug.WriteLine("[Display] D5 - Framebuffer ready (" + BoardPins.LcdWidth + "x" + BoardPins.LcdHeight + ")");
+                return fb;
             }
             catch (Exception ex)
             {
@@ -138,6 +161,7 @@ namespace SpawnWear
                 if (t.Length > 12) t = t.Substring(0, 12);
                 _displayStatus = "EX:" + t;
                 Debug.WriteLine("[Display] EX " + ex.GetType().Name + ": " + ex.Message);
+                return null;
             }
         }
 
@@ -162,9 +186,22 @@ namespace SpawnWear
 
                 touch.TouchEvent += (sender, snapshot) =>
                 {
-                    Debug.WriteLine("[Touch] fingers=" + snapshot.FingerCount +
-                                    " p1=(" + snapshot.X1 + "," + snapshot.Y1 + ")" +
-                                    (snapshot.FingerCount > 1 ? " p2=(" + snapshot.X2 + "," + snapshot.Y2 + ")" : ""));
+                    bool wasDown = _fingerDown;
+                    _fingerDown = snapshot.FingerCount > 0;
+                    if (_fingerDown) _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+
+                    // Wake the main loop so it picks up the new finger state and applies
+                    // the appropriate tick budget (16 ms while held, 1 s when idle).
+                    if (_eventLoop != null) _eventLoop.Wake();
+
+                    if (_fingerDown && !wasDown)
+                    {
+                        Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ")");
+                    }
+                    else if (!_fingerDown && wasDown)
+                    {
+                        Debug.WriteLine("[Touch] UP");
+                    }
                 };
             }
             catch (Exception ex)

@@ -25,6 +25,9 @@
     <Compile Include="Drivers\Touch\Ft3168Driver.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Services\EventLoop.cs" />
+    <Compile Include="UI\SegmentFont.cs" />
+    <Compile Include="UI\Watchface.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
