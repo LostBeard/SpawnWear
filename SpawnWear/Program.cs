@@ -29,8 +29,13 @@ namespace SpawnWear
 
             EnablePowerRails();
             StartTouchProbe();
-            StartBleAdvertising();
+            // StartDisplay must run BEFORE BLE - the graphics heap allocates the
+            // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
+            // when it starts; if BLE wins the race for PSRAM the graphics heap gets
+            // whatever scraps remain (~100KB observed) and FullScreen Bitmap OOMs.
+            // Order: power -> touch -> display (claims PSRAM) -> BLE.
             StartDisplay();
+            StartBleAdvertising();
 
             int beat = 0;
             while (true)
@@ -80,26 +85,52 @@ namespace SpawnWear
 
                 _displayStatus = "I";
                 Debug.WriteLine("[Display] D3 - DisplayControl.Initialize");
-                uint maxBuffer = DisplayControl.Initialize(spi, screen);
+                // GraphicsDriver.GetSize returns GetWidthInWords(w) * h * 4 = 410*502*2 = 411,640
+                // bytes (16bpp PAL bitmap, row-aligned to 4-byte words). The DisplayControl
+                // IsFullScreenBufferAvailable check uses w*h*3/8 = 77KB which is bogus - the
+                // actual native Bitmap allocation needs ~412KB. Request 512KB so FullScreen
+                // can allocate with headroom for fonts/glyphs.
+                uint maxBuffer = DisplayControl.Initialize(spi, screen, 512 * 1024);
                 Debug.WriteLine("[Display] D4 - Initialize returned, maxBuffer=" + maxBuffer);
                 _displayStatus = "F";
 
-                Bitmap fb = DisplayControl.FullScreen;
-                if (fb == null)
+                Bitmap fb = null;
+                try
                 {
-                    _displayStatus = "NoFb";
-                    Debug.WriteLine("[Display] D5-fail - FullScreen bitmap null");
-                    return;
+                    fb = DisplayControl.FullScreen;
+                }
+                catch (OutOfMemoryException)
+                {
+                    Debug.WriteLine("[Display] D5-fallback - FullScreen OOM, will use direct Write");
                 }
 
-                _displayStatus = "P";
-                Debug.WriteLine("[Display] D5 - Painting solid red");
-                fb.Clear();
-                fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, Color.Red);
-                fb.Flush();
-
-                _displayStatus = "OK";
-                Debug.WriteLine("[Display] D6 - Solid red flushed, status=OK");
+                if (fb != null)
+                {
+                    _displayStatus = "P";
+                    Debug.WriteLine("[Display] D5 - Painting solid WHITE via FullScreen Bitmap");
+                    fb.Clear();
+                    fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, Color.White);
+                    fb.Flush();
+                    _displayStatus = "OK";
+                    Debug.WriteLine("[Display] D6 - Solid white flushed, status=OK");
+                }
+                else
+                {
+                    // FullScreen unavailable - graphics heap too small for the per-pixel PAL
+                    // bitmap. Fall back to direct DisplayControl.Write with a small WHITE
+                    // square so we still see SOMETHING on the panel and confirm the bus works.
+                    // 100x100 = 20KB ushort[], small enough to fit in any managed heap.
+                    Debug.WriteLine("[Display] D5b - Allocating 100x100 white pixel array");
+                    ushort[] white = new ushort[100 * 100];
+                    for (int i = 0; i < white.Length; i++)
+                    {
+                        white[i] = 0xFFFF;
+                    }
+                    Debug.WriteLine("[Display] D6b - DisplayControl.Write(155, 200, 100, 100, white)");
+                    DisplayControl.Write(155, 200, 100, 100, white);
+                    _displayStatus = "Wsq";
+                    Debug.WriteLine("[Display] D7b - 100x100 white square written, status=Wsq");
+                }
             }
             catch (Exception ex)
             {

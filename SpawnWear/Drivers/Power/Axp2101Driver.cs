@@ -24,8 +24,12 @@ namespace SpawnWear.Drivers.Power
         // AXP2101 register map (subset).
         const byte REG_DC_ONOFF = 0x80;     // DC1-DC5 on/off control
         const byte REG_DC_VOL0 = 0x82;      // DCDC1 voltage setting
-        const byte REG_LDO_ONOFF0 = 0x90;   // ALDO1-ALDO4 on/off control
-        const byte REG_LDO_VOL0 = 0x92;     // ALDO1 voltage setting
+        const byte REG_LDO_ONOFF0 = 0x90;   // ALDO1-4 + BLDO1-2 + CPUSLDO + DLDO1 on/off
+        const byte REG_LDO_ONOFF1 = 0x91;   // DLDO2 on/off
+        const byte REG_ALDO1_VOL = 0x92;    // ALDO1 voltage (mV - 500) / 100
+        const byte REG_ALDO2_VOL = 0x93;    // ALDO2 voltage (mV - 500) / 100
+        const byte REG_ALDO3_VOL = 0x94;    // ALDO3 voltage
+        const byte REG_ALDO4_VOL = 0x95;    // ALDO4 voltage
 
         readonly I2cDevice _i2c;
 
@@ -40,15 +44,23 @@ namespace SpawnWear.Drivers.Power
         /// </summary>
         public void EnableDisplayRails()
         {
-            // DC1 = main 3.3 V rail. Voltage register expects (mV - 1500) / 100.
-            WriteReg(REG_DC_VOL0, (byte)((3300 - 1500) / 100)); // = 18 = 0x12
+            // Empirically (verified 2026-05-03 by reading AXP2101 register state),
+            // every rail (DC1-4, ALDO1-4, BLDO1-2, CPUSLDO, DLDO1-2) is already
+            // enabled at AXP2101 POR / bootloader handoff on this watch. The
+            // panel does not need any explicit rail toggling. We re-write the
+            // 3.3V voltages defensively (in case a future power-save state has
+            // dropped them) and bit-OR the existing enable register so we
+            // never accidentally turn off a rail another driver depends on.
             byte dcCtrl = ReadReg(REG_DC_ONOFF);
-            WriteReg(REG_DC_ONOFF, (byte)(dcCtrl | 0x01));
-
-            // ALDO1 = display / peripheral 3.3 V rail. Voltage register expects (mV - 500) / 100.
-            WriteReg(REG_LDO_VOL0, (byte)((3300 - 500) / 100)); // = 28 = 0x1C
             byte ldoCtrl = ReadReg(REG_LDO_ONOFF0);
-            WriteReg(REG_LDO_ONOFF0, (byte)(ldoCtrl | 0x01));
+
+            WriteReg(REG_DC_VOL0, (byte)((3300 - 1500) / 100)); // DC1 = 3.3V
+            WriteReg(REG_ALDO1_VOL, (byte)((3300 - 500) / 100)); // ALDO1 = 3.3V
+            WriteReg(REG_ALDO2_VOL, (byte)((3300 - 500) / 100)); // ALDO2 = 3.3V
+            WriteReg(REG_ALDO3_VOL, (byte)((3300 - 500) / 100)); // ALDO3 = 3.3V
+
+            WriteReg(REG_DC_ONOFF, (byte)(dcCtrl | 0x01));        // DC1 on
+            WriteReg(REG_LDO_ONOFF0, (byte)(ldoCtrl | 0x07));    // ALDO1+2+3 on
         }
 
         public byte ReadReg(byte register)

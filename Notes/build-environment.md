@@ -363,6 +363,41 @@ After touching, blow away `build/` and re-run cmake configure + cmake build. The
 
 Ninja issue [#1704: Dates in the future cause "still dirty after 100 tries"](https://github.com/ninja-build/ninja/issues/1704) covers the underlying behavior. The nf-interpreter community apparently doesn't hit this on Linux because tar (used in their CI) handles ZIP archive timestamps differently than Windows file extraction.
 
+## sdkconfig caching: the master sdkconfig wins, defconfig changes are silently ignored
+
+**The trap:** ESP-IDF saves the resolved menuconfig to `${CMAKE_SOURCE_DIR}/sdkconfig` (the "master sdkconfig", at the nf-interpreter root). On subsequent builds it reads the master FIRST and falls back to the defconfig only if the master is missing. So changing the defconfig (e.g. switching `CONFIG_SDK_CONFIG_FILE`, flipping `CONFIG_SPIRAM_MODE_OCT=y`) **does not take effect** as long as the master sdkconfig still exists.
+
+**Symptom:** built `sdkconfig.h` shows the OLD values (e.g. `CONFIG_SPIRAM_MODE_QUAD 1`) even though both `targets/ESP32/defconfig/<preset>_defconfig` and the referenced `targets/ESP32/_IDF/sdkconfig.default_*.esp32s3` correctly say `CONFIG_SPIRAM_MODE_OCT=y`.
+
+**Fix:** delete `${CMAKE_SOURCE_DIR}/sdkconfig` before rebuilding. Next build regenerates it from the defconfig + sdkconfig.default file pair.
+
+```bash
+rm D:/users/tj/Projects/nf-interpreter/nf-interpreter/sdkconfig
+# now rebuild - the new defaults will be picked up
+```
+
+This bit us 2026-05-03 chasing why our QSPI watch was getting only ~31KB managed heap despite the defconfig being switched to `sdkconfig.default_octal_ble.esp32s3`. The build was still in QUAD mode the whole time, the chip auto-detected, fell back to a tiny internal-RAM heap, and graphics buffers couldn't allocate.
+
+## ESP32-S3 octal PSRAM + nanoFramework: extra config beyond `CONFIG_SPIRAM_MODE_OCT=y`
+
+For boards with octal-mode 8MB PSRAM (ESP32-S3R8, including the SpawnWear watch), shipping `CONFIG_SPIRAM_MODE_OCT=y` alone is **not enough**. You also want:
+
+```
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y   # XIP code from PSRAM, frees ~hundreds of KB internal RAM
+CONFIG_SPIRAM_RODATA=y               # rodata segment in PSRAM
+CONFIG_SPIRAM_SPEED_80M=y            # 80 MHz instead of default 40 MHz (doubles PSRAM bandwidth)
+```
+
+Without `FETCH_INSTRUCTIONS` + `RODATA`, instructions and rodata stay in internal RAM and starve the graphics framebuffer / managed heap. The Waveshare LVGL vendor demo enables all three by default.
+
+Also enable boot-info logs while bringing up new hardware - the managed-heap allocator prints its size via `ESP_LOGI`, and the default `CONFIG_LOG_DEFAULT_LEVEL_NONE` silences it:
+
+```
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y      # so Memory.cpp's "Managed heap allocated: N (from max:M)" shows up
+```
+
+The SpawnWear-specific defaults file `targets/ESP32/_IDF/sdkconfig.default_octal_ble_qspi.esp32s3` includes all four. The `ESP32_S3_BLE_QSPI_defconfig` references it via `CONFIG_SDK_CONFIG_FILE=`.
+
 ## Known warnings
 
 - **CMAKE_OBJECT_PATH_MAX warning** on Windows: cmake warns that some intermediate object paths exceed 250 characters and the build "may not work correctly". In practice the build completes, but if it fails on a long-path link error, move the entire `_vendor-nf-interpreter` clone to a shorter root (e.g. `C:\nf-interpreter\`).
