@@ -391,6 +391,38 @@ Two important gotchas — full details in **[`Notes/flashing.md`](Notes/flashing
 
 ---
 
+## Acknowledgements
+
+SpawnWear stands on the shoulders of work other people did first. The C# port wouldn't exist in its current shape without the following references — every architectural choice we make either matches one of these or has a documented reason it diverges. Where we ship code patterns lifted directly from these projects, the relevant SpawnWear source file calls them out by name and link.
+
+### Hardware reference firmware
+
+- **[`infinition/waveshare-watch-rs`](https://github.com/infinition/waveshare-watch-rs)** — Rust firmware for this exact watch. The single most important reference in the repo. The CO5300 init sequence, AXP2101 rail wiring, FT3168 reset timing, and the event-driven `select3(timer, touch_int, button_int)` main-loop pattern with a multi-tier tick budget (screen-off=30 s / AOD=10 s / watchface=1 s / touch-held=60 Hz) are all modeled on this work. The Hackaday article that surfaced it ([rust-y firmware for waveshare smartwatch](https://hackaday.com/2026/04/11/rust-y-firmware-for-waveshare-smartwatch/)) and its comment thread had additional gotchas we relied on. **Power efficiency by being event-based as much as possible** is the design principle we copied directly. Cloned to `_vendor-rust-watch/` outside the repo for cross-reference.
+
+### CO5300 QSPI reference implementation
+
+- **[`moononournation/Arduino_GFX`](https://github.com/moononournation/Arduino_GFX)** — the Arduino GFX library; specifically `Arduino_ESP32QSPI` and `Arduino_CO5300`. Our `Qspi_To_Display.cpp` matches the wire-level transaction pattern of `Arduino_ESP32QSPI` byte for byte (manual CS via `gpio_set_level`, `SPI_TRANS_MULTILINE_CMD | SPI_TRANS_MULTILINE_ADDR` flags on register writes, `SPI_TRANS_MODE_QIO` on pixel chunks, device-level `command_bits=8` / `address_bits=24` with continuation-chunk overrides via `spi_transaction_ext_t`). Bundled in the Waveshare vendor demo at `_vendor-waveshare-demo/examples/Arduino-v3.2.0/libraries/Arduino_GFX/`.
+- **[`waveshareteam/ESP32-S3-Touch-AMOLED-2.06`](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.06)** — Waveshare's official Arduino + ESP-IDF demos for the watch. Authoritative source for pin numbers (`pin_config.h`), AXP2101 power-rail expectations, FT3168 sample integration, and the LVGL display + touch reference flow. Cloned to `_vendor-waveshare-demo/`.
+
+### Other ESP32-S3 smartwatch firmwares we read
+
+These didn't end up driving any specific SpawnWear code path, but they were valuable cross-references during the dark-screen debug week (2026-04-29 → 2026-05-03). If you're picking up a similar board, read them too:
+
+- [`joaquimorg/OLEDS3Watch`](https://github.com/joaquimorg/OLEDS3Watch)
+- [`joaquimorg/S3Watch`](https://github.com/joaquimorg/S3Watch)
+- [`hambooooo/hamboo-rs`](https://github.com/hambooooo/hamboo-rs)
+- [`survivorhao/esp32s3watch`](https://github.com/survivorhao/esp32s3watch)
+
+### Frameworks we depend on
+
+- **[nanoFramework](https://www.nanoframework.net/)** — the .NET runtime that makes this whole project possible. SpawnWear's QSPI display contributions live on the `feature/qspi-display-driver` branches of [`LostBeard/nf-interpreter`](https://github.com/LostBeard/nf-interpreter) and [`LostBeard/nanoFramework.Graphics`](https://github.com/LostBeard/nanoFramework.Graphics) and will be PR'd back upstream once verified end-to-end.
+- **[ESP-IDF v5.5.4](https://github.com/espressif/esp-idf)** — Espressif's IoT Development Framework. The SPI master + GPIO drivers we call into for the CO5300 bus.
+- **[XPowersLib](https://github.com/lewisxhe/XPowersLib)** — the C++ AXP2101 driver library; useful reference even though our managed driver is hand-rolled against the chip datasheet directly.
+
+If you find a project we leaned on that isn't credited here, file an issue and we'll add it.
+
+---
+
 ## The SpawnDev Crew
 
 Every project we work on credits the full SpawnDev team in its README. AI-and-human teamwork built this.
