@@ -163,6 +163,55 @@ Once the runtime is on the watch:
 
 `Debug.WriteLine` output streams to the Output pane, and to any external serial terminal at 921600 baud on the same COM port (only one process can hold the port at a time).
 
+## Daily app development - F5 in VS, NO bootloader dance
+
+**Once the nanoFramework runtime is on the chip, you do NOT need bootloader mode again to re-deploy the SpawnWear app.** This is the inner loop you live in for 99% of development - read it before you start the buttons-into-bootloader dance for every code change.
+
+| What you are doing | Watch state | Tool | COM port | Buttons needed |
+|---|---|---|---|---|
+| Edit C# + redeploy app (everyday) | **Runtime** | **VS F5** | **COM9** | None |
+| Update nanoCLR runtime version | Bootloader | `nanoff --update` | COM10 | Yes (BOOT during cold boot) |
+| Custom nf-interpreter rebuild | Bootloader | esptool / nf-flash-full.bat | COM10 | Yes |
+| First-time install on a virgin watch | Bootloader | `nanoff --update --masserase` | COM10 | Yes |
+| Recovering from `nanoff --deploy` E2002 | Bootloader | esptool / nf-flash-full.bat | COM10 | Yes |
+
+**The everyday workflow:**
+
+1. Watch is in runtime mode (COM9 visible, screen black or showing whatever the app last drew).
+2. Open `SpawnWear.slnx` in Visual Studio 2022 with the nanoFramework extension installed.
+3. Edit C# code.
+4. **F5** (or Ctrl+F5 to skip the debugger). VS deploys the diff (only the .pe files that actually changed) over the wire protocol on COM9. Typical deploy: 2-5 seconds.
+5. Set breakpoints, watch the Output window for `Debug.WriteLine`, step through code.
+6. Stop debugging, edit, F5 again. Loop.
+
+**Cycle time on this loop is ~10 seconds. Cycle time on the bootloader+esptool path is ~90 seconds.** Choose accordingly.
+
+### Why this trips people up
+
+The buttons-into-bootloader dance documented above is for **runtime image updates** - rewriting `bootloader.bin` + `partition-table.bin` + `nanoCLR.bin` at flash addresses 0x0 / 0x8000 / 0x10000. The watch CANNOT receive a runtime update while the CLR is running; the ROM bootloader is a different protocol on a different USB-CDC class identifier.
+
+App deploys are different. The CLR exposes a wire protocol that accepts deploy commands while the runtime is alive. VS uses that path. nanoff `--deploy --image SpawnWear.bin` (with the watch in runtime mode) uses that same path.
+
+If you find yourself running the bootloader dance to deploy app code changes, **stop**. F5 in VS is the right answer.
+
+### When to fall back to the bootloader path
+
+Three legitimate reasons to do the bootloader dance during routine dev:
+
+1. **The deployed app misbehaves and `nanoff --deploy` starts failing E2002.** Once the app has booted and panicked the runtime's wire protocol, no soft path can rescue it. See `feedback_nanoff_deploy_e2002_after_app_runs.md` style note: bail to esptool full reflash via `nf-flash-full.bat`. After the recovery, you are back on the F5-in-VS loop.
+2. **You are upgrading the nanoCLR runtime image** (chasing a matched-libraries combo, picking up a new ESP-IDF version, switching between custom-built nf-interpreter outputs).
+3. **First-time install on a virgin watch.**
+
+That's it. For every other code-iteration scenario the answer is F5 in VS on COM9.
+
+### What `ExecutionMode = ProgramExited` means in custom debugger scripts
+
+If you write your own debugger client using `nanoFramework.Tools.Debugger.Net`, `device.DebugEngine.GetExecutionMode()` may return `ProgramExited, DebuggerEnabled` even while a `Main()` is actively running and reachable via VS breakpoint. Do **NOT** treat this as "user code crashed and exited". Custom probe scripts make poor crash detectors; use VS breakpoints + the Exception popup instead.
+
+(Burned 90 minutes on this 2026-05-03 - polled `ProgramExited` for 25 seconds across 5 different builds before TJ tried VS and the breakpoint hit on Main line 1 of every build.)
+
+---
+
 ## Re-flashing while the runtime is already on the chip
 
 Once the chip is running nanoFramework, **`nanoff --update` cannot reach the bootloader on its own** for native-USB ESP32-S3 boards. esptool talks to the ROM bootloader; the runtime exposes a different USB-CDC endpoint and answers its own debug protocol. nanoff trying to chip-detect against the runtime port returns:

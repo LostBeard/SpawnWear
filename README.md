@@ -351,17 +351,32 @@ These are the realities of running C# on this board today. None of them are bloc
 
 Step-by-step recipes with every gotcha live in **[`Notes/flashing.md`](Notes/flashing.md)** — read that before flashing a fresh watch.
 
-Quick reference (assumes a watch that has already had `dotnet tool install -g nanoff` run once on this machine):
+### Daily dev loop — F5 in VS, no bootloader dance
+
+Once the runtime is on the chip, **routine app deploys do NOT need bootloader mode**. Open `SpawnWear.slnx` in Visual Studio 2022 with the [.NET nanoFramework extension](https://marketplace.visualstudio.com/items?itemName=nanoframework.nanoFramework-VS2022-Extension) installed and press **F5**. The watch must be in runtime mode (COM9 in our setup), connected over USB-C. Cycle time: ~10 seconds. Breakpoints, `Debug.WriteLine` to the Output window, and step-through all work.
+
+**Do not** put the watch into bootloader mode (COM10) for every code change — that's only for the rare scenarios listed below. See [`Notes/flashing.md` → "Daily app development - F5 in VS, NO bootloader dance"](Notes/flashing.md#daily-app-development---f5-in-vs-no-bootloader-dance) for the full explanation of why.
+
+### When you DO need the bootloader-mode dance
+
+| Scenario | Why |
+|---|---|
+| First-time install on a virgin watch | No nanoFramework runtime to talk to yet |
+| Runtime image update / downgrade (`nanoff --update`) | The CLR is rewriting itself; ROM bootloader handles that |
+| Custom nf-interpreter build flashed via `esptool` / `nf-flash-full.bat` | Same — runtime + bootloader + partition table rewrite |
+| Recovery after a deployed app wedges the wire protocol (`nanoff --deploy` returns E2002) | The CLR is too sick to receive an app diff; bail to a full reflash |
+
+In all other day-to-day scenarios — editing C#, redeploying the SpawnWear app, debugging a managed exception — **F5 in VS is the answer**, not the bootloader dance.
+
+### Quick command reference
 
 ```bash
-# First flash on a brand-new watch (chip must be in bootloader mode - see Notes/flashing.md)
-nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase
+# Daily dev loop: open SpawnWear.slnx in VS 2022 + nanoFramework extension, press F5.
+# Watch must be in runtime mode (COM9). No CLI commands needed.
 
-# Subsequent runtime updates (chip must be in bootloader mode)
-nanoff --target ESP32_S3_BLE --serialport COM10 --update
-
-# Deploy SpawnWear app: Visual Studio 2022 with the nanoFramework extension
-# Open SpawnWear.slnx, F5 to deploy + run
+# Bootloader-mode operations (chip must be in bootloader, COM10 in our setup):
+nanoff --target ESP32_S3_BLE --serialport COM10 --update --masserase   # First-time install on virgin watch
+nanoff --target ESP32_S3_BLE --serialport COM10 --update               # Runtime update / version pin
 ```
 
 Two important gotchas — full details in **[`Notes/flashing.md`](Notes/flashing.md)**:
