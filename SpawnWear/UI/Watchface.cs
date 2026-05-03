@@ -19,7 +19,7 @@ namespace SpawnWear.UI
     /// Time source for V1 is uptime via <c>DateTime.UtcNow.Ticks</c>. Phase 3
     /// will swap this for a proper PCF85063 RTC reading once that driver lands.
     /// </summary>
-    public class Watchface
+    public class Watchface : IScreen
     {
         private readonly Bitmap _fb;
         private readonly int _panelWidth;
@@ -74,6 +74,16 @@ namespace SpawnWear.UI
             _axp = axp;
         }
 
+        // IScreen ----------------------------------------------------------------
+
+        void IScreen.Tick() { Tick(); }
+
+        void IScreen.OnResume() { Invalidate(); }
+
+        void IScreen.OnPause() { /* no resources to release */ }
+
+        bool IScreen.OnTap(int x, int y) => false; // let navigator cycle to next screen
+
         /// <summary>
         /// Forces the next <see cref="Tick"/> to repaint the entire panel. Call
         /// after a wake-from-sleep where panel RAM contents are not trusted.
@@ -91,7 +101,18 @@ namespace SpawnWear.UI
         /// Renders the current uptime to the framebuffer and flushes the
         /// minimum region needed. Returns true if any pixels were pushed.
         /// </summary>
-        public bool Tick()
+        public bool TickReturnsPainted()
+        {
+            return DoTick();
+        }
+
+        // Public Tick is the IScreen contract; ignores the painted-bool return.
+        public void Tick()
+        {
+            DoTick();
+        }
+
+        private bool DoTick()
         {
             // Convert uptime to HH:MM:SS. Wraps at 24h for V1.
             // DateTime.UtcNow.Ticks is wall-clock ticks (100 ns) since epoch on

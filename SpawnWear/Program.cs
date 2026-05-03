@@ -24,10 +24,23 @@ namespace SpawnWear
         // System.Runtime.CompilerServices.IsVolatile - the AutoResetEvent.Set + WaitOne
         // pair around every read/write provides happens-before ordering anyway.
         static EventLoop _eventLoop;
-        static Watchface _watchface;
+        static ScreenNavigator _nav;
         static Axp2101Driver _axp;
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
+
+        // Tap-gesture detection state. A "tap" = finger goes down, stays within
+        // a small radius for under TapMaxMs, then lifts. Anything longer is a
+        // long-press (Phase 2 dispatch); anything that moves beyond the radius
+        // is a swipe (also Phase 2). For V1 we treat any short single-finger
+        // touch as a tap and let the navigator cycle screens.
+        const int TapMaxMs = 350;
+        const int TapMaxMoveSquared = 30 * 30;
+        static long _fingerDownUtcTicks;
+        static int _fingerDownX;
+        static int _fingerDownY;
+        static int _fingerLastX;
+        static int _fingerLastY;
 
         // Power-state machine driven by time-since-last-touch. Mirrors waveshare-watch-rs
         // main.rs:613-620 multi-tier tick budget.
@@ -64,7 +77,9 @@ namespace SpawnWear
 
             if (fb != null)
             {
-                _watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                _nav = new ScreenNavigator(new IScreen[] { watchface, stats });
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
@@ -117,7 +132,7 @@ namespace SpawnWear
 
                 if (_screenState != ScreenState.Sleep)
                 {
-                    _watchface.Tick();
+                    _nav.Current.Tick();
                 }
             }
             catch (Exception ex)
@@ -145,7 +160,7 @@ namespace SpawnWear
                     if (prev == ScreenState.Sleep)
                     {
                         DisplayControl.Wake();
-                        _watchface.Invalidate();
+                        _nav.Current.Invalidate();
                     }
                     DisplayControl.SetBrightness(BrightnessActive);
                     break;
@@ -266,20 +281,38 @@ namespace SpawnWear
                 {
                     bool wasDown = _fingerDown;
                     _fingerDown = snapshot.FingerCount > 0;
-                    if (_fingerDown) _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+                    long nowTicks = DateTime.UtcNow.Ticks;
+
+                    if (_fingerDown)
+                    {
+                        _fingerLastX = snapshot.X1;
+                        _fingerLastY = snapshot.Y1;
+                        _lastTouchUtcTicks = nowTicks;
+                        if (!wasDown)
+                        {
+                            _fingerDownUtcTicks = nowTicks;
+                            _fingerDownX = snapshot.X1;
+                            _fingerDownY = snapshot.Y1;
+                            Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ")");
+                        }
+                    }
+                    else if (wasDown)
+                    {
+                        // Finger lifted. Classify as tap vs. drag/long-press.
+                        long elapsedMs = (nowTicks - _fingerDownUtcTicks) / TimeSpan.TicksPerMillisecond;
+                        int dx = _fingerLastX - _fingerDownX;
+                        int dy = _fingerLastY - _fingerDownY;
+                        bool isTap = elapsedMs < TapMaxMs && (dx * dx + dy * dy) < TapMaxMoveSquared;
+                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap);
+                        if (isTap && _nav != null && _screenState != ScreenState.Sleep)
+                        {
+                            _nav.HandleTap(_fingerLastX, _fingerLastY);
+                        }
+                    }
 
                     // Wake the main loop so it picks up the new finger state and applies
                     // the appropriate tick budget (16 ms while held, 1 s when idle).
                     if (_eventLoop != null) _eventLoop.Wake();
-
-                    if (_fingerDown && !wasDown)
-                    {
-                        Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ")");
-                    }
-                    else if (!_fingerDown && wasDown)
-                    {
-                        Debug.WriteLine("[Touch] UP");
-                    }
                 };
             }
             catch (Exception ex)
