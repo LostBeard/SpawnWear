@@ -1,8 +1,11 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.Threading;
 using nanoFramework.Device.Bluetooth;
 using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
+using nanoFramework.UI;
+using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Touch;
 
@@ -11,19 +14,21 @@ namespace SpawnWear
     public class Program
     {
         // Boot status markers encoded into the BLE device name. Pattern: 'SW-<displayStatus>-<touchStatus>'.
-        // Display intentionally Skip until the 271 KB deploy regression is resolved (see Notes/flashing.md
-        // and the Status / Milestones table in the README). Build #10 earlier 2026-05-03 confirmed the
-        // display path works end-to-end; a subsequent reproducible deploy failure at the last 824 bytes
-        // of a 271 KB deployment image keeps Graphics+Display out of the daily-deployable build for now.
-        static string _displayStatus = "Skip";
+        static string _displayStatus = "?";
         static string _touchStatus = "?";
 
         public static void Main()
         {
+            // Build #16 (2026-05-03): display + touch + advertise-only BLE.
+            // Helper services + System.Net + System.Device.Wifi removed to keep deploy total
+            // under the apparent 271 KB ceiling. BLE advertises with the SpawnWear UUID but
+            // no GATT characteristics yet - WiFi provisioning + watch profile come back when
+            // the deploy/heap budget is sorted (parked task).
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             StartTouchProbe();
             StartBleAdvertising();
+            StartDisplay();
 
             int beat = 0;
             while (true)
@@ -31,6 +36,58 @@ namespace SpawnWear
                 Debug.WriteLine("[SpawnWear] heartbeat #" + beat);
                 beat++;
                 Thread.Sleep(5000);
+            }
+        }
+
+        static void StartDisplay()
+        {
+            try
+            {
+                Debug.WriteLine("[Display] D1 - Building SpiConfiguration");
+                var spi = new SpiConfiguration(
+                    spiBus: 0,
+                    chipselect: BoardPins.LcdCs,
+                    dataCommand: -1,
+                    reset: BoardPins.LcdReset,
+                    backLight: -1);
+
+                Debug.WriteLine("[Display] D2 - Building ScreenConfiguration");
+                var screen = new ScreenConfiguration(
+                    x: BoardPins.LcdColumnOffset,
+                    y: 0,
+                    width: BoardPins.LcdWidth,
+                    height: BoardPins.LcdHeight,
+                    graphicDriver: Co5300.GraphicDriver);
+
+                _displayStatus = "I";
+                Debug.WriteLine("[Display] D3 - DisplayControl.Initialize");
+                uint maxBuffer = DisplayControl.Initialize(spi, screen);
+                Debug.WriteLine("[Display] D4 - Initialize returned, maxBuffer=" + maxBuffer);
+                _displayStatus = "F";
+
+                Bitmap fb = DisplayControl.FullScreen;
+                if (fb == null)
+                {
+                    _displayStatus = "NoFb";
+                    Debug.WriteLine("[Display] D5-fail - FullScreen bitmap null");
+                    return;
+                }
+
+                _displayStatus = "P";
+                Debug.WriteLine("[Display] D5 - Painting solid red");
+                fb.Clear();
+                fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, Color.Red);
+                fb.Flush();
+
+                _displayStatus = "OK";
+                Debug.WriteLine("[Display] D6 - Solid red flushed, status=OK");
+            }
+            catch (Exception ex)
+            {
+                string t = ex.GetType().Name;
+                if (t.Length > 12) t = t.Substring(0, 12);
+                _displayStatus = "EX:" + t;
+                Debug.WriteLine("[Display] EX " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -82,31 +139,25 @@ namespace SpawnWear
                 server.DeviceName = name;
                 Debug.WriteLine("[SpawnWear] BLE-3 - DeviceName='" + name + "'");
 
-                Debug.WriteLine("[SpawnWear] BLE-4 - Constructing WifiConfigService (no helpers)");
-                var wifi = new WifiConfigService(null, null);
-                Debug.WriteLine("[SpawnWear] BLE-5 - Calling wifi.InitializeWifiOnly()");
-                if (!wifi.InitializeWifiOnly())
+                Debug.WriteLine("[SpawnWear] BLE-4 - GattServiceProvider.Create");
+                var result = GattServiceProvider.Create(BleUuids.WifiServiceUuid);
+                if (result.Error != BluetoothError.Success)
                 {
-                    Debug.WriteLine("[SpawnWear] BLE-6-fail - InitializeWifiOnly returned false");
+                    Debug.WriteLine("[SpawnWear] BLE-5-fail - Create error=" + result.Error);
                     return;
                 }
-                Debug.WriteLine("[SpawnWear] BLE-6 - Wifi service initialized");
+                Debug.WriteLine("[SpawnWear] BLE-5 - Service created");
 
-                var serviceDataWriter = new DataWriter();
-                serviceDataWriter.WriteByte(0x01);
-
-                wifi.ServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
+                result.ServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
                 {
                     IsConnectable = true,
                     IsDiscoverable = true,
-                    ServiceData = serviceDataWriter.DetachBuffer()
                 });
-                Debug.WriteLine("[SpawnWear] BLE-7 - Advertising as '" + name + "'");
+                Debug.WriteLine("[SpawnWear] BLE-6 - Advertising as '" + name + "'");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("[SpawnWear] BLE-EX " + ex.GetType().Name + ": " + ex.Message);
-                Debug.WriteLine("[SpawnWear] BLE-EX stack: " + ex.StackTrace);
             }
         }
     }
