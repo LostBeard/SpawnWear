@@ -62,6 +62,30 @@ These are the constraints from the chip itself, not the driver's choice:
 4. **Min 2-line writes.** Same alignment story for the y axis - 1-line-tall rectangles need the row duplicated. The Rust port handles this in `fill_contiguous` with a `needs_row_dup` flag.
 5. **MIPI DCS sleep order.** Power on: SLPOUT (`0x11`) -> wait 120ms -> DISPON (`0x29`) -> wait 20ms. Power off: DISPOFF (`0x28`) -> wait 20ms -> SLPIN (`0x10`) -> wait 120ms. Skipping the delays leaves the panel in an inconsistent state.
 
+### Quirk #2 case study: stale-pixel slivers on partial flush (2026-05-03)
+
+**Symptom:** the SpawnWear V1 watch face flushed `(x=67, y=219, w=276, h=64)` once per second to update the seconds digit. Every second-tick left small slivers of the previous digit visible at the left edge of the digits region.
+
+**Root cause:** `x_start = 67` is odd. Per quirk #2 the CO5300 silently snapped the address window so the columns it actually wrote to disagreed with the columns the C# code had cleared via `Bitmap.FillRectangle`. The framebuffer was right; the panel's RAM was off-by-one. No error code was ever returned - the chip happily accepted the malformed window and wrote pixels at its own preferred alignment.
+
+**Detection rule:** stale slivers are NOT visible in a static rendering. They only appear when the underlying pixels CHANGE between flushes. **Run a "9 → 0 → 9" digit-cycle test on real hardware as part of bring-up for any new partial-flush surface.**
+
+**Surgical fix (managed-side, what we shipped first):**
+
+```csharp
+int alignedX     = digitsX & ~1;
+int alignedY     = digitsY & ~1;
+int alignedRight = (digitsX + digitsWidth  - 1) | 1;
+int alignedBottom= (digitsY + digitsHeight - 1) | 1;
+int alignedW     = alignedRight - alignedX + 1;
+int alignedH     = alignedBottom - alignedY + 1;
+fb.FillRectangle(alignedX, alignedY, alignedW, alignedH, Color.Black);
+// ... draw inside the original bounds ...
+fb.Flush(alignedX, alignedY, alignedW, alignedH);
+```
+
+**Long-term fix (still TODO at the time of this note):** bake the alignment + min-2-pixel rules into `nf-interpreter/src/nanoFramework.Graphics/Graphics/Displays/Qspi_To_Display.cpp::SetWindowX16bitsY16Bit` (or a CO5300-specific override) so any consumer of `Bitmap.Flush(x, y, w, h)` gets correct pixels without having to know about the quirk. Until that lands, every managed caller of partial flush MUST do the rounding themselves and the bug WILL re-surface in the first new screen that doesn't.
+
 ## Init sequence (canonical)
 
 Hardware reset:
