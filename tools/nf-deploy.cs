@@ -68,27 +68,48 @@ Console.WriteLine($"Using VS bundled DLL: {dllPath}");
 
 var asm = Assembly.LoadFrom(dllPath);
 
-// Collect .pe files: bin/Debug first (covers SpawnWear.pe + standard refs), then
-// scan packages/*/lib/*.pe to pick up package-shipped PEs that MSBuild's nfproj
-// targets failed to copy (warning MSB3030 fires for any package missing a .pdbx
-// file, which silently breaks the .pe copy step). De-dupe by filename, bin/Debug
-// wins on collision (project's own build output is freshest).
+// Collect .pe files: bin/Debug first (covers SpawnWear.pe + the standard refs that
+// MSBuild successfully copies), then for any nfproj Reference whose .pe is NOT in
+// bin/Debug we grab it from packages/ (covers the spawnwear-1 packages where
+// missing .pdbx breaks MSBuild's .pe copy step).
+//
+// We do NOT blindly scan packages/ for every .pe - doing that includes assemblies
+// the user app doesn't reference, which still get deployed and load into the runtime
+// heap, which can starve the BLE host stack and cause OOM at GattLocalCharacteristic
+// allocation time. The .nfproj Reference list is the right allow-list.
 var peByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 foreach (var f in Directory.GetFiles(binDir, "*.pe", SearchOption.TopDirectoryOnly))
 {
     peByName[Path.GetFileName(f)] = f;
 }
 
-// Scan ../packages OR the project parent's packages folder for additional .pe files.
-// Resolve relative to binDir: typical nfproj layout is <repo>/<proj>/bin/Debug, with
-// packages at <repo>/packages.
 var projectDir = Path.GetDirectoryName(Path.GetDirectoryName(binDir));
+var nfproj = projectDir != null ? Directory.GetFiles(projectDir, "*.nfproj").FirstOrDefault() : null;
+var allowedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+if (nfproj != null)
+{
+    var nfprojXml = File.ReadAllText(nfproj);
+    foreach (var line in nfprojXml.Split('\n'))
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(line, @"<Reference\s+Include=""([^""]+)""");
+        if (m.Success) allowedAssemblies.Add(m.Groups[1].Value.Trim());
+    }
+    if (allowedAssemblies.Count > 0)
+    {
+        Console.WriteLine($"Project references {allowedAssemblies.Count} assemblies from {Path.GetFileName(nfproj)}");
+    }
+}
+
 var packagesDir = projectDir != null ? Path.Combine(Path.GetDirectoryName(projectDir) ?? "", "packages") : null;
 if (packagesDir != null && Directory.Exists(packagesDir))
 {
     foreach (var f in Directory.GetFiles(packagesDir, "*.pe", SearchOption.AllDirectories))
     {
         var name = Path.GetFileName(f);
+        var assemblyName = Path.GetFileNameWithoutExtension(name);
+        // If we have a nfproj allow-list, gate package .pe by it. Otherwise include all
+        // (preserves old behavior when called from outside an nfproj-tree).
+        if (allowedAssemblies.Count > 0 && !allowedAssemblies.Contains(assemblyName)) continue;
         if (!peByName.ContainsKey(name)) peByName[name] = f;
     }
 }
@@ -212,7 +233,7 @@ var assemblyBytes = peFiles.Select(p => File.ReadAllBytes(p)).ToList();
 var paramsForDeploy = deploymentExecute.GetParameters();
 object[] callArgs = new object[paramsForDeploy.Length];
 callArgs[0] = assemblyBytes;
-callArgs[1] = false;  // rebootAfterDeploy - reboot manually after
+callArgs[1] = true;   // rebootAfterDeploy - let DeploymentExecute handle the reboot, same as VS
 if (paramsForDeploy.Length >= 3) callArgs[2] = false; // skipErase = false (full erase + write)
 
 // Build IProgress<MessageWithProgress> + IProgress<string> instances so the deploy
@@ -256,14 +277,10 @@ if (!ok)
     return 1;
 }
 
-// Manual reboot via the wire protocol's RebootDevice. NormalReboot does a chip-level reset.
-Console.WriteLine("Deploy OK. Rebooting CLR manually...");
-var rebootOptionsType = asm.GetType("nanoFramework.Tools.Debugger.RebootOptions");
-var normalReboot = Enum.Parse(rebootOptionsType, "NormalReboot");
-var rebootMi = engineType.GetMethods().First(m => m.Name == "RebootDevice" && m.GetParameters().Length == 2);
-rebootMi.Invoke(engine, new object[] { normalReboot, null });
-
-Console.WriteLine($"Reboot sent. Capturing Debug.WriteLine output for {captureSeconds}s...");
+// rebootAfterDeploy=true above means DeploymentExecute already restarted the CLR.
+// Same path VS uses; no manual reboot needed (and manual reboot was leaving the
+// runtime in a state where Main wasn't actually re-running fresh).
+Console.WriteLine($"Deploy + reboot OK. Capturing Debug.WriteLine output for {captureSeconds}s...");
 await Task.Delay(captureSeconds * 1000);
 Console.WriteLine("Done.");
 return 0;

@@ -11,17 +11,15 @@ namespace SpawnWear
     public class Program
     {
         // Boot status markers encoded into the BLE device name. Pattern: 'SW-<displayStatus>-<touchStatus>'.
-        // displayStatus="Skip" because Graphics packages are temporarily out for deploy-size bisect.
+        // Display intentionally Skip until the 271 KB deploy regression is resolved (see Notes/flashing.md
+        // and the Status / Milestones table in the README). Build #10 earlier 2026-05-03 confirmed the
+        // display path works end-to-end; a subsequent reproducible deploy failure at the last 824 bytes
+        // of a 271 KB deployment image keeps Graphics+Display out of the daily-deployable build for now.
         static string _displayStatus = "Skip";
         static string _touchStatus = "?";
 
         public static void Main()
         {
-            // Build #14 (2026-05-03): no Graphics. Touch + WifiOnly BLE only.
-            // Investigating a deploy regression at ~271 KB total (the size of the full
-            // BLE+Graphics+Touch deploy). Smaller deploys land cleanly. This build is
-            // ~175 KB and validates the Wifi-only BLE path while we figure out the size
-            // issue. Display will return after the deploy issue is resolved.
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             StartTouchProbe();
