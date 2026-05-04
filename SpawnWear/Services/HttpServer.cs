@@ -1,4 +1,5 @@
 using nanoFramework.UI;
+using SpawnWear.AppContracts;
 using SpawnWear.UI;
 using System;
 using System.Diagnostics;
@@ -35,6 +36,27 @@ namespace SpawnWear.Services
         Socket _listener;
         Thread _thread;
         bool _running;
+        LoadedAppScreen _appLoader;
+        ScreenNavigator _navigator;
+        int _appLoaderScreenIndex = -1;
+
+        /// <summary>Wire the LoadedAppScreen + navigator so /loadapp can
+        /// activate dynamically-loaded apps. Called once at boot from
+        /// Program.Main after the navigator is constructed.</summary>
+        public void AttachAppLoader(LoadedAppScreen loader, ScreenNavigator nav, int loaderScreenIndex)
+        {
+            _appLoader = loader;
+            _navigator = nav;
+            _appLoaderScreenIndex = loaderScreenIndex;
+        }
+
+        /// <summary>Convenience: caller doesn't have to know the screen index
+        /// just to attach. The matching navigator + index pair are wired
+        /// from Program.Main when the LoadedAppScreen is created.</summary>
+        public void AttachAppLoader(LoadedAppScreen loader)
+        {
+            _appLoader = loader;
+        }
 
         public HttpServer(Bitmap fb, int panelWidth, int panelHeight, int port = 80)
         {
@@ -127,9 +149,9 @@ namespace SpawnWear.Services
             {
                 ServeScreenshot(client);
             }
-            else if (path == "/loadpe" && method == "POST")
+            else if (path == "/loadapp" && method == "POST")
             {
-                ServeLoadPe(client, reqHeader, buf, n, headerEnd);
+                ServeLoadApp(client, reqHeader, buf, n, headerEnd);
             }
             else
             {
@@ -147,27 +169,87 @@ namespace SpawnWear.Services
             return -1;
         }
 
-        // POST /loadpe - body is a raw nanoFramework .pe assembly. Loads it via
-        // Assembly.Load(byte[]), finds HelloWorldApp.HelloWorldPayload, invokes
-        // Greet() via reflection, returns the result. Phase 8 SD-card-loadable
-        // apps verification harness; proves the dynamic-load + invoke path
-        // works on real silicon.
-        void ServeLoadPe(Socket client, string reqHeader, byte[] firstChunk, int firstLen, int headerEnd)
+        // POST /loadapp - body is a raw nanoFramework .pe assembly that
+        // exports a class implementing SpawnWear.AppContracts.ISpawnApp.
+        // Finds the implementer, instantiates it, hands it to the firmware's
+        // LoadedAppScreen, returns "OK: <app name>". The launcher's APP
+        // tile then opens the running app.
+        void ServeLoadApp(Socket client, string reqHeader, byte[] firstChunk, int firstLen, int headerEnd)
         {
+            if (_appLoader == null)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp loader not attached");
+                return;
+            }
             int contentLength = ParseContentLength(reqHeader);
             if (contentLength <= 0)
             {
-                ServeText(client, "400 Bad Request\r\n\r\nMissing or invalid Content-Length");
+                ServeText(client, "400 Bad Request\r\n\r\nMissing Content-Length");
                 return;
             }
-            Debug.WriteLine("[LoadPe] receiving " + contentLength + " bytes");
+            byte[] payload = ReadBody(client, contentLength, firstChunk, firstLen, headerEnd);
 
-            // Body bytes already in firstChunk after headerEnd.
+            string result;
+            try
+            {
+                var asm = System.Reflection.Assembly.Load(payload);
+                if (asm == null) { result = "ERROR: Assembly.Load returned null"; }
+                else
+                {
+                    System.Type[] types;
+                    try { types = asm.GetTypes(); } catch { types = new System.Type[0]; }
+                    System.Type appType = null;
+                    foreach (var t in types)
+                    {
+                        if (t == null || !t.IsClass || t.IsAbstract) continue;
+                        var ifaces = t.GetInterfaces();
+                        foreach (var i in ifaces)
+                        {
+                            if (i == typeof(ISpawnApp)) { appType = t; break; }
+                        }
+                        if (appType != null) break;
+                    }
+                    if (appType == null) { result = "ERROR: no ISpawnApp implementer in assembly"; }
+                    else
+                    {
+                        // nanoFramework's mscorlib doesn't ship Activator;
+                        // use the parameterless constructor directly.
+                        var ctor = appType.GetConstructor(new System.Type[0]);
+                        if (ctor == null) { result = "ERROR: app type has no parameterless constructor"; }
+                        else
+                        {
+                            var instance = (ISpawnApp)ctor.Invoke(null);
+                            if (_appLoader.SetApp(instance))
+                            {
+                                result = "OK: " + instance.Name;
+                                Debug.WriteLine("[LoadApp] activated: " + instance.Name);
+                            }
+                            else
+                            {
+                                result = "ERROR: app refused activation";
+                            }
+                        }
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
+                Debug.WriteLine("[LoadApp] " + result);
+            }
+
+            string body = result + "\r\n";
+            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
+            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
+            client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
+        }
+
+        byte[] ReadBody(Socket client, int contentLength, byte[] firstChunk, int firstLen, int headerEnd)
+        {
             byte[] payload = new byte[contentLength];
             int already = (headerEnd > 0) ? (firstLen - headerEnd) : 0;
             if (already > 0) System.Array.Copy(firstChunk, headerEnd, payload, 0, already);
-
-            // Read remaining body.
             int got = already;
             byte[] readBuf = new byte[1024];
             while (got < contentLength)
@@ -178,43 +260,7 @@ namespace SpawnWear.Services
                 System.Array.Copy(readBuf, 0, payload, got, copyN);
                 got += copyN;
             }
-            Debug.WriteLine("[LoadPe] received " + got + "/" + contentLength + " bytes");
-
-            string result;
-            try
-            {
-                var asm = System.Reflection.Assembly.Load(payload);
-                Debug.WriteLine("[LoadPe] Assembly.Load returned: " + (asm != null ? asm.FullName : "null"));
-                if (asm == null) { result = "ERROR: Assembly.Load returned null"; }
-                else
-                {
-                    var t = asm.GetType("HelloWorldApp.HelloWorldPayload");
-                    Debug.WriteLine("[LoadPe] GetType returned: " + (t != null ? t.FullName : "null"));
-                    if (t == null) { result = "ERROR: type HelloWorldApp.HelloWorldPayload not found"; }
-                    else
-                    {
-                        var m = t.GetMethod("Greet");
-                        Debug.WriteLine("[LoadPe] GetMethod Greet returned: " + (m != null ? m.Name : "null"));
-                        if (m == null) { result = "ERROR: method Greet not found"; }
-                        else
-                        {
-                            var ret = m.Invoke(null, null);
-                            result = "OK: " + (ret != null ? ret.ToString() : "null");
-                        }
-                    }
-                }
-            }
-            catch (System.Exception ex)
-            {
-                result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
-                Debug.WriteLine("[LoadPe] " + result);
-            }
-
-            string body = result + "\r\n";
-            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
-            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
-            client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
+            return payload;
         }
 
         static int ParseContentLength(string reqHeader)

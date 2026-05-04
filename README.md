@@ -7,9 +7,10 @@ A small wearable OS - written in C# on .NET nanoFramework - for the **Waveshare 
 <p align="center">
   <img src="screenshots/launcher-2026-05-05.png" alt="SpawnWear launcher screenshot 2026-05-05" width="240">
   <img src="screenshots/about-2026-05-05.png" alt="SpawnWear About screen 2026-05-05" width="240">
+  <img src="screenshots/counter-app-2026-05-05.png" alt="SpawnWear Counter demo app 2026-05-05" width="240">
 </p>
 
-Captured live over WiFi from the watch (`http://<watch-ip>:8080/`). 3x3 launcher with status bar (time + USB + WiFi + battery) and 5-page indicator at the bottom; the About screen consumes Power / RTC / WiFi data through the new `IServiceHost` contract. CLOCK / STATS / SETTINGS / ABOUT are functional today; MUSIC / VIDEO / GALLERY / WIFI / VOICE are placeholders for apps that ship in later phases.
+Captured live over WiFi from the watch (`http://<watch-ip>:8080/`). Left: 3x3 launcher with status bar (time + USB + WiFi + battery), CLOCK / ABOUT / WIFI functional, APP tile reserved for runtime-loaded apps. Middle: About screen consumes Power / RTC / WiFi data through the new `IServiceHost` contract. Right: a CounterApp demo running on the watch - the **first dynamically-loaded SpawnWear app**, posted as a .pe over HTTP, instantiated via reflection, rendering through `IDisplayBuffer`.
 
 Think Android, but watch-sized and ESP32-shaped: a kernel/HAL layer of C# drivers for the watch hardware, system services for radios / audio / power, a UI framework for drawing and input, a launcher home screen, and a small set of built-in apps that talk to the system services. No single C++ binary, no fixed UI - apps come and go, services run in the background.
 
@@ -37,7 +38,7 @@ Constrained by the silicon: ESP32-S3R8 with 8 MB PSRAM and 32 MB flash. Everythi
 
 ## Recent highlights (full history in [`Docs/milestones.md`](Docs/milestones.md))
 
-- **2026-05-05** Phase 3 service host scaffold landed (`AppContracts/` interfaces + `Services/ServiceHost.cs`), About screen shipped consuming Power / RTC / WiFi through `IServiceHost` (live battery %, mV, WiFi IP, SSID, USB state, RTC date+time, free heap, uptime)
+- **2026-05-05** **First dynamically-loaded SpawnWear app rendered on the watch.** Phase 3 service host + AppContracts (`IServiceHost`, `ISpawnApp`, `IDisplayBuffer`) shipped with About + WiFi screens consuming services through the contract. CounterApp demo (separate `.nfproj`, references `SpawnWear.AppContracts`) compiles to a 1.2 KB `.pe`, POSTs to `/loadapp` over HTTP, runs on the watch through `LoadedAppScreen` reflection wrapper. Phase 8 architecture (SD-card-loadable apps) verified end-to-end.
 - **2026-05-04** Android-quality launcher shipped (gradient tiles + rounded corners + WiFi status icon + pill page indicator), watchface date label added, WiFi + HTTP screenshot pipeline live, FT3168 touch burst-read layout fixed, nf-interpreter deploy ceiling discovered + guarded, three new doc folders (Docs/ Plans/ Research/) with nf-interpreter source-grounded Phase 8 design
 - **2026-05-03** First-pixel root cause + fix, watchface V1 with 7-segment digits, idle state machine + battery indicator + multi-screen navigation, CO5300 alignment quirk baked into firmware, PCF85063 RTC driver, `-spawnwear.2` local NuGet packages
 - **2026-04-28** Repo scaffolded, runtime flashed, FT3168 touch driver written, QSPI display contribution forks pushed

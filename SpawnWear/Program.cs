@@ -134,10 +134,10 @@ namespace SpawnWear
                 var services = new ServiceHost(_axp, _rtc, _wifi);
 
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
-                var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
-                var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
+                var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
 
                 // Launcher tiles map directly to the per-app screen indices in the
                 // navigator below. Phase 2.5 will let SD-card-loaded apps register
@@ -145,47 +145,41 @@ namespace SpawnWear
                 // hard-wired.
                 var launcherTiles = new LauncherScreen.Tile[]
                 {
-                    // Row 1: 3 fully-implemented apps.
+                    // Row 1: built-in core surfaces.
                     new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
-                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40), BadgeCount = 3 },
-                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20), BadgeCount = 1 },
-                    // Row 2: planned apps - placeholders rendered dimmed until they ship.
+                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(50, 30, 60) },
+                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
+                    // Row 2: dynamic-app slot + planned tiles.
+                    new LauncherScreen.Tile { Label = "APP",      TargetScreenIndex = 4, Icon = LauncherScreen.IconKind.Empty,    Background = Color.FromArgb(60, 30, 70) },
                     new LauncherScreen.Tile { Label = "MUSIC",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
                     new LauncherScreen.Tile { Label = "VIDEO",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
+                    // Row 3: planned apps.
                     new LauncherScreen.Tile { Label = "GALLERY",  TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Gallery },
-                    // Row 3: WIFI functional, VOICE placeholder, ABOUT functional.
-                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5,  Icon = LauncherScreen.IconKind.Wifi,     Background = System.Drawing.Color.FromArgb(20, 60, 90) },
                     new LauncherScreen.Tile { Label = "VOICE",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
-                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 4,  Icon = LauncherScreen.IconKind.Settings, Background = System.Drawing.Color.FromArgb(50, 30, 60) },
+                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Stats },
                 };
                 var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
                     targetIndex => { _nav.GoTo(targetIndex); });
 
-                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen });
+                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, about, wifiScreen, loadedApp });
+                _http?.AttachAppLoader(loadedApp);
                 // Wire page-dot indices + the shared status bar into each screen.
-                // Each screen renders the bar in its own Tick / Invalidate path.
-                launcher.SetPageDots(0, 6);
-                watchface.SetPageDots(1, 6);
-                stats.SetPageDots(2, 6);
-                settings.SetPageDots(3, 6);
-                about.SetPageDots(4, 6);
-                wifiScreen.SetPageDots(5, 6);
+                launcher.SetPageDots(0, 5);
+                watchface.SetPageDots(1, 5);
+                about.SetPageDots(2, 5);
+                wifiScreen.SetPageDots(3, 5);
+                loadedApp.SetPageDots(4, 5);
                 launcher.SetStatusBar(statusBar);
                 watchface.SetStatusBar(statusBar);
-                stats.SetStatusBar(statusBar);
-                settings.SetStatusBar(statusBar);
                 about.SetStatusBar(statusBar);
                 wifiScreen.SetStatusBar(statusBar);
+                loadedApp.SetStatusBar(statusBar);
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
                 // straight to Sleep on the first iteration.
                 _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
                 // Paint the active (boot) screen once before the event loop starts.
-                // ScreenNavigator's Tick path only calls Tick() on active screens,
-                // not Invalidate(); without this initial paint the launcher's
-                // status bar shows but the tile grid stays unpainted until the
-                // user navigates away and back.
                 try { _nav.Current.OnResume(); }
                 catch (Exception ex) { Debug.WriteLine("[Boot] initial OnResume EX " + ex.Message); }
                 _eventLoop = new EventLoop(OnTick);

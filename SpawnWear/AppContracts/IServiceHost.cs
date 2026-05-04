@@ -19,5 +19,6 @@ namespace SpawnWear.AppContracts
         IRtcService GetRtc();
         IWifiService GetWifi();
         ILogger GetLogger();
+        IDisplayBuffer GetDisplay();
     }
 }

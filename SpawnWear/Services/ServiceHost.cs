@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using System.Drawing;
+using nanoFramework.UI;
 using SpawnWear.AppContracts;
 using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Rtc;
 using SpawnWear.Drivers.Wifi;
+using SpawnWear.UI;
 
 namespace SpawnWear.Services
 {
@@ -22,6 +25,7 @@ namespace SpawnWear.Services
         readonly IRtcService _rtc;
         readonly IWifiService _wifi;
         readonly ILogger _logger;
+        IDisplayBuffer _display;
 
         public ServiceHost(Axp2101Driver axp, Pcf85063Driver rtc, WifiService wifi)
         {
@@ -31,10 +35,55 @@ namespace SpawnWear.Services
             _logger = new DebugLogger();
         }
 
+        public void AttachDisplay(Bitmap fb, int panelWidth, int panelHeight)
+        {
+            _display = new DisplayBufferImpl(fb, panelWidth, panelHeight);
+        }
+
         public IPowerService GetPower() => _power;
         public IRtcService GetRtc() => _rtc;
         public IWifiService GetWifi() => _wifi;
         public ILogger GetLogger() => _logger;
+        public IDisplayBuffer GetDisplay() => _display;
+    }
+
+    /// <summary>Wraps a nanoFramework.UI.Bitmap as IDisplayBuffer for apps.
+    /// Hides the native bitmap pointer so apps can't accidentally trample
+    /// the firmware's framebuffer state outside the rectangle they own.</summary>
+    internal class DisplayBufferImpl : IDisplayBuffer
+    {
+        readonly Bitmap _fb;
+        readonly int _panelWidth, _panelHeight;
+        public DisplayBufferImpl(Bitmap fb, int w, int h) { _fb = fb; _panelWidth = w; _panelHeight = h; }
+
+        public int PanelWidth => _panelWidth;
+        public int PanelHeight => _panelHeight;
+        public int StatusBarHeight => StatusBar.ReservedHeight;
+        public int PageIndicatorHeight => 60;
+
+        public void Clear(Color background)
+        {
+            _fb.Clear();
+            _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, background);
+        }
+
+        public void FillRectangle(int x, int y, int w, int h, Color color)
+        {
+            _fb.FillRectangle(x, y, w, h, color);
+        }
+
+        public void DrawString(string text, int x, int y, int scale, Color color)
+        {
+            SmallFont.DrawString(_fb, text == null ? "" : text, x, y, scale, color);
+        }
+
+        public int MeasureString(string text, int scale)
+        {
+            return SmallFont.MeasureString(text == null ? "" : text, scale);
+        }
+
+        public void Flush() { _fb.Flush(); }
+        public void Flush(int x, int y, int w, int h) { _fb.Flush(x, y, w, h); }
     }
 
     /// <summary>Reads battery state from an Axp2101Driver. Read-failures collapse
