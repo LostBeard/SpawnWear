@@ -211,12 +211,12 @@ The PWA companion mirrors every one of these as a remote-UI page reachable via W
 
 The display is the user interface, so it leads. Plumbing (radios, sensors, audio, OTA) is still needed - a watch with no radios is a fancy clock - but each piece gets exposed THROUGH an app or Settings page, not as a substitute for one.
 
-### Phase 1 — Display + touch + input (the UI substrate)
-- [ ] CO5300 QSPI driver in C# — research nanoFramework's QSPI surface; if absent, contribute a managed QSPI bus + CO5300 panel driver upstream
-- [ ] FT3168 touch I²C driver
-- [ ] Frame-buffer + drawing primitives (probably sit on top of `nanoFramework.Graphics` if its surface fits the 410×502 panel; otherwise hand-roll)
-- [ ] Touch + button input dispatcher feeding a UI message loop
-- [ ] BOOT button polling on GPIO0 (single / double / long press dispatch)
+### Phase 1 — Display + touch + input (the UI substrate) — **complete 2026-05-03**
+- [x] CO5300 QSPI driver in C# — landed on `LostBeard/nf-interpreter@feature/qspi-display-driver` and `LostBeard/nanoFramework.Graphics@feature/qspi-display-driver`; PRs to upstream once verified
+- [x] FT3168 touch I²C driver — `SpawnWear/Drivers/Touch/Ft3168Driver.cs`, reports finger-down / finger-up via `TouchEvent`
+- [x] Frame-buffer + drawing primitives — sits on top of `nanoFramework.Graphics` with new `DisplayControl.Sleep / Wake / SetBrightness` upstream extensions
+- [x] Touch + button input dispatcher feeding a UI message loop — `Services/EventLoop.cs` is the host loop; tap classification + cycle-on-tap is in `Program.cs`
+- [x] BOOT button polling on GPIO0 (single press dispatch) — single-press = force panel Sleep. Double / long press semantics reserved for Phase 2.
 
 ### Phase 2 — UI Framework + Launcher
 - [ ] Drawing primitives: text, rounded rects, gradients, icons, scrollable lists, keyboard
@@ -354,6 +354,8 @@ These are the realities of running C# on this board today. None of them are bloc
 | 2026-05-03 | **First-pixel root cause found + fixed: NativeInit was reading uninitialized BSS for the QSPI cmd byte** | The C# `GraphicDriver` class was extended with `BusType` + three `Qspi*` command/address fields, but the matching `FIELD___xxx` index defines never landed in `nanoFramework_Graphics.h` and the C++ `NativeInitSpi` never copied them into the `DisplayInterfaceConfig` struct. So `qspi_send_register` pulled `cmd` from uninitialized BSS (0xFF) instead of the descriptor's `0x02`, and the CO5300 silently rejected every register write. The wire-level diagnostic that exposed it was `CLR_Debug::Printf("cmd=0x%02X")` - 30 lines of code that should have been added on day one. Fix is on `LostBeard/nf-interpreter@feature/qspi-display-driver`. Lesson preserved in `Notes/co5300-quirks.md` and `feedback_native_field_index_must_be_read.md`. |
 | 2026-05-03 | **Watchface V1: event-driven HH:MM:SS readout** | Replaced the heartbeat polling loop with an `AutoResetEvent.WaitOne(timeout)`-driven main loop modeled on `waveshare-watch-rs`'s `select3(timer, touch_int, button_int)` pattern. New `UI/SegmentFont.cs` renders 7-segment digits via `Bitmap.FillRectangle`, no font resource needed. New `UI/Watchface.cs` does a full repaint on first frame and **partial flush** of just the digits region thereafter (~25 KB pushed per second versus 411 KB for full-frame). New `Services/EventLoop.cs` is the host loop with state-dependent tick budget (1 s idle, 16 ms while finger held). |
 | 2026-05-03 | **CO5300 alignment quirk hit + worked around** | The watchface V1 partial flush at `(67, 219, 276, 64)` left small slivers of the previous digit on each second-tick. Per `Notes/co5300-quirks.md` and the [Hackaday comment thread](https://hackaday.com/2026/04/11/rust-y-firmware-for-waveshare-smartwatch/) by the rust port author, the CO5300 silently snaps any `CASET`/`PASET` address window that isn't `x_start`-even / `x_end`-odd. Surgical fix in `Watchface.cs::Tick` - round all four bounds before passing to `Bitmap.Flush(x, y, w, h)`. Long-term fix is to bake the alignment into `Qspi_To_Display.cpp::SetWindowX16bitsY16Bit` so every managed caller gets it for free. |
+| 2026-05-03 | **Sleep / Wake / SetBrightness API added to nanoFramework.Graphics** | Three new public static extern methods on `DisplayControl`. Native checksum 0xA11D435D → 0x3C4F4B75. Native impls call `g_DisplayDriver.PowerSave(SLEEP / NORMAL)` (which run the descriptor's `PowerModeSleep` / `PowerModeNormal` arrays - on CO5300 those are MIPI DCS DISPOFF + SLPIN with the proper settling delays) and `g_DisplayInterface.SendCommand(2, Brightness, level)` for the byte-resolution brightness register. Both branches landed on `LostBeard/nanoFramework.Graphics@feature/qspi-display-driver` and `LostBeard/nf-interpreter@feature/qspi-display-driver`. |
+| 2026-05-03 | **Idle state machine + battery indicator + multi-screen navigation** | Active → Dim (15 s) → Sleep (30 s) state machine driven by time-since-last-touch; touch wakes the panel and triggers a full repaint. Battery indicator bar under the clock reads the AXP2101 fuel gauge, fill color shifts green / yellow / red with charge level. New `IScreen` interface + `ScreenNavigator` rotates between Watchface and a Stats screen (battery %, mV, uptime stacked) on a single-finger tap. **BOOT button on GPIO0** force-sleeps the panel as a hardware shortcut; touch wakes it. **Closes Phase 1 of the roadmap.** |
 
 ## Building
 
