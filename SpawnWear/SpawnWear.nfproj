@@ -41,13 +41,13 @@
       <HintPath>..\packages\nanoFramework.Device.Bluetooth.1.1.115\lib\nanoFramework.Device.Bluetooth.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics">
-      <HintPath>..\packages\nanoFramework.Graphics.2.0.0-spawnwear.1\lib\nanoFramework.Graphics.dll</HintPath>
+      <HintPath>..\packages\nanoFramework.Graphics.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics.Co5300">
-      <HintPath>..\packages\nanoFramework.Graphics.Co5300.2.0.0-spawnwear.1\lib\nanoFramework.Graphics.Co5300.dll</HintPath>
+      <HintPath>..\packages\nanoFramework.Graphics.Co5300.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Co5300.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics.Core">
-      <HintPath>..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.1\lib\nanoFramework.Graphics.Core.dll</HintPath>
+      <HintPath>..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Core.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Hardware.Esp32">
       <HintPath>..\packages\nanoFramework.Hardware.Esp32.1.6.37\lib\nanoFramework.Hardware.Esp32.dll</HintPath>
