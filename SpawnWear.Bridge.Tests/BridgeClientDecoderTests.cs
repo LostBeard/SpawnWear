@@ -330,4 +330,81 @@ public class BridgeClientDecoderTests
         await client.RefreshAsync();
         Assert.Equal(2, transport.RefreshCallCount);
     }
+
+    [Fact]
+    public async Task SetWifiAsync_packs_creds_then_sends_connect_command()
+    {
+        var (client, transport) = await NewBridge();
+        await client.SetWifiAsync("HomeNet", "secret");
+
+        Assert.Equal(2, transport.SentMessages.Count);
+
+        // First: credentials char gets "SSID\nPassword" UTF-8
+        Assert.Equal(ChannelIds.WifiCredentials, transport.SentMessages[0].ChannelId);
+        var creds = System.Text.Encoding.UTF8.GetString(transport.SentMessages[0].Payload);
+        Assert.Equal("HomeNet\nsecret", creds);
+
+        // Second: command char gets the WifiCmdConnect byte
+        Assert.Equal(ChannelIds.WifiCommand, transport.SentMessages[1].ChannelId);
+        Assert.Single(transport.SentMessages[1].Payload);
+        Assert.Equal(BleUuids.WifiCmdConnect, transport.SentMessages[1].Payload[0]);
+    }
+
+    [Fact]
+    public async Task SetWifiAsync_rejects_newline_in_ssid()
+    {
+        var (client, _) = await NewBridge();
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await client.SetWifiAsync("Has\nNewline", "pw"));
+    }
+
+    [Fact]
+    public async Task SetWifiAsync_rejects_empty_ssid()
+    {
+        var (client, _) = await NewBridge();
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await client.SetWifiAsync("", "pw"));
+    }
+
+    [Fact]
+    public async Task DisconnectWifiAsync_sends_correct_command_byte()
+    {
+        var (client, transport) = await NewBridge();
+        await client.DisconnectWifiAsync();
+        Assert.Single(transport.SentMessages);
+        Assert.Equal(ChannelIds.WifiCommand, transport.SentMessages[0].ChannelId);
+        Assert.Equal(BleUuids.WifiCmdDisconnect, transport.SentMessages[0].Payload[0]);
+    }
+
+    [Fact]
+    public async Task ForgetWifiAsync_sends_correct_command_byte()
+    {
+        var (client, transport) = await NewBridge();
+        await client.ForgetWifiAsync();
+        Assert.Single(transport.SentMessages);
+        Assert.Equal(ChannelIds.WifiCommand, transport.SentMessages[0].ChannelId);
+        Assert.Equal(BleUuids.WifiCmdForget, transport.SentMessages[0].Payload[0]);
+    }
+
+    [Fact]
+    public async Task ScanWifiAsync_writes_to_scan_channel()
+    {
+        var (client, transport) = await NewBridge();
+        await client.ScanWifiAsync();
+        Assert.Single(transport.SentMessages);
+        Assert.Equal(ChannelIds.WifiScan, transport.SentMessages[0].ChannelId);
+        // Body byte is a placeholder; firmware ignores content but
+        // requires at least 1 byte to trigger a scan.
+        Assert.True(transport.SentMessages[0].Payload.Length >= 1);
+    }
+
+    [Fact]
+    public async Task SendDebugCommandAsync_packs_utf8_to_debug_channel()
+    {
+        var (client, transport) = await NewBridge();
+        await client.SendDebugCommandAsync("redraw");
+        Assert.Single(transport.SentMessages);
+        Assert.Equal(ChannelIds.DebugCmd, transport.SentMessages[0].ChannelId);
+        Assert.Equal("redraw", System.Text.Encoding.UTF8.GetString(transport.SentMessages[0].Payload));
+    }
 }
