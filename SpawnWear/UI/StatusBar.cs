@@ -45,7 +45,11 @@ namespace SpawnWear.UI
         readonly Pcf85063Driver _rtc;
         // Optional - main loop sets this so the BLE icon mirrors the radio state.
         // We don't query the BluetoothLEServer directly to keep StatusBar driver-free.
-        bool _bleAdvertising = true;
+        bool _bleAdvertising = false;
+        // WiFi state: -1 = unknown, 0 = disconnected, 1..4 = signal-bar count
+        // (1 = weakest, 4 = strongest). Set by the main loop based on whatever
+        // signal-strength source is convenient.
+        int _wifiBars = -1;
 
         // Cached last-rendered values for change detection.
         int _lastHour = -1;
@@ -53,6 +57,7 @@ namespace SpawnWear.UI
         int _lastBatteryPercent = int.MinValue;
         int _lastVbusIn = -1; // 0/1; -1 = not yet read
         int _lastBleAdvertising = -1;
+        int _lastWifiBars = int.MinValue;
 
         public StatusBar(Bitmap fb, int panelWidth, Axp2101Driver axp, Pcf85063Driver rtc)
         {
@@ -63,6 +68,18 @@ namespace SpawnWear.UI
         }
 
         public void SetBleAdvertising(bool on) => _bleAdvertising = on;
+
+        /// <summary>
+        /// Sets the WiFi indicator state. -1 hides the icon entirely (radio
+        /// not initialized), 0 shows a "no signal" outline, 1-4 shows that
+        /// many filled bars in a 4-bar staircase.
+        /// </summary>
+        public void SetWifiBars(int bars)
+        {
+            if (bars < -1) bars = -1;
+            if (bars > 4) bars = 4;
+            _wifiBars = bars;
+        }
 
         /// <summary>
         /// Renders the bar. <paramref name="force"/> bypasses the change-detection
@@ -105,7 +122,8 @@ namespace SpawnWear.UI
                 || minute != _lastMinute
                 || pct != _lastBatteryPercent
                 || vbus != _lastVbusIn
-                || bleVal != _lastBleAdvertising;
+                || bleVal != _lastBleAdvertising
+                || _wifiBars != _lastWifiBars;
             if (!changed) return;
 
             // Clear the bar region.
@@ -129,9 +147,21 @@ namespace SpawnWear.UI
             DrawBatteryIcon(cursor, iconY, IconBoxSize, pct);
             cursor -= IconBoxGap + IconBoxSize;
 
-            // BLE dot (filled circle when advertising, hollow ring when off).
-            DrawBleIcon(cursor, iconY, IconBoxSize, bleVal == 1);
-            cursor -= IconBoxGap + IconBoxSize;
+            // BLE icon: only render when BLE is actually advertising. Otherwise
+            // the slot collapses so we don't show a stale "BLE off" glyph.
+            if (bleVal == 1)
+            {
+                DrawBleIcon(cursor, iconY, IconBoxSize);
+                cursor -= IconBoxGap + IconBoxSize;
+            }
+
+            // WiFi icon: 4-bar staircase. Only render when bars >= 0 (>= 0
+            // means we have a radio state to display; -1 collapses the slot).
+            if (_wifiBars >= 0)
+            {
+                DrawWifiIcon(cursor, iconY, IconBoxSize, _wifiBars);
+                cursor -= IconBoxGap + IconBoxSize;
+            }
 
             // USB plug indicator - filled square when vbus in, no draw when not.
             if (vbus == 1)
@@ -152,6 +182,7 @@ namespace SpawnWear.UI
             _lastBatteryPercent = pct;
             _lastVbusIn = vbus;
             _lastBleAdvertising = bleVal;
+            _lastWifiBars = _wifiBars;
         }
 
         // ----- Icons -----
@@ -196,30 +227,67 @@ namespace SpawnWear.UI
             _fb.FillRectangle(bodyX + fillPad, bodyY + fillPad, fillW, fillH, color);
         }
 
-        void DrawBleIcon(int x, int y, int size, bool advertising)
+        void DrawBleIcon(int x, int y, int size)
         {
+            // Bluetooth glyph approximation using SetPixel-equivalent rectangles.
+            // The classic Bluetooth mark is a stylized capital "B" that forms two
+            // tilted rune-like halves crossing at the spine. We rasterize it as
+            // a centered diamond skeleton: vertical spine, two top diagonals
+            // descending right, two bottom diagonals ascending right, where the
+            // diagonals touch the spine at quarter / three-quarter height.
+            Color color = Color.DodgerBlue;
             int cx = x + size / 2;
-            int cy = y + size / 2;
-            Color color = Color.White;
-            int strokeT = 4;
-            if (advertising)
+            int top = y + 4;
+            int bottom = y + size - 4;
+            int mid = (top + bottom) / 2;
+            int spineT = 3;
+            int spineH = bottom - top;
+            // Vertical spine
+            _fb.FillRectangle(cx - spineT / 2, top, spineT, spineH, color);
+            // Diagonals: each is 4-step staircase from spine to right edge,
+            // converging at quarter-height (top diagonal) and three-quarter-height
+            // (bottom diagonal). The 4 steps form a rough sloped line.
+            int rightX = x + size - 4;
+            int diagSteps = 5;
+            int dx = (rightX - cx) / diagSteps;
+            int topDy = (mid - top) / diagSteps;
+            int botDy = (bottom - mid) / diagSteps;
+            for (int s = 0; s <= diagSteps; s++)
             {
-                // Bowtie approximation - rectangles emanating from center.
-                int armOuter = size / 2 - 2;
-                int armInner = size / 4;
-                _fb.FillRectangle(cx - armInner, cy - armOuter, armInner * 2, strokeT, color);
-                _fb.FillRectangle(cx - armOuter, cy - armOuter + strokeT, armOuter * 2, strokeT, color);
-                _fb.FillRectangle(cx - armOuter, cy + armOuter - 2 * strokeT, armOuter * 2, strokeT, color);
-                _fb.FillRectangle(cx - armInner, cy + armOuter - strokeT, armInner * 2, strokeT, color);
-                _fb.FillRectangle(cx - strokeT / 2, cy - armOuter, strokeT, armOuter * 2, color);
+                // Top half: from spine (top) outward and downward to mid
+                int sx = cx + s * dx;
+                int sy = top + s * topDy;
+                _fb.FillRectangle(sx, sy, 3, 3, color);
+                // Bottom half: from spine (bottom) outward and upward to mid
+                int sy2 = bottom - s * botDy;
+                _fb.FillRectangle(sx, sy2 - 2, 3, 3, color);
             }
-            else
+            // Inner diagonals returning from mid to spine endpoints
+            for (int s = 1; s <= diagSteps; s++)
             {
-                // Hollow rectangle so the layout doesn't shift.
-                _fb.FillRectangle(x + 4, y + 4, size - 8, strokeT, color);
-                _fb.FillRectangle(x + 4, y + size - 4 - strokeT, size - 8, strokeT, color);
-                _fb.FillRectangle(x + 4, y + 4, strokeT, size - 8, color);
-                _fb.FillRectangle(x + size - 4 - strokeT, y + 4, strokeT, size - 8, color);
+                int sx = cx + (diagSteps - s) * dx;
+                int sy = mid - (diagSteps - s) * topDy;
+                _fb.FillRectangle(sx, sy, 3, 3, color);
+                int sy2 = mid + (diagSteps - s) * botDy;
+                _fb.FillRectangle(sx, sy2 - 2, 3, 3, color);
+            }
+        }
+
+        void DrawWifiIcon(int x, int y, int size, int bars)
+        {
+            // 4-bar staircase, each bar wider than the next, all bottom-aligned.
+            // Filled bars are white; empty bars are dim gray. Matches the
+            // Android signal-strength glyph at a 36-px box size.
+            int gap = 3;
+            int barW = (size - 5 * gap) / 4;
+            int baseY = y + size - 4;
+            for (int i = 0; i < 4; i++)
+            {
+                int barH = ((i + 1) * (size - 8)) / 4;
+                int barX = x + gap + i * (barW + gap);
+                int barY = baseY - barH;
+                Color c = i < bars ? Color.White : Color.FromArgb(70, 70, 70);
+                _fb.FillRectangle(barX, barY, barW, barH, c);
             }
         }
 

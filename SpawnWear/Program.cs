@@ -121,6 +121,12 @@ namespace SpawnWear
                     }
                 }
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
+                // WiFi state -> status bar. We don't have RSSI on this build so
+                // signal strength is reported as full bars (4) when connected
+                // and -1 (hidden) when not. Phase 2 will read RSSI from the
+                // adapter and map it to 1-4 bars.
+                statusBar.SetWifiBars(_wifi != null && _wifi.IsConnected ? 4 : -1);
+                statusBar.SetBleAdvertising(false); // BLE not in this build
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
