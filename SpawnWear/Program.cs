@@ -344,7 +344,7 @@ namespace SpawnWear
                 Debug.WriteLine("[SpawnWear] BLE-4 - Constructing helper services");
                 var debugSvc = new DebugConsoleService();
                 var profile = new WatchProfileService();
-                var pairing = new PairingService();
+                var pairing = new PairingService(debugSvc);
                 var wifi = new WifiConfigService(debugSvc, profile, pairing);
                 Debug.WriteLine("[SpawnWear] BLE-5 - Helper services constructed");
 

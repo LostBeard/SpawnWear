@@ -63,8 +63,26 @@ namespace SpawnWear
         const int FileOffsetPeerPub = PubKeyLength + PubKeyLength;
         const int FileOffsetRoomKey = PubKeyLength + PubKeyLength + PubKeyLength;
 
+        readonly DebugConsoleService _debug;
+
         GattLocalCharacteristic _pubKeyChar;
         GattLocalCharacteristic _handshakeChar;
+
+        public PairingService(DebugConsoleService debug)
+        {
+            _debug = debug;
+        }
+
+        // DebugConsoleService.Log already does Debug.WriteLine internally AND
+        // notifies the BLE log characteristic, so calling _debug.Log fans out
+        // to both the COM9 USB-serial stream (nf-attach / VS Output) and the
+        // Companion's Console tab. Fall back to plain Debug.WriteLine when
+        // _debug isn't attached (early boot, or future no-debug builds).
+        void Log(string message)
+        {
+            if (_debug != null) _debug.Log(message);
+            else Debug.WriteLine(message);
+        }
 
         // Watch-side keypair. Loaded from PairingFilePath if a prior boot persisted
         // it; freshly generated + saved on first boot. Persists across reboot via
@@ -90,7 +108,7 @@ namespace SpawnWear
             var pubResult = service.CreateCharacteristic(BleUuids.PairingPubKeyUuid, pubParams);
             if (pubResult.Error != BluetoothError.Success)
             {
-                Debug.WriteLine("[Pair] PubKey characteristic failed: " + pubResult.Error);
+                Log("[Pair] PubKey characteristic failed: " + pubResult.Error);
                 return false;
             }
             _pubKeyChar = pubResult.Characteristic;
@@ -105,13 +123,13 @@ namespace SpawnWear
             var hsResult = service.CreateCharacteristic(BleUuids.PairingHandshakeUuid, hsParams);
             if (hsResult.Error != BluetoothError.Success)
             {
-                Debug.WriteLine("[Pair] Handshake characteristic failed: " + hsResult.Error);
+                Log("[Pair] Handshake characteristic failed: " + hsResult.Error);
                 return false;
             }
             _handshakeChar = hsResult.Characteristic;
             _handshakeChar.WriteRequested += OnHandshakeWrite;
 
-            Debug.WriteLine("[Pair] Characteristics attached (STUB Ed25519 - signatures will not verify)");
+            Log("[Pair] Characteristics attached (STUB Ed25519 - signatures will not verify)");
             return true;
         }
 
@@ -130,7 +148,7 @@ namespace SpawnWear
 
             if (length != CompanionToWatchLength)
             {
-                Debug.WriteLine("[Pair] Handshake bad length: " + length + " (expected " + CompanionToWatchLength + ")");
+                Log("[Pair] Handshake bad length: " + length + " (expected " + CompanionToWatchLength + ")");
                 request.RespondWithProtocolError(AttErrorInvalidLength);
                 return;
             }
@@ -191,7 +209,7 @@ namespace SpawnWear
             if (TryLoadPairingFile())
             {
                 bool paired = !IsAllZero(_peerPubKey) && !IsAllZero(_roomKey);
-                Debug.WriteLine("[Pair] Loaded keypair from " + PairingFilePath + " (paired=" + (paired ? "yes" : "no") + ")");
+                Log("[Pair] Loaded keypair from " + PairingFilePath + " (paired=" + (paired ? "yes" : "no") + ")");
                 return;
             }
 
@@ -203,7 +221,7 @@ namespace SpawnWear
             rng.NextBytes(_ourPrivKey);
             _peerPubKey = new byte[PubKeyLength]; // all zero = unpaired
             _roomKey = new byte[RoomKeyLength];   // all zero = unpaired
-            Debug.WriteLine("[Pair] Generated stub keypair (NOT secure - 7a placeholder)");
+            Log("[Pair] Generated stub keypair (NOT secure - 7a placeholder)");
             SavePairingFile();
         }
 
@@ -215,7 +233,7 @@ namespace SpawnWear
                 var bytes = File.ReadAllBytes(PairingFilePath);
                 if (bytes == null || bytes.Length != PersistedFileLength)
                 {
-                    Debug.WriteLine("[Pair] " + PairingFilePath + " unexpected length " + (bytes == null ? -1 : bytes.Length) + " (want " + PersistedFileLength + "), regenerating");
+                    Log("[Pair] " + PairingFilePath + " unexpected length " + (bytes == null ? -1 : bytes.Length) + " (want " + PersistedFileLength + "), regenerating");
                     return false;
                 }
                 Array.Copy(bytes, FileOffsetOurPub,  _ourPubKey,  0, PubKeyLength);
@@ -228,7 +246,7 @@ namespace SpawnWear
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[Pair] Load from " + PairingFilePath + " EX: " + ex.GetType().Name + ": " + ex.Message);
+                Log("[Pair] Load from " + PairingFilePath + " EX: " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
         }
@@ -243,11 +261,11 @@ namespace SpawnWear
                 if (_peerPubKey != null) Array.Copy(_peerPubKey, 0, buf, FileOffsetPeerPub, PubKeyLength);
                 if (_roomKey    != null) Array.Copy(_roomKey,    0, buf, FileOffsetRoomKey, RoomKeyLength);
                 File.WriteAllBytes(PairingFilePath, buf);
-                Debug.WriteLine("[Pair] Saved " + PersistedFileLength + " bytes to " + PairingFilePath);
+                Log("[Pair] Saved " + PersistedFileLength + " bytes to " + PairingFilePath);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[Pair] Save to " + PairingFilePath + " EX: " + ex.GetType().Name + ": " + ex.Message);
+                Log("[Pair] Save to " + PairingFilePath + " EX: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
