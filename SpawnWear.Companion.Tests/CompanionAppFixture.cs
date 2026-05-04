@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -37,14 +39,13 @@ public sealed class CompanionAppFixture : IAsyncDisposable
             _started = true;
         }
 
-        // If something is already listening on Port, treat that as the running
-        // app (e.g. TJ has VS open serving the same project on a different
-        // port - this fixture only manages :5290). Probe; if responds, reuse.
-        if (await ProbeAsync(ct).ConfigureAwait(false))
-        {
-            Console.WriteLine($"[CompanionAppFixture] Reusing existing server at {BaseUrl}");
-            return;
-        }
+        // If something is already listening on Port it's almost certainly an
+        // orphan dev server from a previous `dotnet test` run that didn't
+        // clean up (NUnit doesn't dispose static IAsyncDisposable). Reusing
+        // that orphan means tests run against a STALE Companion.dll - the
+        // build from the prior run, not the current source. Kill any owner
+        // we can identify and start fresh, which is cheap enough.
+        await KillExistingPortOwnerAsync(ct).ConfigureAwait(false);
 
         var projectDir = ResolveCompanionProjectDirectory();
         Console.WriteLine($"[CompanionAppFixture] Spawning dotnet run for {projectDir}");
@@ -93,6 +94,69 @@ public sealed class CompanionAppFixture : IAsyncDisposable
             return resp.IsSuccessStatusCode;
         }
         catch { return false; }
+    }
+
+    /// <summary>If anything is listening on <see cref="Port"/>, find the owning
+    /// process and stop it. Idempotent - if the port is free, this is a no-op.
+    /// We only kill when we can resolve a process; we don't bulk-kill by port.
+    /// </summary>
+    async Task KillExistingPortOwnerAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Quick TCP-listener check first: if no one's listening, skip.
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            bool anyOnPort = false;
+            foreach (var l in listeners)
+            {
+                if (l.Port == Port) { anyOnPort = true; break; }
+            }
+            if (!anyOnPort) return;
+
+            // Resolve PID via netstat - cross-platform via dotnet would need
+            // GetExtendedTcpTable on Windows; netstat -ano is simpler and
+            // equally reliable on this dev machine.
+            var ps = new Process
+            {
+                StartInfo =
+                {
+                    FileName = "netstat",
+                    Arguments = "-ano -p tcp",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true,
+                },
+            };
+            ps.Start();
+            string output = await ps.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+            await ps.WaitForExitAsync(ct).ConfigureAwait(false);
+
+            // Parse lines: "  TCP    0.0.0.0:5290    0.0.0.0:0    LISTENING    35600"
+            foreach (var line in output.Split('\n'))
+            {
+                if (!line.Contains($":{Port}") || !line.Contains("LISTENING")) continue;
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 5) continue;
+                if (!int.TryParse(parts[^1], out int pid)) continue;
+                try
+                {
+                    var p = Process.GetProcessById(pid);
+                    Console.WriteLine($"[CompanionAppFixture] Killing orphan dev server pid={pid} ({p.ProcessName}) on :{Port}");
+                    p.Kill(entireProcessTree: true);
+                    await p.WaitForExitAsync(ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CompanionAppFixture] Could not kill pid={pid}: {ex.Message}");
+                }
+            }
+            // Tiny grace for the OS to release the port socket.
+            await Task.Delay(500, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CompanionAppFixture] KillExistingPortOwner non-fatal: {ex.Message}");
+        }
     }
 
     static string ResolveCompanionProjectDirectory()
