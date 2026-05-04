@@ -87,6 +87,53 @@ public class BridgeClient : IAsyncDisposable
         return _transport.RefreshAsync(ct);
     }
 
+    // ===== Typed helpers =====
+    // These wrap the channel-id + payload-packing for the most common
+    // operations so consumers don't have to know wire formats. Each is
+    // a pure passthrough to SendAsync with the correct channel + bytes.
+
+    /// <summary>Save WiFi credentials on the watch and tell it to
+    /// connect. Two BLE writes: <c>"SSID\nPassword"</c> UTF-8 to the
+    /// credentials characteristic, then <c>WifiCmdConnect</c> byte to
+    /// the command characteristic.</summary>
+    public async Task SetWifiAsync(string ssid, string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(ssid)) throw new ArgumentException("ssid is empty", nameof(ssid));
+        if (ssid.Contains('\n'))        throw new ArgumentException("ssid may not contain a newline", nameof(ssid));
+        var combined = ssid + "\n" + (password ?? "");
+        var payload = System.Text.Encoding.UTF8.GetBytes(combined);
+        await SendAsync(new TransportMessage(ChannelIds.WifiCredentials, payload), ct);
+        await SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[]{ BleUuids.WifiCmdConnect }), ct);
+    }
+
+    /// <summary>Tell the watch to disconnect from its current WiFi
+    /// network. <c>WifiCmdDisconnect</c> byte to the command
+    /// characteristic.</summary>
+    public Task DisconnectWifiAsync(CancellationToken ct = default) =>
+        SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[]{ BleUuids.WifiCmdDisconnect }), ct);
+
+    /// <summary>Tell the watch to forget stored WiFi credentials.
+    /// <c>WifiCmdForget</c> byte.</summary>
+    public Task ForgetWifiAsync(CancellationToken ct = default) =>
+        SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[]{ BleUuids.WifiCmdForget }), ct);
+
+    /// <summary>Trigger a WiFi scan on the watch. Results arrive on
+    /// <see cref="WifiScanResultsReceived"/> when the watch finishes
+    /// scanning. Body byte is ignored by firmware; we send 0x01 as a
+    /// non-empty placeholder.</summary>
+    public Task ScanWifiAsync(CancellationToken ct = default) =>
+        SendAsync(new TransportMessage(ChannelIds.WifiScan, new byte[]{ 0x01 }), ct);
+
+    /// <summary>Send a UTF-8 command to the watch's debug console.
+    /// Fires through the firmware's <c>DebugConsoleService</c> command
+    /// handler.</summary>
+    public Task SendDebugCommandAsync(string command, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(command)) throw new ArgumentException("command is empty", nameof(command));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(command);
+        return SendAsync(new TransportMessage(ChannelIds.DebugCmd, bytes), ct);
+    }
+
     void OnConnectionChanged(bool connected) => ConnectionChanged?.Invoke(connected);
 
     void OnMessageReceived(TransportMessage msg)
