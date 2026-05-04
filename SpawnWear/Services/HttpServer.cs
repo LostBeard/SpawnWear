@@ -97,16 +97,22 @@ namespace SpawnWear.Services
 
         void HandleClient(Socket client)
         {
-            byte[] buf = new byte[1024];
+            byte[] buf = new byte[2048];
             int n = client.Receive(buf, 0, buf.Length, SocketFlags.None);
             if (n <= 0) return;
-            string req = Encoding.UTF8.GetString(buf, 0, n);
-            string firstLine = req.Split('\n')[0].Trim();
+            // Find end-of-headers (\r\n\r\n) so we can split header from body.
+            int headerEnd = FindHeaderEnd(buf, n);
+            int reqHeaderLen = headerEnd > 0 ? headerEnd : n;
+            string reqHeader = Encoding.UTF8.GetString(buf, 0, reqHeaderLen);
+            string firstLine = reqHeader.Split('\n')[0].Trim();
+            string method = "GET";
             string path = "/";
-            if (firstLine.StartsWith("GET "))
+            int firstSpace = firstLine.IndexOf(' ');
+            if (firstSpace > 0)
             {
-                int sp = firstLine.IndexOf(' ', 4);
-                if (sp > 4) path = firstLine.Substring(4, sp - 4);
+                method = firstLine.Substring(0, firstSpace);
+                int sp = firstLine.IndexOf(' ', firstSpace + 1);
+                if (sp > firstSpace) path = firstLine.Substring(firstSpace + 1, sp - firstSpace - 1);
             }
             // Strip the query string (?t=cache-buster, etc.) before route match.
             int q = path.IndexOf('?');
@@ -121,10 +127,121 @@ namespace SpawnWear.Services
             {
                 ServeScreenshot(client);
             }
+            else if (path == "/loadpe" && method == "POST")
+            {
+                ServeLoadPe(client, reqHeader, buf, n, headerEnd);
+            }
             else
             {
                 ServeNotFound(client);
             }
+        }
+
+        static int FindHeaderEnd(byte[] buf, int n)
+        {
+            for (int i = 0; i < n - 3; i++)
+            {
+                if (buf[i] == 0x0D && buf[i+1] == 0x0A && buf[i+2] == 0x0D && buf[i+3] == 0x0A)
+                    return i + 4;
+            }
+            return -1;
+        }
+
+        // POST /loadpe - body is a raw nanoFramework .pe assembly. Loads it via
+        // Assembly.Load(byte[]), finds HelloWorldApp.HelloWorldPayload, invokes
+        // Greet() via reflection, returns the result. Phase 8 SD-card-loadable
+        // apps verification harness; proves the dynamic-load + invoke path
+        // works on real silicon.
+        void ServeLoadPe(Socket client, string reqHeader, byte[] firstChunk, int firstLen, int headerEnd)
+        {
+            int contentLength = ParseContentLength(reqHeader);
+            if (contentLength <= 0)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nMissing or invalid Content-Length");
+                return;
+            }
+            Debug.WriteLine("[LoadPe] receiving " + contentLength + " bytes");
+
+            // Body bytes already in firstChunk after headerEnd.
+            byte[] payload = new byte[contentLength];
+            int already = (headerEnd > 0) ? (firstLen - headerEnd) : 0;
+            if (already > 0) System.Array.Copy(firstChunk, headerEnd, payload, 0, already);
+
+            // Read remaining body.
+            int got = already;
+            byte[] readBuf = new byte[1024];
+            while (got < contentLength)
+            {
+                int r = client.Receive(readBuf, 0, readBuf.Length, SocketFlags.None);
+                if (r <= 0) break;
+                int copyN = (got + r > contentLength) ? (contentLength - got) : r;
+                System.Array.Copy(readBuf, 0, payload, got, copyN);
+                got += copyN;
+            }
+            Debug.WriteLine("[LoadPe] received " + got + "/" + contentLength + " bytes");
+
+            string result;
+            try
+            {
+                var asm = System.Reflection.Assembly.Load(payload);
+                Debug.WriteLine("[LoadPe] Assembly.Load returned: " + (asm != null ? asm.FullName : "null"));
+                if (asm == null) { result = "ERROR: Assembly.Load returned null"; }
+                else
+                {
+                    var t = asm.GetType("HelloWorldApp.HelloWorldPayload");
+                    Debug.WriteLine("[LoadPe] GetType returned: " + (t != null ? t.FullName : "null"));
+                    if (t == null) { result = "ERROR: type HelloWorldApp.HelloWorldPayload not found"; }
+                    else
+                    {
+                        var m = t.GetMethod("Greet");
+                        Debug.WriteLine("[LoadPe] GetMethod Greet returned: " + (m != null ? m.Name : "null"));
+                        if (m == null) { result = "ERROR: method Greet not found"; }
+                        else
+                        {
+                            var ret = m.Invoke(null, null);
+                            result = "OK: " + (ret != null ? ret.ToString() : "null");
+                        }
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
+                Debug.WriteLine("[LoadPe] " + result);
+            }
+
+            string body = result + "\r\n";
+            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
+            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
+            client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
+        }
+
+        static int ParseContentLength(string reqHeader)
+        {
+            // Case-insensitive line scan.
+            string[] lines = reqHeader.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
+                if (line.Length < 16) continue;
+                string lower = line.ToLower();
+                if (lower.StartsWith("content-length:"))
+                {
+                    string val = line.Substring(15).Trim();
+                    int n;
+                    return int.TryParse(val, out n) ? n : -1;
+                }
+            }
+            return -1;
+        }
+
+        void ServeText(Socket client, string text)
+        {
+            byte[] body = Encoding.UTF8.GetBytes(text);
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n";
+            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
+            client.Send(body, 0, body.Length, SocketFlags.None);
         }
 
         void ServeHtml(Socket client)
