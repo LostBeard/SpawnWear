@@ -110,6 +110,7 @@ namespace SpawnWear
                 if (_wifi != null && _wifi.IsConnected)
                 {
                     _http = new HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, port: 8080);
+                    if (_sd != null) _http.AttachSdCard(_sd);
                     try
                     {
                         _http.Start();

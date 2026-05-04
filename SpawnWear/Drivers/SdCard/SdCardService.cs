@@ -46,6 +46,27 @@ namespace SpawnWear.Drivers.SdCard
                 };
 
                 _card = new SDCard(parameters, new CardDetectParameters());
+                return TryMount();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SdCard] init failed: " + ex.GetType().Name + ": " + ex.Message);
+                IsMounted = false;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Tries to mount the card. Separated from Initialize so a TryFormat
+        /// success can re-mount without re-running pin / ctor setup. Safe to
+        /// call multiple times; throws are caught.
+        /// </summary>
+        public bool TryMount()
+        {
+            if (_card == null) return false;
+            if (IsMounted) return true;
+            try
+            {
                 _card.Mount();
                 IsMounted = true;
                 Debug.WriteLine("[SdCard] mounted at " + MountPath);
@@ -55,6 +76,68 @@ namespace SpawnWear.Drivers.SdCard
             {
                 Debug.WriteLine("[SdCard] mount failed: " + ex.GetType().Name + ": " + ex.Message);
                 IsMounted = false;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Formats the SD card via nanoFramework's DriveInfo.Format. DESTRUCTIVE —
+        /// erases the entire card. Triggered by the explicit POST /sdformat HTTP
+        /// route so a misbehaving caller can't auto-wipe a card on a transient
+        /// mount glitch. Common reason to need this: 1GB-class cards ship
+        /// pre-formatted FAT16 / FAT12, which our runtime's FATFS rejects with
+        /// CLR_E_VOLUME_NOT_FOUND - reformatting to FAT32 in-place is faster
+        /// than pulling the card out for Windows.
+        /// </summary>
+        public bool TryFormat(string fileSystem)
+        {
+            // Diagnostic dump before any action so the failure mode is visible.
+            try
+            {
+                var beforeDrives = System.IO.DriveInfo.GetDrives();
+                Debug.WriteLine("[SdCard] Format pre-state: " + beforeDrives.Length + " drive(s) registered");
+                foreach (var d in beforeDrives)
+                {
+                    Debug.WriteLine("[SdCard]   drive: " + d.Name + " type=" + d.DriveType);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SdCard] GetDrives EX: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            // MountRemovableVolumes asks the runtime to enumerate removables that
+            // weren't mounted at boot - in our case the SD card whose existing
+            // FAT16 volume FATFS rejected. If this surfaces the card, Format has
+            // a DriveInfo to operate on. The doc warns this isn't supported on
+            // every target; we catch and continue.
+            try
+            {
+                Debug.WriteLine("[SdCard] DriveInfo.MountRemovableVolumes()");
+                System.IO.DriveInfo.MountRemovableVolumes();
+                var afterDrives = System.IO.DriveInfo.GetDrives();
+                Debug.WriteLine("[SdCard] post-MountRemovable: " + afterDrives.Length + " drive(s) registered");
+                foreach (var d in afterDrives)
+                {
+                    Debug.WriteLine("[SdCard]   drive: " + d.Name + " type=" + d.DriveType);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SdCard] MountRemovableVolumes EX: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            try
+            {
+                Debug.WriteLine("[SdCard] Format starting (filesystem=" + fileSystem + ", path=" + MountPath + ")");
+                var drive = new System.IO.DriveInfo(MountPath);
+                drive.Format(fileSystem, 0);
+                Debug.WriteLine("[SdCard] Format(" + fileSystem + ") succeeded");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SdCard] Format failed: " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
         }

@@ -1,5 +1,6 @@
 using nanoFramework.UI;
 using SpawnWear.AppContracts;
+using SpawnWear.Drivers.SdCard;
 using SpawnWear.UI;
 using System;
 using System.Diagnostics;
@@ -45,6 +46,12 @@ namespace SpawnWear.Services
         LoadedAppScreen _appLoader;
         ScreenNavigator _navigator;
         int _appLoaderScreenIndex = -1;
+        SdCardService _sdCard;
+
+        /// <summary>Wire the SD card service so /sdformat can in-place reformat
+        /// the inserted card without pulling it for Windows. Optional - the
+        /// route returns 503 if not attached.</summary>
+        public void AttachSdCard(SdCardService sd) { _sdCard = sd; }
 
         /// <summary>Wire the LoadedAppScreen + navigator so /loadapp can
         /// activate dynamically-loaded apps. Called once at boot from
@@ -168,10 +175,51 @@ namespace SpawnWear.Services
             {
                 ServeTouch(client, reqHeader, buf, n, headerEnd);
             }
+            else if (path == "/sdformat" && method == "POST")
+            {
+                ServeSdFormat(client, reqHeader, buf, n, headerEnd);
+            }
             else
             {
                 ServeNotFound(client);
             }
+        }
+
+        // POST /sdformat - reformats the inserted SD card. DESTRUCTIVE.
+        // Body must be "CONFIRM_FORMAT_<fileSystem>" (e.g. "CONFIRM_FORMAT_FAT32").
+        // Filesystem name is extracted from the body and passed to the runtime's
+        // DriveInfo.Format. After a successful format the service retries Mount.
+        void ServeSdFormat(Socket client, string reqHeader, byte[] buf, int n, int headerEnd)
+        {
+            if (_sdCard == null)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nSD card service not attached");
+                return;
+            }
+            int contentLen = ParseContentLength(reqHeader);
+            if (contentLen <= 0 || contentLen > 64)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nExpected body 'CONFIRM_FORMAT_<fileSystem>' (e.g. CONFIRM_FORMAT_FAT32)");
+                return;
+            }
+            byte[] body = ReadBody(client, contentLen, buf, n, headerEnd);
+            string token = Encoding.UTF8.GetString(body, 0, body.Length).Trim();
+            const string Prefix = "CONFIRM_FORMAT_";
+            if (token.Length <= Prefix.Length || !token.StartsWith(Prefix))
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nBody must start with " + Prefix + " (e.g. CONFIRM_FORMAT_FAT32). Got: '" + token + "'");
+                return;
+            }
+            string fs = token.Substring(Prefix.Length);
+            Debug.WriteLine("[Http] /sdformat triggered (fs=" + fs + ")");
+            bool formatted = _sdCard.TryFormat(fs);
+            if (!formatted)
+            {
+                ServeText(client, "500 Internal Server Error\r\n\r\nFormat(" + fs + ") failed - check Debug output for the exception");
+                return;
+            }
+            bool mounted = _sdCard.TryMount();
+            ServeText(client, "OK format(" + fs + ")=ok mount=" + (mounted ? "ok" : "FAILED"));
         }
 
         // POST /touch - body is 4 bytes [x_u16_LE][y_u16_LE]. Routes through
