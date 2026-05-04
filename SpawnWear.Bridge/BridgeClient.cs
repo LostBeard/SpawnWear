@@ -34,6 +34,7 @@ public class BridgeClient : IAsyncDisposable
     public event Action<ImuSample>? ImuSampleReceived;
     public event Action<RtcTime>? RtcTimeReceived;
     public event Action<WifiStatus>? WifiStatusChanged;
+    public event Action<WifiScanResult[]>? WifiScanResultsReceived;
     public event Action<string>? DebugLogReceived;
 
     /// <summary>Use the supplied transport for the next Connect call.
@@ -109,6 +110,28 @@ public class BridgeClient : IAsyncDisposable
                 }
                 break;
 
+            case ChannelIds.WifiScan:
+                {
+                    // Firmware schema (WifiConfigService.PerformWifiScan):
+                    //   "SSID|RSSI\nSSID2|RSSI2\n..."
+                    //   RSSI is decimal int (dBm, typically negative).
+                    var text = System.Text.Encoding.UTF8.GetString(msg.Payload);
+                    var lines = text.Length == 0 ? Array.Empty<string>() : text.Split('\n');
+                    var results = new List<WifiScanResult>(lines.Length);
+                    foreach (var line in lines)
+                    {
+                        if (string.IsNullOrEmpty(line)) continue;
+                        var pipe = line.LastIndexOf('|');
+                        if (pipe < 0) { results.Add(new WifiScanResult(line, 0)); continue; }
+                        var ssid = line.Substring(0, pipe);
+                        var rssiStr = line.Substring(pipe + 1);
+                        int.TryParse(rssiStr, out int rssi);
+                        results.Add(new WifiScanResult(ssid, rssi));
+                    }
+                    WifiScanResultsReceived?.Invoke(results.ToArray());
+                }
+                break;
+
             case ChannelIds.WifiStatus:
                 if (msg.Payload.Length >= 1)
                 {
@@ -161,6 +184,7 @@ public static class ChannelIds
     public const string DebugLog        = "log";
     public const string DebugCmd        = "log.cmd";
     public const string WifiStatus      = "wifi.status";
+    public const string WifiScan        = "wifi.scan";
     public const string WifiCommand     = "wifi.cmd";
     public const string WifiCredentials = "wifi.creds";
     public const string AppPayload      = "app.payload";
@@ -182,3 +206,9 @@ public enum WifiState : byte
 }
 
 public readonly record struct WifiStatus(WifiState State, string IpAddress);
+
+/// <summary>One row in a watch-side WiFi scan. RSSI is dBm (typically
+/// negative; -50 = strong, -90 = weak). Mirrors the
+/// <c>"SSID|RSSI"</c> line format produced by
+/// <c>WifiConfigService.PerformWifiScan</c>.</summary>
+public readonly record struct WifiScanResult(string Ssid, int RssiDbm);

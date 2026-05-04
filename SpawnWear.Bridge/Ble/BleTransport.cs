@@ -33,6 +33,7 @@ public class BleTransport : ITransport, IAsyncDisposable
     BluetoothRemoteGATTCharacteristic? _rtc;
     BluetoothRemoteGATTCharacteristic? _button;
     BluetoothRemoteGATTCharacteristic? _wifiStatus;
+    BluetoothRemoteGATTCharacteristic? _wifiScan;     // notify-side; also writeable to trigger
     BluetoothRemoteGATTCharacteristic? _debugLog;
 
     // Write-side characteristics (set during Connect, used by SendAsync)
@@ -86,6 +87,7 @@ public class BleTransport : ITransport, IAsyncDisposable
         _rtc            = await TryGetCharacteristic(_service, BleUuids.RtcTimeUuid);
         _button         = await TryGetCharacteristic(_service, BleUuids.ButtonEventUuid);
         _wifiStatus     = await TryGetCharacteristic(_service, BleUuids.WifiStatusUuid);
+        _wifiScan       = await TryGetCharacteristic(_service, BleUuids.WifiScanUuid);
         _debugLog       = await TryGetCharacteristic(_service, BleUuids.DebugLogOutputUuid);
         _wifiCommand    = await TryGetCharacteristic(_service, BleUuids.WifiCommandUuid);
         _wifiCredentials = await TryGetCharacteristic(_service, BleUuids.WifiCredentialsUuid);
@@ -97,6 +99,8 @@ public class BleTransport : ITransport, IAsyncDisposable
         await SubscribeNotify(_imu,        ChannelIds.ImuSample);
         await SubscribeNotify(_rtc,        ChannelIds.RtcTime);
         await SubscribeNotify(_button,     ChannelIds.Button);
+        await SubscribeNotify(_wifiStatus, ChannelIds.WifiStatus);
+        await SubscribeNotify(_wifiScan,   ChannelIds.WifiScan);
         await SubscribeNotify(_debugLog,   ChannelIds.DebugLog);
 
         IsConnected = true;
@@ -111,6 +115,7 @@ public class BleTransport : ITransport, IAsyncDisposable
         {
             ChannelIds.WifiCommand     => _wifiCommand,
             ChannelIds.WifiCredentials => _wifiCredentials,
+            ChannelIds.WifiScan        => _wifiScan,     // any byte triggers a scan; firmware ignores body
             ChannelIds.RtcTime         => _rtc,
             ChannelIds.DebugCmd        => _debugCommand,
             _ => null,
@@ -139,9 +144,10 @@ public class BleTransport : ITransport, IAsyncDisposable
         await DetachNotify(_imu);        _imu         = null;
         await DetachNotify(_rtc);        _rtc         = null;
         await DetachNotify(_button);     _button      = null;
+        await DetachNotify(_wifiStatus); _wifiStatus  = null;
+        await DetachNotify(_wifiScan);   _wifiScan    = null;
         await DetachNotify(_debugLog);   _debugLog    = null;
 
-        DisposeAndClear(ref _wifiStatus);
         DisposeAndClear(ref _wifiCommand);
         DisposeAndClear(ref _wifiCredentials);
         DisposeAndClear(ref _debugCommand);

@@ -31,6 +31,7 @@
         <button type="submit" disabled="@(!Bridge.IsConnected || string.IsNullOrEmpty(_ssid))">Save &amp; connect</button>
         <button type="button" class="secondary" @onclick="Disconnect" disabled="@(!Bridge.IsConnected)">Tell watch to disconnect</button>
         <button type="button" class="ghost" @onclick="Forget" disabled="@(!Bridge.IsConnected)">Forget saved network</button>
+        <button type="button" class="ghost" @onclick="Scan" disabled="@(!Bridge.IsConnected || _scanning)">@(_scanning ? "Scanning…" : "Scan networks")</button>
     </div>
 
     @if (_status is not null)
@@ -50,6 +51,26 @@
         {
             <div class="status-row"><span class="status-label">IP</span><span class="status-ip">@w.IpAddress</span></div>
         }
+    </div>
+}
+
+@if (_scanResults is { Length: > 0 })
+{
+    <div class="card scan-card">
+        <div class="status-label">Networks the watch can see</div>
+        <table class="scan">
+            <tbody>
+            @foreach (var r in _scanResults)
+            {
+                <tr @onclick="() => UseSsid(r.Ssid)">
+                    <td class="ssid">@(string.IsNullOrEmpty(r.Ssid) ? "(hidden)" : r.Ssid)</td>
+                    <td class="rssi">@r.RssiDbm dBm</td>
+                    <td class="bars">@RssiBars(r.RssiDbm)</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        <div class="muted" style="margin-top:0.4rem;">Click a row to drop the SSID into the form above.</div>
     </div>
 }
 
@@ -86,28 +107,67 @@
     .status-pill.failed       { background: rgba(220,80,90,0.18); color: #ec7986; }
     .status-pill.disconnected { background: #2c2f3a; color: #d8dae4; }
     .status-ip { font-family: ui-monospace, "SF Mono", monospace; font-size: 0.85rem; }
+    .scan-card { max-width: 36rem; margin-top: 0.6rem; }
+    table.scan { width: 100%; border-collapse: collapse; margin-top: 0.4rem; }
+    table.scan tr { cursor: pointer; transition: background 0.1s ease; }
+    table.scan tr:hover { background: rgba(91,141,239,0.08); }
+    table.scan td { padding: 0.4rem 0.6rem; border-top: 1px solid #2c2f3a; }
+    table.scan td.ssid { font-weight: 500; }
+    table.scan td.rssi { font-family: ui-monospace, "SF Mono", monospace; font-size: 0.82rem; opacity: 0.7; text-align: right; width: 5rem; }
+    table.scan td.bars { width: 2.5rem; text-align: right; letter-spacing: 1px; color: #6dd9a4; }
 </style>
 
 @code {
     string _ssid = "";
     string _password = "";
     bool _showPw;
+    bool _scanning;
     string? _status;
     bool _isError;
     WifiStatus? _wifi;
+    WifiScanResult[]? _scanResults;
 
     protected override void OnInitialized()
     {
         Bridge.ConnectionChanged += OnConn;
         Bridge.WifiStatusChanged += OnWifi;
+        Bridge.WifiScanResultsReceived += OnScanResults;
     }
     public void Dispose()
     {
         Bridge.ConnectionChanged -= OnConn;
         Bridge.WifiStatusChanged -= OnWifi;
+        Bridge.WifiScanResultsReceived -= OnScanResults;
     }
     void OnConn(bool _) => InvokeAsync(StateHasChanged);
     void OnWifi(WifiStatus s) { _wifi = s; InvokeAsync(StateHasChanged); }
+    void OnScanResults(WifiScanResult[] r) { _scanResults = r; _scanning = false; InvokeAsync(StateHasChanged); }
+
+    void UseSsid(string ssid) { _ssid = ssid; _status = null; }
+
+    static string RssiBars(int dbm)
+    {
+        // Strong: > -55, Good: -55..-65, Fair: -65..-75, Weak: -75..-85, Poor: < -85
+        if (dbm >= -55) return "▮▮▮▮";
+        if (dbm >= -65) return "▮▮▮▯";
+        if (dbm >= -75) return "▮▮▯▯";
+        if (dbm >= -85) return "▮▯▯▯";
+        return "▯▯▯▯";
+    }
+
+    async Task Scan()
+    {
+        _scanning = true; _status = null; _isError = false;
+        try
+        {
+            // Firmware's WifiScan characteristic triggers a scan on any write
+            // and notifies results back as "SSID|RSSI\n..." text. Body byte
+            // is ignored; we send 0x01 as a non-empty placeholder.
+            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiScan, new byte[]{ 0x01 }));
+            _status = "Scan triggered. Results will appear below when the watch finishes.";
+        }
+        catch (Exception ex) { _scanning = false; _status = ex.Message; _isError = true; }
+    }
 
     static string StatePillClass(WifiState s) => s switch
     {

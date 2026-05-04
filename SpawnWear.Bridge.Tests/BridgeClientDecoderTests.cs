@@ -187,6 +187,55 @@ public class BridgeClientDecoderTests
     }
 
     [Fact]
+    public async Task WifiScan_decodes_pipe_separated_lines()
+    {
+        // Firmware schema (WifiConfigService.PerformWifiScan):
+        //   "SSID|RSSI\nSSID2|RSSI2\n..." UTF-8.
+        var payload = System.Text.Encoding.UTF8.GetBytes("HomeNetwork|-52\nNeighborWiFi|-77\nXfinity|-89");
+        var (client, transport) = await NewBridge();
+        WifiScanResult[]? got = null;
+        client.WifiScanResultsReceived += r => got = r;
+
+        transport.Push(new TransportMessage(ChannelIds.WifiScan, payload));
+
+        Assert.NotNull(got);
+        Assert.Equal(3, got!.Length);
+        Assert.Equal("HomeNetwork", got[0].Ssid);
+        Assert.Equal(-52, got[0].RssiDbm);
+        Assert.Equal("NeighborWiFi", got[1].Ssid);
+        Assert.Equal(-77, got[1].RssiDbm);
+        Assert.Equal("Xfinity", got[2].Ssid);
+        Assert.Equal(-89, got[2].RssiDbm);
+    }
+
+    [Fact]
+    public async Task WifiScan_handles_ssid_with_pipe_in_name()
+    {
+        // SSID can technically contain '|' - the firmware's split is on the
+        // LAST '|', so the RSSI is always the rightmost segment. Guard the
+        // decoder against losing characters in pathological names.
+        var payload = System.Text.Encoding.UTF8.GetBytes("Net|Special|-60");
+        var (client, transport) = await NewBridge();
+        WifiScanResult[]? got = null;
+        client.WifiScanResultsReceived += r => got = r;
+        transport.Push(new TransportMessage(ChannelIds.WifiScan, payload));
+        Assert.Single(got!);
+        Assert.Equal("Net|Special", got![0].Ssid);
+        Assert.Equal(-60, got[0].RssiDbm);
+    }
+
+    [Fact]
+    public async Task WifiScan_empty_payload_yields_empty_array()
+    {
+        var (client, transport) = await NewBridge();
+        WifiScanResult[]? got = null;
+        client.WifiScanResultsReceived += r => got = r;
+        transport.Push(new TransportMessage(ChannelIds.WifiScan, Array.Empty<byte>()));
+        Assert.NotNull(got);
+        Assert.Empty(got!);
+    }
+
+    [Fact]
     public async Task DebugLog_decodes_utf8()
     {
         var payload = System.Text.Encoding.UTF8.GetBytes("[Boot] hello — 🌎");
