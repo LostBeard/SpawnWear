@@ -1,0 +1,99 @@
+@using SpawnWear.Bridge
+@inject BridgeClient Bridge
+@implements IDisposable
+
+@*
+    Persistent app-shell strip. Lives at the top of MainLayout and
+    rebinds to whichever BridgeClient events fire. Watching this
+    bar tells the user at a glance whether their watch is reachable
+    from any page in the Companion (Home / WiFi / Mirror / Apps /
+    Console), and what the last-known signal looked like.
+*@
+
+<div class="statusbar">
+    <span class="dot @(Bridge.IsConnected ? "ok" : "off")"></span>
+    <span class="label">@(Bridge.IsConnected ? "Watch live" : "Not paired")</span>
+
+    @if (_battery is { } b)
+    {
+        <span class="sep">·</span>
+        <span class="metric" title="@b.VoltageMillivolts mV / @b.CurrentMilliamps mA">
+            @if (b.IsCharging) { <text>⚡</text> } else if (b.IsLowBattery) { <text>!</text> }
+            @b.Percent<span class="unit">%</span>
+        </span>
+    }
+
+    @if (_wifi is { } w && w.State != WifiState.Disconnected)
+    {
+        <span class="sep">·</span>
+        <span class="metric @WifiClass(w.State)">
+            WiFi @w.State@(string.IsNullOrEmpty(w.IpAddress) ? "" : $" {w.IpAddress}")
+        </span>
+    }
+
+    @if (_button is { } btn)
+    {
+        <span class="sep">·</span>
+        <span class="metric muted">@btn.Button @btn.Action</span>
+    }
+</div>
+
+<style>
+    .statusbar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 1rem;
+        background: #15192a;
+        border-bottom: 1px solid #2c2f3a;
+        font-size: 0.78rem;
+        color: #d8dae4;
+        flex-wrap: wrap;
+    }
+    .dot { width: 0.55rem; height: 0.55rem; border-radius: 999px; display: inline-block; }
+    .dot.ok { background: #6dd9a4; box-shadow: 0 0 6px rgba(109,217,164,0.6); }
+    .dot.off { background: #ec7986; }
+    .label { font-weight: 600; letter-spacing: 0.02em; }
+    .sep { opacity: 0.35; }
+    .metric { font-family: ui-monospace, "SF Mono", monospace; font-size: 0.78rem; }
+    .metric .unit { opacity: 0.55; }
+    .metric.connected { color: #6dd9a4; }
+    .metric.connecting { color: #f3c668; }
+    .metric.failed { color: #ec7986; }
+    .metric.muted { opacity: 0.6; }
+</style>
+
+@code {
+    BatteryState? _battery;
+    WifiStatus? _wifi;
+    ButtonEvent? _button;
+
+    protected override void OnInitialized()
+    {
+        Bridge.ConnectionChanged   += OnAny;
+        Bridge.BatteryChanged      += OnBattery;
+        Bridge.WifiStatusChanged   += OnWifi;
+        Bridge.ButtonEventReceived += OnButton;
+    }
+
+    public void Dispose()
+    {
+        Bridge.ConnectionChanged   -= OnAny;
+        Bridge.BatteryChanged      -= OnBattery;
+        Bridge.WifiStatusChanged   -= OnWifi;
+        Bridge.ButtonEventReceived -= OnButton;
+    }
+
+    void OnAny(bool _)            => InvokeAsync(StateHasChanged);
+    void OnBattery(BatteryState b){ _battery = b;  InvokeAsync(StateHasChanged); }
+    void OnWifi(WifiStatus s)     { _wifi    = s;  InvokeAsync(StateHasChanged); }
+    void OnButton(ButtonEvent e)  { _button  = e;  InvokeAsync(StateHasChanged); }
+
+    static string WifiClass(WifiState s) => s switch
+    {
+        WifiState.Connected  => "connected",
+        WifiState.Connecting => "connecting",
+        WifiState.Failed     => "failed",
+        _ => "muted",
+    };
+}

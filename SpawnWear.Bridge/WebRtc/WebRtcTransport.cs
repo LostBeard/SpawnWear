@@ -33,8 +33,13 @@ public class WebRtcTransport : ITransport
 
     public bool IsConnected { get; private set; }
 
+    // Events are the public contract; Phase 7 fills in the senders when
+    // SpawnDev.RTC + BLE-as-signaling are wired. Suppressing CS0067 here
+    // keeps the warning-clean build until then.
+#pragma warning disable CS0067
     public event Action<bool>? ConnectionChanged;
     public event Action<TransportMessage>? MessageReceived;
+#pragma warning restore CS0067
 
     public Task ConnectAsync(CancellationToken ct = default)
     {
