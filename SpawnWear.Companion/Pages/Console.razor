@@ -1,0 +1,104 @@
+@page "/console"
+@using SpawnWear.Bridge
+@inject BridgeClient Bridge
+@implements IDisposable
+
+<PageTitle>Console &mdash; SpawnWear.Companion</PageTitle>
+
+<div class="page-head">
+    <h1>Debug console</h1>
+    <span class="badge @(Bridge.IsConnected ? "ok" : "off")">
+        @(Bridge.IsConnected ? "live" : "disconnected")
+    </span>
+</div>
+
+<p class="muted">Live <code>Debug.WriteLine</code> stream from the watch over BLE GATT (notify on <code>DebugLogOutputUuid</code>). Type a command below and press Send to write to the watch's <code>DebugCommandInputUuid</code> characteristic.</p>
+
+<div class="terminal" @ref="_terminalRef">
+@foreach (var line in _lines)
+{
+    <div class="line">@line</div>
+}
+</div>
+
+<form @onsubmit="SendCommand" @onsubmit:preventDefault class="cmd-row">
+    <input type="text" placeholder="@(Bridge.IsConnected ? "type a command, then Enter" : "connect on Home first")"
+           @bind="_cmd" @bind:event="oninput" disabled="@(!Bridge.IsConnected)" />
+    <button type="submit" disabled="@(!Bridge.IsConnected || string.IsNullOrEmpty(_cmd))">Send</button>
+    <button type="button" class="ghost" @onclick="ClearLog">Clear</button>
+</form>
+
+@if (_error is not null)
+{
+    <div class="error">@_error</div>
+}
+
+<style>
+    .page-head { display: flex; align-items: center; gap: 0.8rem; }
+    .page-head h1 { margin: 0; }
+    .badge { padding: 0.18rem 0.6rem; border-radius: 999px; font-size: 0.7rem; letter-spacing: 0.07em; font-weight: 600; }
+    .badge.ok { background: rgba(70,210,140,0.18); color: #6dd9a4; }
+    .badge.off { background: rgba(220,80,90,0.18); color: #ec7986; }
+    .muted { opacity: 0.7; font-size: 0.95rem; }
+    .terminal { background: #0e1117; color: #d8dae4; border: 1px solid #2c2f3a; border-radius: 10px;
+                padding: 0.8rem 1rem; font-family: ui-monospace, "SF Mono", monospace; font-size: 0.85rem;
+                height: 22rem; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+    .terminal .line { padding: 0.05rem 0; }
+    .cmd-row { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+    .cmd-row input { flex: 1; background: #1f2330; border: 1px solid #2c2f3a; color: #d8dae4;
+                     border-radius: 8px; padding: 0.5rem 0.75rem; font-family: ui-monospace, "SF Mono", monospace; }
+    .cmd-row button { background: linear-gradient(120deg,#5b8def,#9d6bff); color: white; border: 0;
+                      padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .cmd-row button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .cmd-row button.ghost { background: #2c2f3a; }
+    .error { color: #ec7986; margin-top: 0.5rem; font-size: 0.9rem; }
+</style>
+
+@code {
+    readonly List<string> _lines = new();
+    string _cmd = "";
+    string? _error;
+    ElementReference _terminalRef;
+
+    protected override void OnInitialized()
+    {
+        Bridge.DebugLogReceived  += OnLog;
+        Bridge.ConnectionChanged += OnConn;
+    }
+
+    public void Dispose()
+    {
+        Bridge.DebugLogReceived  -= OnLog;
+        Bridge.ConnectionChanged -= OnConn;
+    }
+
+    void OnLog(string line)
+    {
+        _lines.Add(line);
+        const int CAP = 500;
+        if (_lines.Count > CAP) _lines.RemoveRange(0, _lines.Count - CAP);
+        InvokeAsync(StateHasChanged);
+    }
+
+    void OnConn(bool connected) => InvokeAsync(StateHasChanged);
+
+    async Task SendCommand()
+    {
+        if (string.IsNullOrEmpty(_cmd)) return;
+        _error = null;
+        try
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(_cmd);
+            await Bridge.SendAsync(new TransportMessage(ChannelIds.DebugCmd, bytes));
+            _lines.Add($"> {_cmd}");
+            _cmd = "";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    void ClearLog()
+    {
+        _lines.Clear();
+        _error = null;
+    }
+}

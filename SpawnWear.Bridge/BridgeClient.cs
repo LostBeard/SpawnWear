@@ -59,6 +59,15 @@ public class BridgeClient : IAsyncDisposable
     public Task DisconnectAsync() =>
         _transport?.DisconnectAsync() ?? Task.CompletedTask;
 
+    /// <summary>Send a framed message to the watch through whichever
+    /// transport is currently active. Throws if not connected.</summary>
+    public Task SendAsync(TransportMessage message, CancellationToken ct = default)
+    {
+        if (_transport is null)
+            throw new InvalidOperationException("No transport configured. Call UseTransportAsync first.");
+        return _transport.SendAsync(message, ct);
+    }
+
     void OnConnectionChanged(bool connected) => ConnectionChanged?.Invoke(connected);
 
     void OnMessageReceived(TransportMessage msg)

@@ -1,0 +1,119 @@
+@page "/wifi"
+@using SpawnWear.Bridge
+@inject BridgeClient Bridge
+@implements IDisposable
+
+<PageTitle>WiFi &mdash; SpawnWear.Companion</PageTitle>
+
+<div class="page-head">
+    <h1>WiFi setup</h1>
+    <span class="badge @(Bridge.IsConnected ? "ok" : "off")">
+        @(Bridge.IsConnected ? "BLE live" : "disconnected")
+    </span>
+</div>
+
+<p class="muted">Send the watch your home network credentials over BLE so it can join WiFi without typing on its 2.06" panel. Credentials write to the <code>WifiCredentialsUuid</code> characteristic; a single-byte command on <code>WifiCommandUuid</code> tells the watch what to do next.</p>
+
+<form class="card" @onsubmit="SaveAndConnect" @onsubmit:preventDefault>
+    <label>
+        <span>SSID</span>
+        <input type="text" @bind="_ssid" @bind:event="oninput" placeholder="MyHomeNetwork" disabled="@(!Bridge.IsConnected)" />
+    </label>
+    <label>
+        <span>Password</span>
+        <input type="@(_showPw ? "text" : "password")" @bind="_password" @bind:event="oninput" placeholder="WPA2 passphrase" disabled="@(!Bridge.IsConnected)" />
+    </label>
+    <label class="row">
+        <input type="checkbox" @bind="_showPw" /> show password
+    </label>
+
+    <div class="actions">
+        <button type="submit" disabled="@(!Bridge.IsConnected || string.IsNullOrEmpty(_ssid))">Save &amp; connect</button>
+        <button type="button" class="secondary" @onclick="Disconnect" disabled="@(!Bridge.IsConnected)">Tell watch to disconnect</button>
+        <button type="button" class="ghost" @onclick="Forget" disabled="@(!Bridge.IsConnected)">Forget saved network</button>
+    </div>
+
+    @if (_status is not null)
+    {
+        <div class="status @(_isError ? "error" : "ok")">@_status</div>
+    }
+</form>
+
+<style>
+    .page-head { display: flex; align-items: center; gap: 0.8rem; }
+    .page-head h1 { margin: 0; }
+    .badge { padding: 0.18rem 0.6rem; border-radius: 999px; font-size: 0.7rem; letter-spacing: 0.07em; font-weight: 600; }
+    .badge.ok { background: rgba(70,210,140,0.18); color: #6dd9a4; }
+    .badge.off { background: rgba(220,80,90,0.18); color: #ec7986; }
+    .muted { opacity: 0.7; font-size: 0.95rem; max-width: 56rem; }
+    .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.4rem; max-width: 32rem; }
+    .card label { display: block; margin-bottom: 0.8rem; font-size: 0.85rem; opacity: 0.85; }
+    .card label.row { display: flex; align-items: center; gap: 0.4rem; opacity: 0.65; }
+    .card label span { display: block; margin-bottom: 0.25rem; }
+    .card input[type=text], .card input[type=password] {
+        width: 100%; box-sizing: border-box; background: #0e1117; border: 1px solid #2c2f3a; color: #d8dae4;
+        border-radius: 8px; padding: 0.55rem 0.75rem; font-size: 0.95rem;
+    }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .actions button { background: linear-gradient(120deg,#5b8def,#9d6bff); color: white; border: 0;
+                      padding: 0.55rem 1.05rem; border-radius: 999px; font-weight: 600; cursor: pointer; }
+    .actions button.secondary { background: #2c2f3a; color: #d8dae4; }
+    .actions button.ghost { background: transparent; border: 1px solid #2c2f3a; color: #d8dae4; }
+    .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .status { margin-top: 0.9rem; font-size: 0.9rem; }
+    .status.ok { color: #6dd9a4; }
+    .status.error { color: #ec7986; }
+</style>
+
+@code {
+    string _ssid = "";
+    string _password = "";
+    bool _showPw;
+    string? _status;
+    bool _isError;
+
+    protected override void OnInitialized()
+    {
+        Bridge.ConnectionChanged += OnConn;
+    }
+    public void Dispose() => Bridge.ConnectionChanged -= OnConn;
+    void OnConn(bool _) => InvokeAsync(StateHasChanged);
+
+    async Task SaveAndConnect()
+    {
+        _status = null; _isError = false;
+        try
+        {
+            // Wire format on the watch:
+            //   WifiCredentialsUuid write payload = [ssidLen:u8][ssid bytes][passwordLen:u8][password bytes]
+            // Mirrors what the firmware's WifiConfigService expects.
+            var ssidBytes = System.Text.Encoding.UTF8.GetBytes(_ssid);
+            var pwBytes   = System.Text.Encoding.UTF8.GetBytes(_password);
+            if (ssidBytes.Length > 32) throw new InvalidOperationException("SSID too long (max 32 bytes)");
+            if (pwBytes.Length > 64)   throw new InvalidOperationException("Password too long (max 64 bytes)");
+
+            var payload = new byte[1 + ssidBytes.Length + 1 + pwBytes.Length];
+            payload[0] = (byte)ssidBytes.Length;
+            Buffer.BlockCopy(ssidBytes, 0, payload, 1, ssidBytes.Length);
+            payload[1 + ssidBytes.Length] = (byte)pwBytes.Length;
+            Buffer.BlockCopy(pwBytes, 0, payload, 2 + ssidBytes.Length, pwBytes.Length);
+
+            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCredentials, payload));
+            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdConnect }));
+            _status = "Credentials sent. Watch will attempt to join.";
+        }
+        catch (Exception ex) { _status = ex.Message; _isError = true; }
+    }
+
+    async Task Disconnect()
+    {
+        try { await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdDisconnect })); _status = "Disconnect command sent."; _isError = false; }
+        catch (Exception ex) { _status = ex.Message; _isError = true; }
+    }
+
+    async Task Forget()
+    {
+        try { await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdForget })); _status = "Forget command sent."; _isError = false; }
+        catch (Exception ex) { _status = ex.Message; _isError = true; }
+    }
+}

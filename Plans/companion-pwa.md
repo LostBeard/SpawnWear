@@ -69,9 +69,11 @@ The Bridge picks whichever is reachable. All three transports terminate at the s
 
 - [x] **`SpawnWear.Bridge` RCL scaffolded** (2026-05-05) - SpawnDev.BlazorJS 3.5.3 + SpawnDev.RTC 1.1.0 referenced; ITransport abstraction; BleTransport stub; WebRtcTransport stub; BridgeClient with typed events; AddSpawnWearBridge DI extension; BleUuids + ChannelIds duplicated from firmware (will graduate to a shared `SpawnWear.Protocol` library when duplication starts to hurt)
 - [x] **`SpawnWear.Companion` PWA scaffolded** (2026-05-05) - Blazor WASM PWA + service worker; ProjectReference to Bridge; Home page with Connect button + live Battery/IMU/log cards bound to BridgeClient events; builds clean
-- [ ] BleTransport real implementation (Web Bluetooth requestDevice + GATT notify subscription against WatchProfileService) - in-flight
-- [ ] WifiConfigService write characteristic - PWA sends SSID + password, watch stores via `Wireless80211Configuration.SaveConfiguration` and reconnects
-- [ ] Live battery + RTC + IP readout via WatchProfileService - schema match with firmware verified, wire-up pending real BLE
+- [x] **BleTransport real implementation** (2026-05-05) - Web Bluetooth `RequestDevice` filtered on `WifiServiceUuid` + `SW-` name-prefix fallback, `GATT.Connect`, `GetPrimaryService`, every characteristic resolved (battery / IMU / RTC / button / wifi-status / debug-log on notify side; wifi-cmd / wifi-creds / debug-cmd on write side), `StartNotifications` + `OnCharacteristicValueChanged` subscriptions wired, `Device.OnGATTServerDisconnected` cleanup. SpawnDev.BlazorJS typed wrappers throughout - no raw JS, no IJSRuntime.
+- [x] **`Wifi.razor` page** (2026-05-05) - SSID + password form, "Save & connect" writes credentials + `WifiCmdConnect` to the watch; "Tell watch to disconnect" + "Forget saved network" send the matching command bytes
+- [x] **`Console.razor` page** (2026-05-05) - live `Debug.WriteLine` stream from the watch (decoded UTF-8 from `DebugLogOutputUuid` notifies); command-line input writes UTF-8 to `DebugCommandInputUuid`. Capped at 500 lines for memory.
+- [ ] **Verify on real silicon** - browser pairing UI + GATT subscription against the actual watch firmware. TJ's daily watch on COM9 / WiFi 192.168.1.171.
+- [ ] Battery / RTC / IP readout displayed in PWA - data plumbing is live; UI cards show "no data" until first watch notify lands
 
 ### Phase 4b - Debug console mirror
 
