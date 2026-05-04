@@ -28,6 +28,8 @@ namespace SpawnWear
         static ScreenNavigator _nav;
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
+        static Bitmap _fb; // shared framebuffer reference for screenshots
+        static int _bootButtonClickPending; // set by ISR, drained by main loop
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
 
@@ -94,6 +96,7 @@ namespace SpawnWear
 
             if (fb != null)
             {
+                _fb = fb;
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
@@ -105,12 +108,18 @@ namespace SpawnWear
                 // hard-wired.
                 var launcherTiles = new LauncherScreen.Tile[]
                 {
-                    new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock },
-                    // Static demo badge counts on STATS + SETTINGS so the visual is
-                    // visible at boot. Phase 3 will wire these to a real
-                    // NotificationService that aggregates BLE / system / app events.
-                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    BadgeCount = 3 },
-                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, BadgeCount = 1 },
+                    // Row 1: 3 fully-implemented apps.
+                    new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
+                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40), BadgeCount = 3 },
+                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20), BadgeCount = 1 },
+                    // Row 2: planned apps - placeholders rendered dimmed until they ship.
+                    new LauncherScreen.Tile { Label = "MUSIC",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
+                    new LauncherScreen.Tile { Label = "VIDEO",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
+                    new LauncherScreen.Tile { Label = "GALLERY",  TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Gallery },
+                    // Row 3: more planned apps.
+                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Wifi },
+                    new LauncherScreen.Tile { Label = "VOICE",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
+                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Settings },
                 };
                 var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
                     targetIndex => { _nav.GoTo(targetIndex); });
@@ -161,6 +170,21 @@ namespace SpawnWear
         /// </summary>
         static int OnTick(EventLoop.WakeReason reason)
         {
+            // Drain a pending screenshot capture before painting. We do this on the
+            // main-loop thread (not in the BOOT-button ISR) because Screenshot.Capture
+            // does ~52 KB of GetPixel reads + base64 + Debug.WriteLine traffic that
+            // would block the GPIO event handler for several seconds.
+            if (_bootButtonClickPending > 0)
+            {
+                _bootButtonClickPending = 0;
+                if (_fb != null)
+                {
+                    Debug.WriteLine("[Boot] capturing screenshot...");
+                    int bytes = Screenshot.Capture(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                    Debug.WriteLine("[Boot] screenshot " + bytes + " bytes done");
+                }
+            }
+
             try
             {
                 long nowTicks = DateTime.UtcNow.Ticks;
@@ -431,10 +455,11 @@ namespace SpawnWear
         /// roadmap item from the README. The button is pulled-up internally (active LOW),
         /// so a press triggers a falling edge.
         ///
-        /// V1 dispatch: a single press IMMEDIATELY transitions the screen state to Sleep
-        /// (DisplayControl.Sleep + 30 s tick budget). A subsequent touch wakes the panel
-        /// via the existing state-machine path. Long-press / double-press semantics are
-        /// reserved for Phase 2 once the system gets a real input dispatcher.
+        /// V2 dispatch (dev-mode): a single press triggers a screenshot capture - the
+        /// main loop drains a pending-flag and emits the framebuffer thumbnail as
+        /// base64 chunks over Debug.WriteLine that the host-side
+        /// `tools/nf-screenshot.cs` reassembles into a PNG. Force-sleep moves to the
+        /// SETTINGS app's "SLEEP" row.
         /// </summary>
         static void StartBootButton()
         {
@@ -446,12 +471,8 @@ namespace SpawnWear
                 pin.ValueChanged += (sender, args) =>
                 {
                     if (args.ChangeType != System.Device.Gpio.PinEventTypes.Falling) return;
-                    Debug.WriteLine("[Boot] PRESS - forcing Sleep");
-                    // Reset _lastTouchUtcTicks far enough into the past that the next OnTick
-                    // computes idle >= SleepAfterSeconds and transitions the state machine
-                    // to Sleep, which then drives DisplayControl.Sleep().
-                    _lastTouchUtcTicks = DateTime.UtcNow.Ticks - (SleepAfterSeconds + 1) * TimeSpan.TicksPerSecond;
-                    _fingerDown = false;
+                    Debug.WriteLine("[Boot] PRESS - queue screenshot");
+                    _bootButtonClickPending = 1;
                     if (_eventLoop != null) _eventLoop.Wake();
                 };
                 Debug.WriteLine("[Boot] B2 - Falling-edge handler attached");

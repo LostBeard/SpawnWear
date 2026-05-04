@@ -32,6 +32,7 @@
     <Compile Include="UI\ListView.cs" />
     <Compile Include="UI\PageDots.cs" />
     <Compile Include="UI\ScreenNavigator.cs" />
+    <Compile Include="UI\Screenshot.cs" />
     <Compile Include="UI\StatusBar.cs" />
     <Compile Include="UI\SegmentFont.cs" />
     <Compile Include="UI\SettingsScreen.cs" />

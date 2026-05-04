@@ -29,9 +29,15 @@ namespace SpawnWear.UI
             // Phase 3 will wire this to a NotificationService that aggregates
             // events from BLE + system + per-app sources.
             public int BadgeCount;
+            // Tinted background fill. Color.Black = no fill (just the outline).
+            // Stock Waveshare firmware uses gradient fills for visual hierarchy;
+            // V2 here uses solid color tints as a stepping stone toward that.
+            public Color Background = Color.Black;
+            // Tiles with no TargetScreenIndex (-1) are placeholders for apps not
+            // yet implemented - they render dimmed and ignore taps.
         }
 
-        public enum IconKind { Clock, Stats, Settings }
+        public enum IconKind { Clock, Stats, Settings, Music, Gallery, Wifi, Empty }
 
         readonly Bitmap _fb;
         readonly int _panelWidth;
@@ -42,11 +48,14 @@ namespace SpawnWear.UI
         int _pageDotIndex = -1;
         int _pageDotCount;
 
-        // Tile geometry (computed in Layout).
+        // Tile geometry (computed in Layout). 3x3 grid: cols * rows tiles, with
+        // gaps between them, centered horizontally and below the status bar.
+        const int Cols = 3;
+        const int Rows = 3;
         int _tileSize;
         int _tileGap;
-        int _tilesY;
-        int _tilesStartX;
+        int _gridTopY;
+        int _gridLeftX;
 
         public LauncherScreen(Bitmap fb, int panelWidth, int panelHeight, Tile[] tiles, LaunchApp launch)
         {
@@ -71,11 +80,18 @@ namespace SpawnWear.UI
             _fb.Clear();
             _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
 
-            // Tiles row.
-            for (int i = 0; i < _tiles.Length; i++)
+            // 3x3 grid. Empty slots (i >= _tiles.Length) render nothing so the
+            // launcher gracefully scales from 1 to 9 registered apps.
+            for (int row = 0; row < Rows; row++)
             {
-                int x = _tilesStartX + i * (_tileSize + _tileGap);
-                DrawTile(x, _tilesY, _tiles[i]);
+                for (int col = 0; col < Cols; col++)
+                {
+                    int idx = row * Cols + col;
+                    if (idx >= _tiles.Length) break;
+                    int x = _gridLeftX + col * (_tileSize + _tileGap);
+                    int y = _gridTopY + row * (_tileSize + _tileGap);
+                    DrawTile(x, y, _tiles[idx]);
+                }
             }
 
             // Page dots.
@@ -93,19 +109,31 @@ namespace SpawnWear.UI
 
         public bool OnTap(int x, int y)
         {
-            // Re-run layout in case Invalidate hasn't been called yet.
             if (_tileSize == 0) Layout();
 
-            if (y < _tilesY || y >= _tilesY + _tileSize) return false;
-            int relX = x - _tilesStartX;
-            if (relX < 0) return false;
-            int slot = relX / (_tileSize + _tileGap);
-            if (slot < 0 || slot >= _tiles.Length) return false;
-            int slotStart = slot * (_tileSize + _tileGap);
-            int slotEnd = slotStart + _tileSize;
-            if (relX < slotStart || relX >= slotEnd) return false; // landed in the gap
+            int relX = x - _gridLeftX;
+            int relY = y - _gridTopY;
+            if (relX < 0 || relY < 0) return false;
 
-            var tile = _tiles[slot];
+            int colSlot = relX / (_tileSize + _tileGap);
+            int rowSlot = relY / (_tileSize + _tileGap);
+            if (colSlot < 0 || colSlot >= Cols) return false;
+            if (rowSlot < 0 || rowSlot >= Rows) return false;
+
+            // Reject taps that land in the gap between cells.
+            int colInSlot = relX - colSlot * (_tileSize + _tileGap);
+            int rowInSlot = relY - rowSlot * (_tileSize + _tileGap);
+            if (colInSlot >= _tileSize || rowInSlot >= _tileSize) return false;
+
+            int idx = rowSlot * Cols + colSlot;
+            if (idx >= _tiles.Length) return false;
+
+            var tile = _tiles[idx];
+            if (tile.TargetScreenIndex < 0)
+            {
+                System.Diagnostics.Debug.WriteLine("[Launcher] tile " + tile.Label + " is a placeholder, ignored");
+                return true; // consume so navigator doesn't cycle
+            }
             System.Diagnostics.Debug.WriteLine("[Launcher] launching " + tile.Label + " -> screen " + tile.TargetScreenIndex);
             _launch?.Invoke(tile.TargetScreenIndex);
             return true;
@@ -116,84 +144,109 @@ namespace SpawnWear.UI
         void Layout()
         {
             int statusBarH = _statusBar != null ? StatusBar.ReservedHeight : 0;
-            int safeBottomReserved = 80; // page dots + footer breathing room
+            int safeBottomReserved = 60; // page dots breathing room
             int availableH = _panelHeight - statusBarH - safeBottomReserved;
-            // Corner-rounding safe area: don't push tiles all the way to the edges
-            int safeInset = 50;
+            // Corner-rounding safe area inset (per Notes/co5300-quirks.md - the
+            // visible AMOLED is inset ~50 px from each panel edge by the case bezel).
+            int safeInset = 40;
             int availableW = _panelWidth - 2 * safeInset;
 
-            // 3 tiles + 2 gaps. Pick a tile size that leaves a comfortable label
-            // (label ~ 40 px) below each tile inside the row.
-            int tileLabelH = 40;
-            int rowH = availableH;
-            int tileSizeFromHeight = rowH - tileLabelH;
-            int tileSizeFromWidth = (availableW - 2 * 24) / _tiles.Length; // 24 px gaps
-            _tileSize = tileSizeFromHeight < tileSizeFromWidth ? tileSizeFromHeight : tileSizeFromWidth;
-            if (_tileSize > 130) _tileSize = 130;
-            _tileGap = 24;
+            _tileGap = 14;
 
-            int totalW = _tiles.Length * _tileSize + (_tiles.Length - 1) * _tileGap;
-            _tilesStartX = (_panelWidth - totalW) / 2;
-            _tilesY = statusBarH + (availableH - _tileSize - tileLabelH) / 2;
+            // Labels render INSIDE each tile's bottom strip; no extra vertical
+            // space needed between rows beyond _tileGap. This matches the
+            // Android launcher pattern (icon top, label bottom, no overflow).
+            int sizeFromW = (availableW - (Cols - 1) * _tileGap) / Cols;
+            int sizeFromH = (availableH - (Rows - 1) * _tileGap) / Rows;
+            _tileSize = sizeFromW < sizeFromH ? sizeFromW : sizeFromH;
+            if (_tileSize < 60) _tileSize = 60;
+
+            int totalGridW = Cols * _tileSize + (Cols - 1) * _tileGap;
+            int totalGridH = Rows * _tileSize + (Rows - 1) * _tileGap;
+            _gridLeftX = (_panelWidth - totalGridW) / 2;
+            _gridTopY = statusBarH + (availableH - totalGridH) / 2;
         }
 
         // ----- Tile rendering -----
 
         void DrawTile(int x, int y, Tile tile)
         {
-            // Outline square as the tile background.
-            int t = 3;
-            _fb.FillRectangle(x, y, _tileSize, t, Color.White);
-            _fb.FillRectangle(x, y + _tileSize - t, _tileSize, t, Color.White);
-            _fb.FillRectangle(x, y, t, _tileSize, Color.White);
-            _fb.FillRectangle(x + _tileSize - t, y, t, _tileSize, Color.White);
+            bool placeholder = tile.TargetScreenIndex < 0;
 
-            // Icon area = inner ~70% square centered.
-            int iconBoxSize = (_tileSize * 7) / 10;
+            // Filled tile background. Solid tint for V1; future polish pass swaps
+            // for a vertical gradient (FillGradientRectangle exists in the
+            // managed framework) and rounds the corners.
+            Color bg = placeholder ? Color.FromArgb(60, 60, 60) : tile.Background;
+            if (bg != Color.Black)
+            {
+                _fb.FillRectangle(x, y, _tileSize, _tileSize, bg);
+            }
+
+            // Outline.
+            int t = placeholder ? 1 : 2;
+            Color outline = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
+            _fb.FillRectangle(x, y, _tileSize, t, outline);
+            _fb.FillRectangle(x, y + _tileSize - t, _tileSize, t, outline);
+            _fb.FillRectangle(x, y, t, _tileSize, outline);
+            _fb.FillRectangle(x + _tileSize - t, y, t, _tileSize, outline);
+
+            // Layout INSIDE the tile: icon in the top ~65%, label in the bottom ~25%
+            // with a small gap between them. This matches the Android launcher
+            // shape and prevents labels from overflowing into the next row.
+            int labelScale = 2;
+            int labelH = SmallFont.GlyphHeight * labelScale;
+            int labelStripH = labelH + 6; // 3 px padding above + below
+            int iconAreaH = _tileSize - labelStripH - 6; // 6 px top padding
+            int iconBoxSize = iconAreaH < (_tileSize * 6) / 10 ? iconAreaH : (_tileSize * 6) / 10;
             int iconX = x + (_tileSize - iconBoxSize) / 2;
-            int iconY = y + (_tileSize - iconBoxSize) / 2;
+            int iconY = y + 6 + (iconAreaH - iconBoxSize) / 2;
+            Color iconColor = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
 
             switch (tile.Icon)
             {
-                case IconKind.Clock: DrawClockIcon(iconX, iconY, iconBoxSize); break;
-                case IconKind.Stats: DrawStatsIcon(iconX, iconY, iconBoxSize); break;
-                case IconKind.Settings: DrawSettingsIcon(iconX, iconY, iconBoxSize); break;
+                case IconKind.Clock: DrawClockIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Stats: DrawStatsIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Settings: DrawSettingsIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Music: DrawMusicIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Gallery: DrawGalleryIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Wifi: DrawWifiIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.Empty: break;
             }
 
             // Notification badge (top-right corner of the tile).
             if (tile.BadgeCount > 0)
             {
-                DrawBadge(x + _tileSize - 26, y - 6, tile.BadgeCount);
+                DrawBadge(x + _tileSize - 22, y - 4, tile.BadgeCount);
             }
 
-            // Label centered under the tile.
-            int labelScale = 3;
+            // Label inside the bottom strip of the tile.
             int labelW = SmallFont.MeasureString(tile.Label, labelScale);
             int labelX = x + (_tileSize - labelW) / 2;
-            int labelY = y + _tileSize + 8;
-            SmallFont.DrawString(_fb, tile.Label, labelX, labelY, labelScale, Color.White);
+            int labelY = y + _tileSize - labelStripH + 3;
+            Color labelColor = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
+            SmallFont.DrawString(_fb, tile.Label, labelX, labelY, labelScale, labelColor);
         }
 
         // Filled red badge with a small white digit; "9+" if count > 9.
         void DrawBadge(int x, int y, int count)
         {
-            int size = 32;
-            // Solid red square (Phase 3 swaps to circle once we have per-pixel ops).
-            _fb.FillRectangle(x, y, size, size, Color.Red);
-            // White outline so the badge pops against any tile color.
+            int size = 22;
+            Color badge = Color.Red;
+            Color text = Color.White;
+            _fb.FillRectangle(x, y, size, size, badge);
             int t = 2;
-            _fb.FillRectangle(x, y, size, t, Color.White);
-            _fb.FillRectangle(x, y + size - t, size, t, Color.White);
-            _fb.FillRectangle(x, y, t, size, Color.White);
-            _fb.FillRectangle(x + size - t, y, t, size, Color.White);
+            _fb.FillRectangle(x, y, size, t, text);
+            _fb.FillRectangle(x, y + size - t, size, t, text);
+            _fb.FillRectangle(x, y, t, size, text);
+            _fb.FillRectangle(x + size - t, y, t, size, text);
 
             string display = count > 9 ? "9+" : ((char)('0' + count)).ToString();
-            int scale = 3;
+            int scale = 2;
             int textW = SmallFont.MeasureString(display, scale);
             int textH = SmallFont.GlyphHeight * scale;
             int textX = x + (size - textW) / 2;
             int textY = y + (size - textH) / 2;
-            SmallFont.DrawString(_fb, display, textX, textY, scale, Color.White);
+            SmallFont.DrawString(_fb, display, textX, textY, scale, text);
         }
 
         /// <summary>
@@ -209,31 +262,31 @@ namespace SpawnWear.UI
 
         // ----- Icon primitives (rectangles only) -----
 
-        void DrawClockIcon(int x, int y, int size)
+        void DrawClockIcon(int x, int y, int size, Color color)
         {
             // Outline circle approximation: 4 corners with rectangles, plus a
             // hands cross in the middle.
             int t = 4;
             // Top / bottom thick caps to suggest curvature.
             int capW = size / 2;
-            _fb.FillRectangle(x + (size - capW) / 2, y, capW, t, Color.White);
-            _fb.FillRectangle(x + (size - capW) / 2, y + size - t, capW, t, Color.White);
-            _fb.FillRectangle(x, y + (size - capW) / 2, t, capW, Color.White);
-            _fb.FillRectangle(x + size - t, y + (size - capW) / 2, t, capW, Color.White);
+            _fb.FillRectangle(x + (size - capW) / 2, y, capW, t, color);
+            _fb.FillRectangle(x + (size - capW) / 2, y + size - t, capW, t, color);
+            _fb.FillRectangle(x, y + (size - capW) / 2, t, capW, color);
+            _fb.FillRectangle(x + size - t, y + (size - capW) / 2, t, capW, color);
             // 12-3-6-9 markers as small dots.
             int m = 4;
-            _fb.FillRectangle(x + size / 2 - m / 2, y + 8, m, m, Color.White);
-            _fb.FillRectangle(x + size / 2 - m / 2, y + size - 8 - m, m, m, Color.White);
-            _fb.FillRectangle(x + 8, y + size / 2 - m / 2, m, m, Color.White);
-            _fb.FillRectangle(x + size - 8 - m, y + size / 2 - m / 2, m, m, Color.White);
+            _fb.FillRectangle(x + size / 2 - m / 2, y + 8, m, m, color);
+            _fb.FillRectangle(x + size / 2 - m / 2, y + size - 8 - m, m, m, color);
+            _fb.FillRectangle(x + 8, y + size / 2 - m / 2, m, m, color);
+            _fb.FillRectangle(x + size - 8 - m, y + size / 2 - m / 2, m, m, color);
             // Hands: vertical (hour) and horizontal-ish (minute).
             int cx = x + size / 2;
             int cy = y + size / 2;
-            _fb.FillRectangle(cx - 2, cy - size / 4, 4, size / 4, Color.White);  // hour pointing up
-            _fb.FillRectangle(cx, cy - 2, size / 3, 4, Color.White);              // minute pointing right
+            _fb.FillRectangle(cx - 2, cy - size / 4, 4, size / 4, color);  // hour pointing up
+            _fb.FillRectangle(cx, cy - 2, size / 3, 4, color);              // minute pointing right
         }
 
-        void DrawStatsIcon(int x, int y, int size)
+        void DrawStatsIcon(int x, int y, int size, Color color)
         {
             // Three vertical bars of increasing height, like a tiny bar chart.
             int barW = size / 5;
@@ -244,11 +297,11 @@ namespace SpawnWear.UI
             {
                 int barX = x + barGap + i * (barW + barGap);
                 int h = heights[i];
-                _fb.FillRectangle(barX, baseY - h, barW, h, Color.White);
+                _fb.FillRectangle(barX, baseY - h, barW, h, color);
             }
         }
 
-        void DrawSettingsIcon(int x, int y, int size)
+        void DrawSettingsIcon(int x, int y, int size, Color color)
         {
             // Gear-like: a centered square + 8 surrounding rectangles for teeth.
             int t = size / 4;
@@ -258,19 +311,75 @@ namespace SpawnWear.UI
             int hole = t / 2;
             int holeStroke = 3;
             int sb = size / 2 - 4;
-            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, sb, holeStroke, Color.White);
-            _fb.FillRectangle(cx - sb / 2, cy + sb / 2 - holeStroke, sb, holeStroke, Color.White);
-            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, holeStroke, sb, Color.White);
-            _fb.FillRectangle(cx + sb / 2 - holeStroke, cy - sb / 2, holeStroke, sb, Color.White);
+            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, sb, holeStroke, color);
+            _fb.FillRectangle(cx - sb / 2, cy + sb / 2 - holeStroke, sb, holeStroke, color);
+            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, holeStroke, sb, color);
+            _fb.FillRectangle(cx + sb / 2 - holeStroke, cy - sb / 2, holeStroke, sb, color);
             // Teeth: 4 cardinal stubs.
             int toothLen = (size - sb) / 2 - 2;
             int toothW = sb / 3;
             // Top + bottom
-            _fb.FillRectangle(cx - toothW / 2, y, toothW, toothLen, Color.White);
-            _fb.FillRectangle(cx - toothW / 2, y + size - toothLen, toothW, toothLen, Color.White);
+            _fb.FillRectangle(cx - toothW / 2, y, toothW, toothLen, color);
+            _fb.FillRectangle(cx - toothW / 2, y + size - toothLen, toothW, toothLen, color);
             // Left + right
-            _fb.FillRectangle(x, cy - toothW / 2, toothLen, toothW, Color.White);
-            _fb.FillRectangle(x + size - toothLen, cy - toothW / 2, toothLen, toothW, Color.White);
+            _fb.FillRectangle(x, cy - toothW / 2, toothLen, toothW, color);
+            _fb.FillRectangle(x + size - toothLen, cy - toothW / 2, toothLen, toothW, color);
+        }
+
+        void DrawMusicIcon(int x, int y, int size, Color color)
+        {
+            // Eighth note: filled head + thick stem + flag.
+            int cx = x + size / 4;
+            int cy = y + size - size / 4;
+            int headW = size / 3;
+            int headH = size / 4;
+            _fb.FillRectangle(cx - headW / 2, cy - headH / 2, headW, headH, color);
+            // Stem.
+            int stemX = cx + headW / 2 - 4;
+            int stemTopY = y + size / 6;
+            int stemH = cy - stemTopY;
+            _fb.FillRectangle(stemX, stemTopY, 4, stemH, color);
+            // Flag.
+            _fb.FillRectangle(stemX, stemTopY, size / 3, 4, color);
+            _fb.FillRectangle(stemX + size / 3 - 4, stemTopY, 4, size / 4, color);
+        }
+
+        void DrawGalleryIcon(int x, int y, int size, Color color)
+        {
+            // Photo frame: outline rectangle + a "horizon line" + a "sun" dot.
+            int t = 3;
+            _fb.FillRectangle(x, y, size, t, color);
+            _fb.FillRectangle(x, y + size - t, size, t, color);
+            _fb.FillRectangle(x, y, t, size, color);
+            _fb.FillRectangle(x + size - t, y, t, size, color);
+            // Horizon line at 2/3 height.
+            int horizonY = y + (size * 2) / 3;
+            _fb.FillRectangle(x + 4, horizonY, size - 8, t, color);
+            // Sun.
+            int sunSize = size / 5;
+            _fb.FillRectangle(x + size - sunSize - 8, y + 8, sunSize, sunSize, color);
+        }
+
+        void DrawWifiIcon(int x, int y, int size, Color color)
+        {
+            // Three concentric arcs approximated as horizontal bars of decreasing
+            // width stacked on top of a dot. Bottom = dot, then small arc, mid arc,
+            // big arc. Reads as a wifi signal at the panel's density.
+            int cx = x + size / 2;
+            int t = 4;
+            // Dot at bottom-center.
+            int dotSize = 6;
+            _fb.FillRectangle(cx - dotSize / 2, y + size - dotSize - 2, dotSize, dotSize, color);
+            // Three horizontal bars above the dot, increasing width.
+            int barCount = 3;
+            int gap = 6;
+            int baseY = y + size - dotSize - 2 - gap;
+            for (int i = 0; i < barCount; i++)
+            {
+                int width = (size * (i + 1)) / (barCount + 1);
+                int yy = baseY - i * (t + gap);
+                _fb.FillRectangle(cx - width / 2, yy - t, width, t, color);
+            }
         }
     }
 }
