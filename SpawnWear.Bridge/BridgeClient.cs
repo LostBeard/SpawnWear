@@ -79,15 +79,19 @@ public class BridgeClient : IAsyncDisposable
         switch (msg.ChannelId)
         {
             case ChannelIds.Battery:
-                if (msg.Payload.Length >= 8)
+                if (msg.Payload.Length >= 6)
                 {
+                    // Firmware schema (WatchProfileService.NotifyBatteryState):
+                    //   [percent:u8][flags:u8][voltage_mV:u16-LE][current_mA:i16-LE]
+                    //   flags bit0 = charging, bit1 = USB VBUS present, bit2 = low battery
+                    byte flags = msg.Payload[1];
                     var b = new BatteryState(
-                        Percent: msg.Payload[0],
-                        IsCharging: msg.Payload[1] != 0,
-                        IsVbusPresent: msg.Payload[2] != 0,
-                        IsLowBattery: msg.Payload[3] != 0,
-                        VoltageMillivolts: (ushort)(msg.Payload[4] | (msg.Payload[5] << 8)),
-                        CurrentMilliamps: (short)(msg.Payload[6] | (msg.Payload[7] << 8)));
+                        Percent:           msg.Payload[0],
+                        IsCharging:        (flags & 0x01) != 0,
+                        IsVbusPresent:     (flags & 0x02) != 0,
+                        IsLowBattery:      (flags & 0x04) != 0,
+                        VoltageMillivolts: (ushort)(msg.Payload[2] | (msg.Payload[3] << 8)),
+                        CurrentMilliamps:  (short) (msg.Payload[4] | (msg.Payload[5] << 8)));
                     BatteryChanged?.Invoke(b);
                 }
                 break;
