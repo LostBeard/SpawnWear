@@ -12,6 +12,8 @@ When you discover something non-obvious - a chip quirk, a flashing gotcha, a reg
 
 ### Reverse-engineered chip behavior
 - **[co5300-quirks.md](co5300-quirks.md)** - AMOLED display driver: QSPI hybrid protocol, 2-pixel minimum writes, even-aligned address windows, init sequence, command table
+- **[ft3168-driver-notes.md](ft3168-driver-notes.md)** - FocalTech FT3168 capacitive touch: I²C 0x38, burst-read layout (no gap byte after FingerNum, unlike FT5xxx samples), 12-bit decode, tap classification, wake-tap state machine
+- **[pcf85063-driver-notes.md](pcf85063-driver-notes.md)** - NXP PCF85063 RTC: I²C 0x51, OS flag handling, init sequence, weekday convention, Phase 5 alarms path
 
 ### Design docs + reference patches (upstream contributions)
 - **[qspi-display-driver-design.md](qspi-display-driver-design.md)** - End-to-end design for adding hybrid-QSPI display panel support to .NET nanoFramework. Covers managed descriptor extension, native bus binding, ESP-IDF quad-mode plumbing, custom firmware target. CO5300 lands as the first consumer.
@@ -21,8 +23,6 @@ When you discover something non-obvious - a chip quirk, a flashing gotcha, a reg
 
 - `axp2101-driver-notes.md` - PMIC: charging, rails, IRQ multiplexing, PWR button via the IRQ output line on GPIO10
 - `qmi8658-driver-notes.md` - 6-axis IMU: I²C protocol, INT pin on GPIO21, motion-wake config, step counter
-- `pcf85063-driver-notes.md` - RTC: read/set time, alarms via INT pin on GPIO39, battery-backup behavior
-- `ft3168-driver-notes.md` - Touch controller: register map, INT debouncing, multi-touch report format
 - `es8311-driver-notes.md` - Audio playback codec: I²S clock relationships, register init, mute/volume registers
 - `es7210-driver-notes.md` - Echo-cancel ADC + dual PDM mic capture
 - `qspi-bus-design.md` - Design doc for the upstream-bound `nanoFramework.Hardware.Esp32.QspiDevice` we will need to add to the runtime
