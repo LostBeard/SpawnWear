@@ -292,43 +292,27 @@ namespace SpawnWear.Services
 
         void ServeHtml(Socket client)
         {
-            string body = "<!doctype html>\r\n" +
-                "<html><head><title>SpawnWear</title>\r\n" +
-                "<meta name='viewport' content='width=device-width, initial-scale=1'>\r\n" +
-                "<style>body{background:#222;color:#eee;font-family:sans-serif;text-align:center;margin:0;padding:16px} canvas{border:1px solid #555;image-rendering:pixelated;max-width:90vw;height:auto}</style>\r\n" +
-                "</head><body>\r\n" +
-                "<h2>SpawnWear screen</h2>\r\n" +
-                "<button id='r' style='padding:12px 24px;font-size:16px;margin-bottom:12px'>Refresh</button>\r\n" +
-                "<div><canvas id='c' width='410' height='502'></canvas></div>\r\n" +
-                "<p id='s'>idle</p>\r\n" +
-                "<script>\r\n" +
-                "async function fetchShot(){\r\n" +
-                " const s=document.getElementById('s');\r\n" +
-                " s.textContent='fetching...';\r\n" +
-                " const r=await fetch('/screenshot.bin?t='+Date.now());\r\n" +
-                " const ab=await r.arrayBuffer();\r\n" +
-                " const bytes=new Uint8Array(ab);\r\n" +
-                " let nl=0; while(bytes[nl]!=10) nl++;\r\n" +
-                " const hdr=new TextDecoder().decode(bytes.slice(0,nl));\r\n" +
-                " const wm=hdr.match(/w=(\\d+)/), hm=hdr.match(/h=(\\d+)/);\r\n" +
-                " const w=+wm[1], h=+hm[1];\r\n" +
-                " const px=bytes.slice(nl+1);\r\n" +
-                " const c=document.getElementById('c'); c.width=w; c.height=h;\r\n" +
-                " const ctx=c.getContext('2d'); const img=ctx.createImageData(w,h);\r\n" +
-                " for(let i=0;i<w*h;i++){\r\n" +
-                "   const hi=px[i*2], lo=px[i*2+1]; const v=(hi<<8)|lo;\r\n" +
-                "   const r5=(v>>11)&0x1F, g6=(v>>5)&0x3F, b5=v&0x1F;\r\n" +
-                "   img.data[i*4+0]=(r5<<3)|(r5>>2);\r\n" +
-                "   img.data[i*4+1]=(g6<<2)|(g6>>4);\r\n" +
-                "   img.data[i*4+2]=(b5<<3)|(b5>>2);\r\n" +
-                "   img.data[i*4+3]=255;\r\n" +
-                " }\r\n" +
-                " ctx.putImageData(img,0,0);\r\n" +
-                " s.textContent='ok '+w+'x'+h+' '+px.length+' bytes';\r\n" +
-                "}\r\n" +
-                "document.getElementById('r').onclick=fetchShot;\r\n" +
-                "fetchShot();\r\n" +
-                "</script></body></html>\r\n";
+            string body = "<!doctype html><html><head><title>SpawnWear</title>" +
+                "<meta name='viewport' content='width=device-width, initial-scale=1'>" +
+                "<style>body{background:#1a1a22;color:#eee;font-family:system-ui,sans-serif;margin:0;padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px}canvas{border:1px solid #555;image-rendering:pixelated;max-width:90vw;height:auto}button{padding:10px 20px;font-size:15px;background:#2a2a36;color:#eee;border:1px solid #555;border-radius:6px;cursor:pointer}button:hover{background:#3a3a48}#drop{border:2px dashed #555;border-radius:8px;padding:24px;width:80%;max-width:380px;text-align:center;color:#aaa;cursor:pointer}#drop.over{border-color:#6cf;color:#6cf;background:#222}#out{font-family:monospace;font-size:13px;background:#000;padding:8px 12px;border-radius:4px;width:80%;max-width:400px;min-height:1.5em}</style>" +
+                "</head><body>" +
+                "<h2>SpawnWear</h2>" +
+                "<button id='r'>Refresh screen</button>" +
+                "<canvas id='c' width='410' height='502'></canvas>" +
+                "<div id='drop'>Drop a SpawnWear app .pe here<br><small>or <a href='#' id='pick' style='color:#6cf'>browse</a></small><input type='file' id='f' accept='.pe' style='display:none'></div>" +
+                "<div id='out'>idle</div>" +
+                "<script>" +
+                "const out=document.getElementById('out');const drop=document.getElementById('drop');const f=document.getElementById('f');" +
+                "async function fetchShot(){out.textContent='fetching...';const r=await fetch('/screenshot.bin?t='+Date.now());const ab=await r.arrayBuffer();const b=new Uint8Array(ab);let nl=0;while(b[nl]!=10)nl++;const h=new TextDecoder().decode(b.slice(0,nl));const w=+h.match(/w=(\\d+)/)[1],ht=+h.match(/h=(\\d+)/)[1];const px=b.slice(nl+1);const c=document.getElementById('c');c.width=w;c.height=ht;const cx=c.getContext('2d'),img=cx.createImageData(w,ht);for(let i=0;i<w*ht;i++){const v=(px[i*2]<<8)|px[i*2+1];const r5=(v>>11)&0x1F,g6=(v>>5)&0x3F,b5=v&0x1F;img.data[i*4]=(r5<<3)|(r5>>2);img.data[i*4+1]=(g6<<2)|(g6>>4);img.data[i*4+2]=(b5<<3)|(b5>>2);img.data[i*4+3]=255}cx.putImageData(img,0,0);out.textContent='screen '+w+'x'+ht}" +
+                "async function uploadApp(file){out.textContent='uploading '+file.name+' ('+file.size+' bytes)...';const buf=await file.arrayBuffer();const r=await fetch('/loadapp',{method:'POST',body:buf});const t=await r.text();out.textContent=t.trim();setTimeout(fetchShot,500)}" +
+                "document.getElementById('r').onclick=fetchShot;" +
+                "document.getElementById('pick').onclick=e=>{e.preventDefault();f.click()};" +
+                "f.onchange=e=>{if(e.target.files[0])uploadApp(e.target.files[0])};" +
+                "drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};" +
+                "drop.ondragleave=()=>drop.classList.remove('over');" +
+                "drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])uploadApp(e.dataTransfer.files[0])};" +
+                "fetchShot();" +
+                "</script></body></html>";
             byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
             string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
