@@ -8,15 +8,24 @@ html, body {
     color-scheme: dark;
 }
 
-/* Readability: per-component <style> blocks across the app set opacity values
-   between 0.35 and 0.7 on ".muted", ".tagline", ".stat-sub", etc. against the
-   #0e1117 background that lands the text below WCAG AA contrast - hard to
-   read without highlighting. Bump every "fade" class to a single readable
-   floor of 0.85 site-wide. Component styles can still override locally if
-   they need more contrast (e.g. error / disabled states use !important sparingly). */
+/* Readability — multi-front fix:
+   1. Bootstrap 5's .card sets `color: var(--bs-card-color)` which falls back
+      to the LIGHT-theme dark text (#212529) and disappears against our
+      #1f2330 dark cards. Force card text to use the body color so card
+      content (stat-label, stat-value, stat-sub) is actually visible.
+   2. Per-component <style> blocks across the app set opacity values between
+      0.35 and 0.7 on ".muted", ".tagline", ".stat-sub", etc. - below WCAG
+      AA against #0e1117 / #1f2330. Bump every fade class to 0.92 with
+      !important so component-scoped <style> blocks (which load AFTER
+      app.css) don't undo the fix.
+   3. Standalone exceptions (.statusbar .sep, .cmd-row button:disabled)
+      that legitimately want a faded look get a higher floor of 0.55-0.6. */
+.card, .card * {
+    color: #d8dae4;
+}
 .muted, .tagline, .stat-sub, .stat-label, .paired-sub, .paired-name,
 .subtitle, .sub, .ghost, .badge {
-    opacity: 0.92;
+    opacity: 0.92 !important;
 }
 .statusbar .sep { opacity: 0.6 !important; }
 .cmd-row button:disabled { opacity: 0.55 !important; }
