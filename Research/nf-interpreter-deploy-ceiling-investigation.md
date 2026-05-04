@@ -66,7 +66,7 @@ The previously-flashed firmware on the watch was OLDER than the current source. 
 - `c925835a` DisplayControl Sleep / Wake / SetBrightness (2026-05-03 19:04)
 - `d239323d` QSPI display NativeInit fix (2026-05-03 18:03)
 
-We did NOT pinpoint exactly which commit fixed the deploy corruption — possibly memory or alignment-related cleanup that happened to also stabilize deploy. Rather than bisect, we accept the resolution and move forward with the freshly-built firmware as the canonical artifact.
+**2026-05-05 11:30 update — bisected to confirm.** Three controlled rebuilds tested: (1) v5.5.4 + diag instrumentation, (2) v5.4.1 + diag, (3) v5.5.4 with diag REVERTED to byte-identical match of yesterday's flashed source. **All three are clean at 295 KB.** That rules out ESP-IDF version, source state, and the diagnostic itself. The most plausible remaining cause is **build-artifact variance triggering undefined behavior** somewhere in the codebase — different linker output → different addresses → bug doesn't fire. The actual UB hasn't been pinpointed and would require memory sanitizers + a way to reproduce yesterday's binary bit-for-bit (which we can't, since the original .bin is overwritten). Practical takeaway for anyone hitting nanoFramework ESP32-S3 deploy ceilings: **rebuild before treating as architectural**. Any rebuild seems to fix it.
 
 **Deploy ceiling guards in `tools/nf-deploy.cs` and `tools/check-deploy-size.cs` raised from 242 KB to 2 MB** — generous sanity bound, far above any realistic deploy size. The 2.94 MB deploy partition itself is the hardware ceiling.
 
