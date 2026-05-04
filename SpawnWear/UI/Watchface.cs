@@ -1,5 +1,6 @@
 using nanoFramework.UI;
 using SpawnWear.Drivers.Power;
+using SpawnWear.Drivers.Rtc;
 using System;
 using System.Drawing;
 
@@ -25,6 +26,7 @@ namespace SpawnWear.UI
         private readonly int _panelWidth;
         private readonly int _panelHeight;
         private readonly Axp2101Driver _axp;
+        private readonly Pcf85063Driver _rtc;
         private int _lastBatteryPercent = -2; // -2 = never read, -1 = uncalibrated, 0..100 = valid
 
         // Glyph geometry. Tuned for the 410x502 panel: digits ~64 px tall,
@@ -66,12 +68,13 @@ namespace SpawnWear.UI
         // can target only the bar + cap region.
         private int _batX, _batY, _batW, _batH;
 
-        public Watchface(Bitmap framebuffer, int panelWidth, int panelHeight, Axp2101Driver axp = null)
+        public Watchface(Bitmap framebuffer, int panelWidth, int panelHeight, Axp2101Driver axp = null, Pcf85063Driver rtc = null)
         {
             _fb = framebuffer;
             _panelWidth = panelWidth;
             _panelHeight = panelHeight;
             _axp = axp;
+            _rtc = rtc;
         }
 
         // IScreen ----------------------------------------------------------------
@@ -114,14 +117,25 @@ namespace SpawnWear.UI
 
         private bool DoTick()
         {
-            // Convert uptime to HH:MM:SS. Wraps at 24h for V1.
-            // DateTime.UtcNow.Ticks is wall-clock ticks (100 ns) since epoch on
-            // nanoFramework; without an RTC sync it just monotonically increases
-            // from boot, which is exactly what we want for an uptime readout.
-            long elapsedSec = DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond;
-            int h = (int)((elapsedSec / 3600) % 24);
-            int m = (int)((elapsedSec / 60) % 60);
-            int s = (int)(elapsedSec % 60);
+            // Prefer the PCF85063 RTC when it's reporting valid time (oscillator
+            // running, time has been set since power-up). The RTC is battery-backed
+            // through the AXP2101 coin-cell pin so wall-clock time survives a
+            // reboot. Falls back to uptime via DateTime.UtcNow.Ticks when the RTC
+            // is missing or its OS flag is asserted.
+            int h, m, s;
+            if (_rtc != null && _rtc.TryRead(out var rtcTime))
+            {
+                h = rtcTime.Hour;
+                m = rtcTime.Minute;
+                s = rtcTime.Second;
+            }
+            else
+            {
+                long elapsedSec = DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond;
+                h = (int)((elapsedSec / 3600) % 24);
+                m = (int)((elapsedSec / 60) % 60);
+                s = (int)(elapsedSec % 60);
+            }
 
             if (!_needsFullRepaint && h == _lastH && m == _lastM && s == _lastS)
             {

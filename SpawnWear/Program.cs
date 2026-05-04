@@ -7,6 +7,7 @@ using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Power;
+using SpawnWear.Drivers.Rtc;
 using SpawnWear.Drivers.Touch;
 using SpawnWear.Services;
 using SpawnWear.UI;
@@ -26,6 +27,7 @@ namespace SpawnWear
         static EventLoop _eventLoop;
         static ScreenNavigator _nav;
         static Axp2101Driver _axp;
+        static Pcf85063Driver _rtc;
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
 
@@ -66,6 +68,7 @@ namespace SpawnWear
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             EnablePowerRails();
+            StartRtc();
             StartTouchProbe();
             StartBootButton();
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
@@ -78,7 +81,7 @@ namespace SpawnWear
 
             if (fb != null)
             {
-                var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 _nav = new ScreenNavigator(new IScreen[] { watchface, stats });
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
@@ -322,6 +325,41 @@ namespace SpawnWear
                 if (t.Length > 8) t = t.Substring(0, 8);
                 _touchStatus = "Tex" + t;
                 Debug.WriteLine("[Touch] EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        static void StartRtc()
+        {
+            try
+            {
+                Debug.WriteLine("[Rtc] R1 - Opening PCF85063 I2C device @ 0x" + BoardPins.RtcI2cAddress.ToString("X2"));
+                var rtcI2c = BoardSetup.OpenI2cDevice(BoardPins.RtcI2cAddress);
+                _rtc = new Pcf85063Driver(rtcI2c);
+                _rtc.Initialize();
+                bool valid = _rtc.TryRead(out var t);
+                Debug.WriteLine("[Rtc] R2 - " + (valid ? "valid" : "OS-flag-set") +
+                    " " + t.Year + "-" + t.Month + "-" + t.Day +
+                    " " + t.Hour.ToString("D2") + ":" + t.Minute.ToString("D2") + ":" + t.Second.ToString("D2"));
+
+                // Seed a default time when the chip reports oscillator-stopped (no
+                // coin-cell battery installed, or first power-on). Picks the build
+                // date as a reasonable starting point - any sync from BLE/NTP later
+                // can override.
+                if (!valid)
+                {
+                    var seed = new Pcf85063Driver.RtcTime
+                    {
+                        Year = 2026, Month = 5, Day = 3,
+                        Hour = 12, Minute = 0, Second = 0, Weekday = 0
+                    };
+                    _rtc.Set(seed);
+                    Debug.WriteLine("[Rtc] R3 - Seeded default 2026-05-03 12:00:00");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Rtc] EX " + ex.GetType().Name + ": " + ex.Message);
+                _rtc = null;
             }
         }
 
