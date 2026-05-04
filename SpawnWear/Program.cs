@@ -300,6 +300,44 @@ namespace SpawnWear
 
         static void StartSdCard()
         {
+            // One-shot diagnostic: list every drive the runtime knows about
+            // BEFORE we try to mount the SD card. If the SD slot has been
+            // auto-mounted by the runtime image, it'll show up here. Total
+            // size distinguishes SD (~1GB) vs an internal flash partition
+            // (typically a few MB).
+            try
+            {
+                var pre = System.IO.DriveInfo.GetDrives();
+                Debug.WriteLine("[SD] pre-mount drives: " + pre.Length);
+                foreach (var d in pre)
+                {
+                    long total = -1;
+                    try { total = d.TotalSize; } catch { }
+                    Debug.WriteLine("[Drive] " + d.Name + " type=" + d.DriveType + " size=" + total);
+
+                    // List the drive's root - if it's the SD card auto-mounted
+                    // by the runtime, we'll see TJ's existing files. If it's an
+                    // internal flash partition we'll only see what SpawnWear
+                    // wrote (spawnwear-pair.bin from PairingService).
+                    try
+                    {
+                        var dirs = System.IO.Directory.GetDirectories(d.Name);
+                        var files = System.IO.Directory.GetFiles(d.Name);
+                        Debug.WriteLine("[Drive]   " + d.Name + " has " + dirs.Length + " dirs + " + files.Length + " files");
+                        foreach (var f in files) Debug.WriteLine("[Drive]   FILE " + f);
+                        foreach (var dd in dirs) Debug.WriteLine("[Drive]   DIR  " + dd);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("[Drive]   " + d.Name + " enum EX: " + ex.GetType().Name + ": " + ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SD] pre-mount enum EX: " + ex.Message);
+            }
+
             try
             {
                 Debug.WriteLine("[SD] mounting...");
