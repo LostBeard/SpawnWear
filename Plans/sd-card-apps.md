@@ -140,3 +140,27 @@ In order:
 ## What WAS in this file but was wrong
 
 An earlier version of this file said `Assembly.Load(byte[])` doesn't work in nanoFramework. That was based on a bad recollection rather than reading the source. **It does work** - see `corlib_native_System_Reflection_Assembly.cpp::Load___STATIC__SystemReflectionAssembly__SZARRAY_U1` in the LostBeard nf-interpreter fork. Rule 4b violation - corrected here so the next reader doesn't propagate the wrong assumption.
+
+## Empirical validation 2026-05-05
+
+The full dynamic-load + invoke path verified end-to-end on the watch:
+
+1. Built a minimal `HelloWorldApp.pe` (416 bytes, managed-only, references mscorlib only). `tools/check-pe-header.cs` confirmed `flags = 0` and `nativeMethodsChecksum = 0`.
+2. Added a `POST /loadpe` HTTP endpoint to SpawnWear's `HttpServer.cs` that reads the request body as a byte[], runs `System.Reflection.Assembly.Load(byte[])`, finds the type `HelloWorldApp.HelloWorldPayload`, invokes static method `Greet()` via reflection, returns the result string in the HTTP response.
+3. POSTed the .pe file via curl: `curl -X POST --data-binary @HelloWorldApp.pe http://192.168.1.171:8080/loadpe`
+4. Watch responded: `OK: Hello from SD-card-loadable app, watch is at 05/04/2026 12:20:29`
+
+This confirms the architectural assumptions:
+- `Assembly.Load(byte[])` works at runtime on the LostBeard nf-interpreter fork as deployed
+- Pure-managed assemblies (flags = 0) load cleanly without `CLR_E_BUSY`
+- Loaded assemblies are reachable via `assembly.GetType("...")`
+- Static methods on loaded types are invocable via `MethodInfo.Invoke(null, null)`
+- Return values cross the assembly boundary correctly
+
+**Phase 8 is unblocked.** The full app loader can be built on top of this foundation with confidence the foundation is real.
+
+What remains untested:
+- Assembly unload + heap reclaim across many load cycles (Gemini's "metadata never reclaimed" claim - needs a 100x load test)
+- Cross-assembly interface calls (loaded app implementing `ISpawnApp` from the firmware-deployed AppContracts)
+- Same-name+version collision behavior on a real load attempt
+- Loading from SD card (FileSystem package not yet on the firmware)
