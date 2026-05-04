@@ -2,6 +2,14 @@
 
 A small wearable OS — written in C# on .NET nanoFramework — for the **Waveshare ESP32-S3 Touch AMOLED 2.06" Watch**.
 
+## Current state of the UI
+
+<p align="center">
+  <img src="screenshots/launcher-2026-05-04.png" alt="SpawnWear launcher screenshot 2026-05-04" width="240">
+</p>
+
+Screenshot captured live over WiFi from the watch (`http://<watch-ip>:8080/`). 3x3 launcher with status bar (time + USB + BLE + battery) and 4-page indicator at the bottom. CLOCK / STATS / SETTINGS are functional today; MUSIC / VIDEO / GALLERY / WIFI / VOICE / ABOUT are placeholders for apps that ship in later phases. We update this image as the UI moves toward Android-quality polish.
+
 Think Android, but watch-sized and ESP32-shaped: a kernel/HAL layer of C# drivers for the watch hardware, system services for radios / audio / power, a UI framework for drawing and input, a launcher home screen, and a small set of built-in apps (Settings, Clock, etc.) that talk to the system services. No single C++ binary, no single fixed UI — apps come and go, services run in the background.
 
 It comes with a complementary **Blazor WebAssembly PWA** that mirrors the watch UI over BLE + WiFi for headless setup, debugging, and remote control. Same C# language on both sides.
