@@ -107,6 +107,38 @@ public class BleTransport : ITransport, IAsyncDisposable
         ConnectionChanged?.Invoke(true);
     }
 
+    public async Task RefreshAsync(CancellationToken ct = default)
+    {
+        if (!IsConnected) throw new InvalidOperationException("Not connected");
+
+        // Pull current value from every Read-supporting characteristic
+        // and dispatch the bytes through MessageReceived so the
+        // BridgeClient decoders run as if a notify had arrived.
+        // Notify-only characteristics (IMU, button events, debug log,
+        // WiFi scan) get nothing - they only fire when the watch has
+        // something fresh to push.
+        await ReadAndDispatch(_battery,    ChannelIds.Battery);
+        await ReadAndDispatch(_rtc,        ChannelIds.RtcTime);
+        await ReadAndDispatch(_wifiStatus, ChannelIds.WifiStatus);
+    }
+
+    async Task ReadAndDispatch(BluetoothRemoteGATTCharacteristic? c, string channelId)
+    {
+        if (c is null) return;
+        try
+        {
+            using var view = await c.ReadValue();
+            var bytes = view.ReadBytes();
+            if (bytes is { Length: > 0 })
+                MessageReceived?.Invoke(new TransportMessage(channelId, bytes));
+        }
+        catch
+        {
+            // Some firmware builds don't actually expose Read on every
+            // char declared with Read permission. Skip quietly.
+        }
+    }
+
     public async Task SendAsync(TransportMessage message, CancellationToken ct = default)
     {
         if (!IsConnected) throw new InvalidOperationException("Not connected");

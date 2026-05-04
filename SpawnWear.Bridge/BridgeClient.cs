@@ -71,6 +71,17 @@ public class BridgeClient : IAsyncDisposable
         return _transport.SendAsync(message, ct);
     }
 
+    /// <summary>Force a one-shot read of every readable characteristic
+    /// and feed the bytes through the decoder pipeline. Equivalent to
+    /// "show me what the watch's state is RIGHT NOW" without waiting
+    /// for the next push. Call after Connect to populate UI before any
+    /// notify lands.</summary>
+    public Task RefreshAsync(CancellationToken ct = default)
+    {
+        if (_transport is null) return Task.CompletedTask;
+        return _transport.RefreshAsync(ct);
+    }
+
     void OnConnectionChanged(bool connected) => ConnectionChanged?.Invoke(connected);
 
     void OnMessageReceived(TransportMessage msg)

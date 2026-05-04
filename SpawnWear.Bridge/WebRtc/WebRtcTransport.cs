@@ -52,5 +52,9 @@ public class WebRtcTransport : ITransport
     public Task SendAsync(TransportMessage message, CancellationToken ct = default) =>
         throw new NotImplementedException("Phase 7");
 
+    /// <summary>WebRTC has no concept of "readable state" - state arrives
+    /// via push from the watch over the data channel. No-op.</summary>
+    public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;
+
     public Task DisconnectAsync() => Task.CompletedTask;
 }

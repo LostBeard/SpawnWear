@@ -309,4 +309,25 @@ public class BridgeClientDecoderTests
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await bare.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new byte[]{ 1 })));
     }
+
+    [Fact]
+    public async Task RefreshAsync_without_transport_is_noop()
+    {
+        // Distinct from SendAsync - Refresh is an "update if you can"
+        // hint, not a hard send. Should silently skip without throwing
+        // when no transport is wired.
+        var bare = new BridgeClient();
+        await bare.RefreshAsync();
+    }
+
+    [Fact]
+    public async Task RefreshAsync_routes_through_transport()
+    {
+        var (client, transport) = await NewBridge();
+        Assert.Equal(0, transport.RefreshCallCount);
+        await client.RefreshAsync();
+        Assert.Equal(1, transport.RefreshCallCount);
+        await client.RefreshAsync();
+        Assert.Equal(2, transport.RefreshCallCount);
+    }
 }

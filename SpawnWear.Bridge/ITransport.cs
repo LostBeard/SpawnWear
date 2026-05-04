@@ -33,6 +33,15 @@ public interface ITransport
     /// <summary>Send a framed message to the watch.</summary>
     Task SendAsync(TransportMessage message, CancellationToken ct = default);
 
+    /// <summary>Force a one-shot read of every characteristic that
+    /// supports Read, feeding the bytes back through
+    /// <see cref="MessageReceived"/> as if a notify had just arrived.
+    /// Useful right after Connect so the consumer sees current state
+    /// without having to wait for the next firmware-pushed notify.
+    /// Optional - transports that don't model "readable state"
+    /// (WebRTC) implement this as a no-op.</summary>
+    Task RefreshAsync(CancellationToken ct = default);
+
     /// <summary>Disconnect cleanly.</summary>
     Task DisconnectAsync();
 }

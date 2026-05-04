@@ -40,6 +40,14 @@ public class FakeTransport : ITransport
         return Task.CompletedTask;
     }
 
+    public Task RefreshAsync(CancellationToken ct = default)
+    {
+        RefreshCallCount++;
+        return Task.CompletedTask;
+    }
+
+    public int RefreshCallCount { get; private set; }
+
     /// <summary>Drive a TransportMessage into the BridgeClient as if it
     /// arrived over the wire.</summary>
     public void Push(TransportMessage message) => MessageReceived?.Invoke(message);
