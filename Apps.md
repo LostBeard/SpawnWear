@@ -4,12 +4,24 @@ Each subfolder in this repo's root that ends in `App` is a standalone, dynamical
 
 ## Try them
 
+Two paths - the watch's built-in HTML page or the SpawnWear.Companion PWA.
+
+**Watch built-in page** (zero install):
+
 1. Make sure the watch is on WiFi and you know its IP. Boot the firmware, look for `[SpawnWear] HTTP at http://<ip>:8080/` in the deploy log, or read it off the **WIFI** tile.
 2. Open `http://<watch-ip>:8080/` in any browser on the same network.
 3. Drag any `.pe` from the table below onto the drop zone, or click "browse" to pick one.
 4. Watch responds `OK: <APP NAME>` and the screen-mirror canvas refreshes with the app rendering.
 5. Tap the **APP** tile on the launcher itself to interact.
 6. Long-press anywhere on the watch screen → return to the launcher.
+
+**SpawnWear.Companion PWA** (richer surface, BLE pairing + WiFi mirror):
+
+1. `dotnet run --project SpawnWear.Companion -- --urls http://localhost:5251` from this repo, or visit a hosted Companion build.
+2. On the Home page click **Pair watch** → browser shows the Bluetooth picker → select `SW-OK-Tok`.
+3. Navigate to **Apps** in the sidebar. The watch URL auto-fills from the WiFi-status notify the watch sends after pairing.
+4. Drop a `.pe` (or click to pick one). It POSTs to `/loadapp` over WiFi with the same outcome as path 1.
+5. Switch to **Mirror** to watch the app render live; **Console** shows the watch's `Debug.WriteLine` stream.
 
 ## App library
 
