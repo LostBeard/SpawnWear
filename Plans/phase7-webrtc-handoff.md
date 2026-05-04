@@ -112,6 +112,48 @@ handles wire encryption; Ed25519 handles peer identity. A compromised
 hub can drop / delay traffic but can never impersonate either side or
 read what flows.
 
+## Crypto stratification
+
+Phase 7 actually needs TWO crypto stacks running side by side, each with different requirements per device:
+
+**Stack A — Phase 7 pairing-trust layer (our addition).** Used during BLE pairing and again on every WebRTC reconnect to verify peer identity. Small surface:
+
+| Primitive | Purpose |
+|---|---|
+| Ed25519 sign / verify | Pairing handshake + reconnect challenge. RFC 8032. |
+| Cryptographic random | Generate keypairs, generate the room key, generate the per-reconnect nonce. |
+| SHA-256 (optional) | If we go with deterministic room-key derivation `RoomKey.FromString(SHA256(companionPub || watchPub))`. |
+
+**Stack B — WebRTC wire encryption (delivered by the underlying WebRTC stack, NOT something we implement).** This is the standard WebRTC TLS/DTLS-SRTP suite that browsers, Sip­Sorcery, libdatachannel, etc. implement. We don't build it; we pick a stack that does. Surface:
+
+| Primitive | Purpose |
+|---|---|
+| DTLS 1.2 (1.3 ideal) | Handshake before any data flows. Browsers require ECDSA-P256 certs by default; some accept RSA. |
+| ECDSA P-256 sign / verify | Peer certificate generation + DTLS handshake auth. |
+| AES-GCM-128 / AES-GCM-256 | SRTP profile — payload encryption + integrity. WebRTC standard. |
+| AEAD-AES-128-GCM (alternative) | Equivalent SRTP profile. |
+| SHA-256 / SHA-384 / SHA-512 | DTLS handshake hashing + HKDF-Expand. |
+| HMAC-SHA1 (legacy) | Older SRTP profile (`AES_CM_HMAC_SHA1_80`). Browsers still negotiate it; mandated for SipSorcery's fork. |
+| HKDF | Deriving SRTP session keys from the DTLS master secret. |
+
+### Per-device matrix
+
+| Device | Pairing-trust (Stack A) | WebRTC wire (Stack B) |
+|---|---|---|
+| **Companion (Blazor WASM PWA)** | `SpawnDev.BlazorJS.Cryptography` (already shipped). Browser WebCrypto for Ed25519 with `Ed25519Managed.cs` fallback. | Browser native WebRTC. Zero work — the browser does it all. |
+| **Future SpawnWear.Bridge.Desktop (.NET)** | `SpawnDev.BlazorJS.Cryptography` (`DotNetCrypto`, same library, runs on desktop). | `SpawnDev.RTC` (already shipped). Bundles the SipSorcery fork with its proven BouncyCastle DTLS stack + ECDSA-P256 certs + AES-GCM SRTP profiles. |
+| **Watch (firmware, nanoFramework on ESP32-S3)** | OPEN — see open question #3. | OPEN — see open question #7. |
+
+The watch is the genuinely hard problem on both axes. ESP-IDF (which the nf-interpreter native build sits on top of) ships **mbedtls** with full DTLS, AES-GCM, ECDSA P-256, and SHA-2/3 support. So the C primitives are present; the work is exposing them through nanoCLR as managed primitives + writing or porting a WebRTC client that uses them.
+
+### Watch-side options for Stack B (WebRTC wire)
+
+1. **libdatachannel + mbedtls.** [libdatachannel](https://github.com/paullouisageneau/libdatachannel) is a well-maintained C++ WebRTC stack used in IoT contexts. ESP-IDF port exists in the wild. Compile into the LostBeard nf-interpreter fork as a native module; expose data-channel primitives through a managed wrapper. Largest dependency to import but most complete.
+2. **Custom thin WebRTC.** Write only the data-channel slice we need on top of mbedtls + libsrtp directly. Skips libdatachannel's full ICE/SDP machinery; uses mbedtls's DTLS + libsrtp's SRTP only. Smaller code but reinventing the WebRTC client; risky for cross-implementation interop.
+3. **Watch is NOT a real WebRTC peer.** Hub-mediated relay: the watch connects to `hub.spawndev.com` over plain WebSocket or HTTP/2, the hub bridges to a "real" WebRTC peer on the other side (the Companion). Watch never speaks WebRTC. Trades elegance for simplicity; works today; but loses the "Companion talks directly to watch over WebRTC P2P, hub never sees data" property that's the whole point of the design.
+
+Option 1 is the right end-state. Option 3 might be a useful stepping stone if the Phase 7 ramp is too steep — ship hub-mediated first, then graduate to direct peer-to-peer once libdatachannel is integrated.
+
 ## Bridge surface (today vs tomorrow)
 
 Today's `BridgeClient` only knows BLE. Phase 7 keeps the same public surface but adds the pairing + WebRTC promotion underneath:
@@ -168,5 +210,7 @@ Phase 7 is a multi-week build, not a single-session push. Today's 2026-05-05 shi
 4. **Hub URL discovery.** Hard-code `wss://hub.spawndev.com`, or let the Companion configure it (multi-hub failover for redundancy)? Watch-side: same question - configurable via BLE before pairing, or hard-coded?
 5. **WebRTC video track for screen mirror.** Replace today's HTTP-pulled `/screenshot.bin` once WebRTC is up, or keep both for fallback when WebRTC is unreachable?
 6. **TurnServer credentials.** The `SpawnDev.RTC.Server` model is "ephemeral creds gated by who's announced in the room." That means the hub's tracker needs to know our pubkey BEFORE we announce, so it can verify our room-claim signature. Bootstrap order matters: pubkey-registration ↔ first-announce.
+7. **Watch-side WebRTC stack (Stack B).** Three options outlined in [Crypto stratification](#crypto-stratification): (1) libdatachannel + mbedtls integrated into the nf-interpreter native build, (2) custom thin WebRTC on top of mbedtls + libsrtp directly, (3) hub-mediated relay where the watch never speaks WebRTC. Option 1 is end-state; option 3 is a viable stepping stone. Need to commit to a path before any watch-side WebRTC code lands.
+8. **Managed-side wrapping for watch crypto primitives.** Whichever Stack B path we take, the watch needs to expose enough crypto through nanoCLR for Stack A (Ed25519). Three sub-questions: (a) do we add Ed25519 as a separate intrinsic alongside whatever Stack B brings in, (b) does Stack B's underlying library (mbedtls) already implement Ed25519 we can re-expose, (c) what's the managed surface — extend `IPortableCrypto` to nanoFramework, or roll a SpawnWear-specific minimal interface?
 
 These get answered in the next dedicated Phase 7 session, not in autonomous Editor's-choice work.
