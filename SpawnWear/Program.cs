@@ -8,6 +8,7 @@ using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
 using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Rtc;
+using SpawnWear.Drivers.SdCard;
 using SpawnWear.Drivers.Touch;
 using SpawnWear.Drivers.Wifi;
 using SpawnWear.Services;
@@ -30,6 +31,7 @@ namespace SpawnWear
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
+        static SdCardService _sd;
         static HttpServer _http;
         static Bitmap _fb; // shared framebuffer reference for screenshots
         static int _bootButtonClickPending; // set by ISR, drained by main loop
@@ -90,6 +92,7 @@ namespace SpawnWear
             StartTouchProbe();
             StartBootButton();
             StartWifi();
+            StartSdCard();
             // BLE stripped - see using comment above.
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
@@ -285,6 +288,36 @@ namespace SpawnWear
                 case ScreenState.Sleep:
                     DisplayControl.Sleep();
                     break;
+            }
+        }
+
+        static void StartSdCard()
+        {
+            try
+            {
+                Debug.WriteLine("[SD] mounting...");
+                _sd = new SdCardService();
+                if (_sd.Initialize())
+                {
+                    Debug.WriteLine("[SD] mounted at " + _sd.MountPath);
+                    // Probe: list /D:\ root if accessible
+                    try
+                    {
+                        var dirs = System.IO.Directory.GetDirectories(_sd.MountPath);
+                        var files = System.IO.Directory.GetFiles(_sd.MountPath);
+                        Debug.WriteLine("[SD] root has " + dirs.Length + " dirs + " + files.Length + " files");
+                        foreach (var d in dirs) Debug.WriteLine("[SD] DIR  " + d);
+                        foreach (var f in files) Debug.WriteLine("[SD] FILE " + f);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.WriteLine("[SD] enumerate EX: " + ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SD] init EX: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
