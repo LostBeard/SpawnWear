@@ -50,6 +50,7 @@ namespace SpawnWear.UI
             bool consumed = false;
             try { consumed = _screens[_activeIndex].OnTap(x, y); }
             catch (System.Exception ex) { Debug.WriteLine("[Nav] OnTap EX " + ex.Message); }
+            Debug.WriteLine("[Nav] tap=(" + x + "," + y + ") consumed=" + consumed);
             if (!consumed) Next();
         }
     }

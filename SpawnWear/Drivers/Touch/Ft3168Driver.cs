@@ -115,17 +115,20 @@ namespace SpawnWear.Drivers.Touch
         /// </summary>
         public TouchSnapshot ReadTouch()
         {
-            // Six bytes from 0x02: finger count + reserved + X1H/L + Y1H/L. Reading two-finger
-            // data needs two extra reads at 0x09..0x0C; we issue them only if FingerNum >= 2.
+            // Six bytes from 0x02: FingerNum (0x02), X1H (0x03), X1L (0x04),
+            // Y1H (0x05), Y1L (0x06), then one trailing byte at 0x07 we don't use.
+            // The earlier "reserved at offset 1" comment was wrong - there is no
+            // reserved byte; the register stride between FingerNum and X1H is 1.
+            // Reading two-finger data needs two extra reads at 0x09..0x0C; we
+            // issue them only if FingerNum >= 2.
             SpanByte writeBuf = new byte[1];
             writeBuf[0] = RegFingerNum;
             SpanByte readBuf = new byte[6];
             _i2c.WriteRead(writeBuf, readBuf);
 
             byte fingerCount = readBuf[0];
-            // readBuf[1] is reserved.
-            ushort x1 = Decode12Bit(readBuf[2], readBuf[3]);
-            ushort y1 = Decode12Bit(readBuf[4], readBuf[5]);
+            ushort x1 = Decode12Bit(readBuf[1], readBuf[2]); // X1H | X1L
+            ushort y1 = Decode12Bit(readBuf[3], readBuf[4]); // Y1H | Y1L
 
             ushort x2 = 0;
             ushort y2 = 0;

@@ -43,6 +43,13 @@ namespace SpawnWear
         static int _fingerDownY;
         static int _fingerLastX;
         static int _fingerLastY;
+        // Phone-style wake-tap consumption: when the panel is asleep and the
+        // user touches it, the touch wakes the screen but the UP event MUST NOT
+        // dispatch as a UI tap - otherwise the tap that woke the watch also
+        // triggers whatever row was last under the finger and the user gets
+        // "tap turns on, immediately turns back off" behavior. We capture the
+        // ScreenState at finger-DOWN; only Active-state taps reach the navigator.
+        static ScreenState _stateAtFingerDown;
 
         // Power-state machine driven by time-since-last-touch. Mirrors waveshare-watch-rs
         // main.rs:613-620 multi-tier tick budget.
@@ -83,7 +90,8 @@ namespace SpawnWear
             {
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
-                _nav = new ScreenNavigator(new IScreen[] { watchface, stats });
+                var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
+                _nav = new ScreenNavigator(new IScreen[] { watchface, stats, settings });
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
@@ -150,6 +158,18 @@ namespace SpawnWear
                 case ScreenState.Sleep: return 30000;
                 default: return 1000;
             }
+        }
+
+        /// <summary>
+        /// Settings-screen "SLEEP" row callback - rewinds the idle clock so the
+        /// next OnTick state-machine pass transitions to ScreenState.Sleep, same
+        /// path the BOOT button uses.
+        /// </summary>
+        static void ForceSleepFromUi()
+        {
+            _lastTouchUtcTicks = DateTime.UtcNow.Ticks - (SleepAfterSeconds + 1) * TimeSpan.TicksPerSecond;
+            _fingerDown = false;
+            if (_eventLoop != null) _eventLoop.Wake();
         }
 
         static void TransitionTo(ScreenState desired)
@@ -286,18 +306,21 @@ namespace SpawnWear
                     bool wasDown = _fingerDown;
                     _fingerDown = snapshot.FingerCount > 0;
                     long nowTicks = DateTime.UtcNow.Ticks;
+                    int snapX = snapshot.X1;
+                    int snapY = snapshot.Y1;
 
                     if (_fingerDown)
                     {
-                        _fingerLastX = snapshot.X1;
-                        _fingerLastY = snapshot.Y1;
+                        _fingerLastX = snapX;
+                        _fingerLastY = snapY;
                         _lastTouchUtcTicks = nowTicks;
                         if (!wasDown)
                         {
                             _fingerDownUtcTicks = nowTicks;
                             _fingerDownX = snapshot.X1;
                             _fingerDownY = snapshot.Y1;
-                            Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ")");
+                            _stateAtFingerDown = _screenState;
+                            Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ") state=" + _stateAtFingerDown);
                         }
                     }
                     else if (wasDown)
@@ -308,7 +331,9 @@ namespace SpawnWear
                         int dy = _fingerLastY - _fingerDownY;
                         bool isTap = elapsedMs < TapMaxMs && (dx * dx + dy * dy) < TapMaxMoveSquared;
                         Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap);
-                        if (isTap && _nav != null && _screenState != ScreenState.Sleep)
+                        // Wake-tap consumption: a tap whose finger-DOWN happened while the screen
+                        // was asleep is consumed by the wake itself, not dispatched to the UI.
+                        if (isTap && _nav != null && _stateAtFingerDown == ScreenState.Active)
                         {
                             _nav.HandleTap(_fingerLastX, _fingerLastY);
                         }
