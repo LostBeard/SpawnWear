@@ -42,6 +42,12 @@ public static class BleUuids
     public static readonly Guid DebugLogOutputUuid   = new("a0e4f2c1-0001-00f0-8000-00805f9b34fb");
     public static readonly Guid DebugCommandInputUuid = new("a0e4f2c1-0001-00f1-8000-00805f9b34fb");
 
+    // Pairing service (Phase 7) - Ed25519 pubkey exchange + handshake.
+    // Reserved here so Phase 7's first implementation commit doesn't
+    // have to renumber. See Plans/phase7-webrtc-handoff.md.
+    public static readonly Guid PairingPubKeyUuid    = new("a0e4f2c1-0001-00a0-8000-00805f9b34fb");
+    public static readonly Guid PairingHandshakeUuid = new("a0e4f2c1-0001-00a1-8000-00805f9b34fb");
+
     // WiFi commands (single byte written to WifiCommandUuid)
     public const byte WifiCmdConnect    = 0x01;
     public const byte WifiCmdDisconnect = 0x02;
