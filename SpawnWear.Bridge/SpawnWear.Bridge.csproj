@@ -36,6 +36,10 @@
     <!-- Web Bluetooth + typed JS interop (today). Browser-target only.
          Pinned >= what SpawnDev.RTC requires transitively. -->
     <PackageReference Include="SpawnDev.BlazorJS" Version="3.5.3" />
+    <!-- Cross-platform Ed25519 sign/verify for the Phase 7 pairing-trust
+         layer. Browser uses WebCrypto (with Ed25519Managed fallback);
+         a future SpawnWear.Bridge.Desktop consumer uses DotNetCrypto. -->
+    <PackageReference Include="SpawnDev.BlazorJS.Cryptography" Version="3.2.0" />
     <!-- WebRTC peer (Phase 7). Same package supports desktop too,
          setting up the future SpawnWear.Bridge.Desktop crate to use
          the same WebRTC plumbing via SpawnDev.RTC. -->

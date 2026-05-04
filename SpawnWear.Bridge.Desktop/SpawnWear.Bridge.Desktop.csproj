@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SpawnWear.Bridge.Desktop</RootNamespace>
+    <AssemblyName>SpawnWear.Bridge.Desktop</AssemblyName>
+    <Authors>SpawnDev (LostBeard / TJ Tanner)</Authors>
+    <Description>Desktop (.NET, non-browser) implementation of the SpawnWear.Bridge transport surface. Pairs with a SpawnWear watch over BLE (via a desktop BLE adapter, TBD), then promotes to WebRTC via SpawnDev.RTC for always-on connectivity through hub.spawndev.com. Phase 7 work; this crate is a placeholder until the watch-side WebRTC stack picks an option (see Plans/phase7-webrtc-handoff.md).</Description>
+    <PackageId>SpawnWear.Bridge.Desktop</PackageId>
+    <Version>0.0.1-prealpha</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpawnWear.Bridge\SpawnWear.Bridge.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WebRTC peer (Phase 7). Same library SpawnWear.Bridge references on the
+         browser side, but here it picks the desktop SipSorcery-fork backend. -->
+    <PackageReference Include="SpawnDev.RTC" Version="1.1.0" />
+    <!-- Cross-platform Ed25519 for the pairing-trust layer (Stack A in
+         Plans/phase7-webrtc-handoff.md). DotNetCrypto picks
+         Ed25519Managed on net10.0. -->
+    <PackageReference Include="SpawnDev.BlazorJS.Cryptography" Version="3.2.0" />
+  </ItemGroup>
+
+</Project>
