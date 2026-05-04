@@ -86,7 +86,12 @@ The Bridge picks whichever is reachable. All three transports terminate at the s
 - [x] **CORS headers on watch HTTP server** (2026-05-05) - `Access-Control-Allow-Origin: *` + OPTIONS preflight handler so the PWA can fetch `/screenshot.bin` from a different origin without the browser blocking.
 - [ ] Touch coordinates from the PWA → POST to a `/touch` endpoint → injected into the watch's event loop (this turns the PWA into a fully-remote launcher)
 
-### Phase 5 onwards - Per-app mirrors
+### Phase 5 - Drop-on-watch app installer
+
+- [x] **`Apps.razor` page** (2026-05-05) - drag-drop / browse a `.pe` file, POSTs the raw bytes to the watch's `http://<watch-ip>/loadapp` endpoint. Pulls watch URL from `WifiStatusChanged` so the user types it once. Hooks the existing firmware-side dynamic-load path that finds the `ISpawnApp` implementer via reflection and pushes it onto the screen stack as the foreground app.
+- [ ] Drag-drop binary file (currently click-to-pick only; drag-drop's `DataTransfer.files` needs a typed wrapper round on SpawnDev.BlazorJS to work cleanly through Blazor's DragEventArgs)
+
+### Phase 6 onwards - Per-app mirrors
 
 Each built-in app gets a corresponding PWA page that drives its UI remotely. Settings and Clock are easiest (mostly read-write of state); Voice Recorder and AI Assistant need bidirectional audio over WebRTC.
 
