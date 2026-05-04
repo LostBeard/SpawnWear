@@ -161,11 +161,22 @@ Even without working signatures, we can test the BLE plumbing today:
 
 That's the order: prove the BLE wiring, then drop in real crypto. Each step independently testable, no mock test (every byte is the real wire format).
 
-## NVS surface
+## Persistence surface (CORRECTION 2026-05-05 evening)
 
-nanoFramework's `nanoFramework.Hardware.Esp32.NonVolatileStorage` is the canonical key-value store for ESP32. Persists across reboots + firmware updates that don't `--erase-flash`. ~30KB free per partition by default; our four keys (32+32+32+20 = 116 bytes) fit trivially.
+The earlier draft of this doc named `nanoFramework.Hardware.Esp32.NonVolatileStorage` as the canonical KV store. **That package does not exist on nuget.org** — the search came up empty 2026-05-05 and the existing `nanoFramework.Hardware.Esp32 1.6.37` package only exposes `Gpio / HighResTimer / Logging / Configuration / DeviceTypes / DeviceFunction / EspNativeError / NativeMemory / Sleep / Touch.*`. No `NonVolatileStorage` type.
 
-If NVS isn't a fit (e.g. we want to nuke the pairing on a deliberate "factory reset" while keeping WiFi creds), the SD card path from Phase 8 is also available — `IDisplayBuffer`-side persistence is already wired.
+Real persistence options on the watch:
+
+1. **File on a mounted volume via `System.IO.File`** (`nanoFramework.System.IO.FileSystem` is already referenced).
+   - `D:\` = SD card. Works once `SdCardService.Mount()` succeeds. TJ's current unit reports `SDCard mount failed: VOLUME_NOT_FOUND` — no SD inserted, so this isn't an everyday-watch path.
+   - `C:\` (or `I:\`) = internal flash partition. Whether it's mounted depends on the nf-interpreter build's partition table. Probe at runtime with `DriveInfo.GetDrives()` before depending on it.
+2. **`nanoFramework.Windows.Storage 1.0.0` (stable)** — only ships file/folder API (`StorageFile`, `StorageFolder`, `KnownFolders`), no `ApplicationData.LocalSettings` KV store. Same underlying writable-volume requirement as option 1; just a different API shape.
+3. **mbedtls NVS / KV via a nanoCLR-exposed intrinsic in the LostBeard nf-interpreter fork** (the right end-state). When 7b lands the libdatachannel + mbedtls native component, expose `mbedtls`'s NVS-shaped storage (or ESP-IDF's `nvs_flash` directly) as a managed primitive at the same time. Single integration point, native-fast, partition-table-controlled.
+4. **Park persistence in 7a** — keypair regenerates per boot via `System.Random`. Re-pair via BLE every reboot. Acceptable as a pre-7b stopgap because the keypair's value is itself stub anyway.
+
+Recommended path for now: **option 4 until 7b**, then **option 3** alongside the libdatachannel integration. That avoids a throwaway file-based implementation that would be ripped out as soon as the proper KV intrinsic exists.
+
+If a non-stub keypair actually needs to survive reboot before 7b ships (e.g. for multi-day field testing), fall back to option 1 with a `DriveInfo.GetDrives()` probe at boot to confirm a writable volume exists.
 
 ## WebRTC peer integration (Stack B)
 
