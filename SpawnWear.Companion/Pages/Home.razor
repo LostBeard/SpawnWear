@@ -205,6 +205,7 @@
                 ?? throw new InvalidOperationException("BridgeClient has no transport configured.");
             var flow = new PairingFlow(Crypto, PairingStore);
             _record = await flow.PairAsync(transport, friendlyName: Bridge.PeerName);
+            _savedPairings = PairingStore.List().ToList();
         }
         catch (PairingException ex) { _lastError = "Pairing failed: " + ex.Message; }
         catch (NotSupportedException ex) { _lastError = "Watch firmware does not yet advertise the Phase 7 pairing characteristics. " + ex.Message; }
