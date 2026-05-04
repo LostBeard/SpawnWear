@@ -28,8 +28,11 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\EventLoop.cs" />
     <Compile Include="UI\IScreen.cs" />
+    <Compile Include="UI\LauncherScreen.cs" />
     <Compile Include="UI\ListView.cs" />
+    <Compile Include="UI\PageDots.cs" />
     <Compile Include="UI\ScreenNavigator.cs" />
+    <Compile Include="UI\StatusBar.cs" />
     <Compile Include="UI\SegmentFont.cs" />
     <Compile Include="UI\SettingsScreen.cs" />
     <Compile Include="UI\SmallFont.cs" />

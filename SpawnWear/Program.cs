@@ -38,6 +38,12 @@ namespace SpawnWear
         // touch as a tap and let the navigator cycle screens.
         const int TapMaxMs = 350;
         const int TapMaxMoveSquared = 30 * 30;
+        // Long-press = finger held in roughly the same place for >= 800 ms.
+        // Triggers ScreenNavigator.GoHome() so the user can always get back to
+        // the watch face regardless of how deep into the screen rotation they
+        // are - useful as a "back to home" gesture before we have a real
+        // navigation stack with a back button.
+        const int LongPressMinMs = 800;
         static long _fingerDownUtcTicks;
         static int _fingerDownX;
         static int _fingerDownY;
@@ -88,10 +94,38 @@ namespace SpawnWear
 
             if (fb != null)
             {
+                var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
-                _nav = new ScreenNavigator(new IScreen[] { watchface, stats, settings });
+
+                // Launcher tiles map directly to the per-app screen indices in the
+                // navigator below. Phase 2.5 will let SD-card-loaded apps register
+                // their own tiles dynamically; for now the three built-in apps are
+                // hard-wired.
+                var launcherTiles = new LauncherScreen.Tile[]
+                {
+                    new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock },
+                    // Static demo badge counts on STATS + SETTINGS so the visual is
+                    // visible at boot. Phase 3 will wire these to a real
+                    // NotificationService that aggregates BLE / system / app events.
+                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    BadgeCount = 3 },
+                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, BadgeCount = 1 },
+                };
+                var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
+                    targetIndex => { _nav.GoTo(targetIndex); });
+
+                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings });
+                // Wire page-dot indices + the shared status bar into each screen.
+                // Each screen renders the bar in its own Tick / Invalidate path.
+                launcher.SetPageDots(0, 4);
+                watchface.SetPageDots(1, 4);
+                stats.SetPageDots(2, 4);
+                settings.SetPageDots(3, 4);
+                launcher.SetStatusBar(statusBar);
+                watchface.SetStatusBar(statusBar);
+                stats.SetStatusBar(statusBar);
+                settings.SetStatusBar(statusBar);
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
@@ -325,17 +359,21 @@ namespace SpawnWear
                     }
                     else if (wasDown)
                     {
-                        // Finger lifted. Classify as tap vs. drag/long-press.
+                        // Finger lifted. Classify as tap, long-press, or drag.
                         long elapsedMs = (nowTicks - _fingerDownUtcTicks) / TimeSpan.TicksPerMillisecond;
                         int dx = _fingerLastX - _fingerDownX;
                         int dy = _fingerLastY - _fingerDownY;
-                        bool isTap = elapsedMs < TapMaxMs && (dx * dx + dy * dy) < TapMaxMoveSquared;
-                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap);
-                        // Wake-tap consumption: a tap whose finger-DOWN happened while the screen
-                        // was asleep is consumed by the wake itself, not dispatched to the UI.
-                        if (isTap && _nav != null && _stateAtFingerDown == ScreenState.Active)
+                        bool stayedPut = (dx * dx + dy * dy) < TapMaxMoveSquared;
+                        bool isTap = elapsedMs < TapMaxMs && stayedPut;
+                        bool isLongPress = elapsedMs >= LongPressMinMs && stayedPut;
+                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress);
+                        // Wake-tap consumption: any gesture whose finger-DOWN happened while
+                        // the screen was asleep is consumed by the wake itself, not dispatched
+                        // to the UI.
+                        if (_nav != null && _stateAtFingerDown == ScreenState.Active)
                         {
-                            _nav.HandleTap(_fingerLastX, _fingerLastY);
+                            if (isLongPress) _nav.GoHome();
+                            else if (isTap) _nav.HandleTap(_fingerLastX, _fingerLastY);
                         }
                     }
 

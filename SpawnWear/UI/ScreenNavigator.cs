@@ -23,6 +23,19 @@ namespace SpawnWear.UI
         }
 
         public IScreen Current => _screens[_activeIndex];
+        public int CurrentIndex => _activeIndex;
+
+        /// <summary>
+        /// Jumps directly to the screen at <paramref name="index"/>. Used by the
+        /// Launcher to "open" an app tile. Out-of-range or no-op transitions
+        /// are silently ignored.
+        /// </summary>
+        public void GoTo(int index)
+        {
+            if (index < 0 || index >= _screens.Length) return;
+            if (index == _activeIndex) return;
+            SwitchTo(index);
+        }
 
         /// <summary>
         /// Switches to the next registered screen, wrapping around at the end.
@@ -33,6 +46,23 @@ namespace SpawnWear.UI
         {
             int next = (_activeIndex + 1) % _screens.Length;
             if (next == _activeIndex) return;
+            SwitchTo(next);
+        }
+
+        /// <summary>
+        /// Snaps back to the first registered screen (the "home" screen) without
+        /// cycling through intermediate ones. Wired to the long-press gesture
+        /// so a held finger returns the user to the watchface no matter how
+        /// deep into the screen rotation they are.
+        /// </summary>
+        public void GoHome()
+        {
+            if (_activeIndex == 0) return;
+            SwitchTo(0);
+        }
+
+        private void SwitchTo(int next)
+        {
             try { _screens[_activeIndex].OnPause(); }
             catch (System.Exception ex) { Debug.WriteLine("[Nav] OnPause EX " + ex.Message); }
             _activeIndex = next;

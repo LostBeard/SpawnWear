@@ -30,6 +30,11 @@ namespace SpawnWear.UI
         private readonly RequestSleep _requestSleep;
         private readonly ListView _list;
         private readonly ListView.Row _brightnessRow;
+        private int _pageDotIndex = -1;
+        private int _pageDotCount = 0;
+        public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
+        private StatusBar _statusBar;
+        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
 
         private static byte _currentBrightness = 0xFF;
 
@@ -74,8 +79,7 @@ namespace SpawnWear.UI
 
         public void Tick()
         {
-            // Header at the top: "SETTINGS" label centered, only redrawn on full repaint.
-            // The list itself partial-flushes individual rows.
+            _statusBar?.Render(force: false);
             _list.Tick();
         }
 
@@ -84,23 +88,30 @@ namespace SpawnWear.UI
             _fb.Clear();
             _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
 
-            // Header.
+            // Header. Sits below the status bar.
+            int statusBarHeight = _statusBar != null ? StatusBar.ReservedHeight : 0;
             const string title = "SETTINGS";
             int scale = 5;
             int titleWidth = SmallFont.MeasureString(title, scale);
             int titleX = (_panelWidth - titleWidth) / 2;
-            int titleY = 30;
+            int titleY = statusBarHeight + 16;
             SmallFont.DrawString(_fb, title, titleX, titleY, scale, Color.White);
 
-            // Footer hint.
+            // Footer hint - drawn ABOVE the page-dots row.
             const string footer = "TAP OUTSIDE TO BACK";
             int footerScale = 2;
             int footerWidth = SmallFont.MeasureString(footer, footerScale);
             int footerX = (_panelWidth - footerWidth) / 2;
-            int footerY = _panelHeight - 40;
+            int footerY = _panelHeight - 60;
             SmallFont.DrawString(_fb, footer, footerX, footerY, footerScale, Color.White);
 
+            if (_pageDotCount > 1)
+            {
+                PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
+            }
+
             _fb.Flush();
+            _statusBar?.Render(force: true);
             _list.Invalidate();
         }
 

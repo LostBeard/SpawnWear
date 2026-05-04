@@ -45,6 +45,11 @@ namespace SpawnWear.UI
         private int _lastMv = int.MinValue;
         private int _lastUptimeSec = -1;
         private bool _needsFullRepaint = true;
+        private int _pageDotIndex = -1;
+        private int _pageDotCount = 0;
+        public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
+        private StatusBar _statusBar;
+        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
 
         public StatsScreen(Bitmap framebuffer, int panelWidth, int panelHeight, Axp2101Driver axp = null)
         {
@@ -92,13 +97,21 @@ namespace SpawnWear.UI
                 DrawPercent(pct);
                 DrawMillivolts(mv);
                 DrawUptime(uptimeSec);
+                if (_pageDotCount > 1)
+                {
+                    PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
+                }
                 _fb.Flush();
+                _statusBar?.Render(force: true);
                 _needsFullRepaint = false;
                 _lastPct = pct;
                 _lastMv = mv;
                 _lastUptimeSec = uptimeSec;
                 return;
             }
+
+            // Per-tick: refresh status bar (cheap; only flushes on change).
+            _statusBar?.Render(force: false);
 
             // Partial repaints, only redraw rows whose content changed.
             if (pct != _lastPct)
@@ -126,10 +139,12 @@ namespace SpawnWear.UI
 
         private void Layout()
         {
-            // Layout the three rows with even spacing in the vertical center.
+            // Layout the three rows with even spacing in the area below the
+            // status bar (when present) and above the page-dots row.
+            int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
             int gap = 24;
             int blockHeight = (3 * DigitHeight) + (2 * gap);
-            int top = (_panelHeight - blockHeight) / 2;
+            int top = contentTop + (_panelHeight - contentTop - blockHeight) / 2;
             _row1Y = top;
             _row2Y = top + DigitHeight + gap;
             _row3Y = top + 2 * (DigitHeight + gap);

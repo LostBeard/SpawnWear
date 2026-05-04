@@ -1,0 +1,245 @@
+using nanoFramework.UI;
+using SpawnWear.Drivers.Power;
+using SpawnWear.Drivers.Rtc;
+using System;
+using System.Drawing;
+
+namespace SpawnWear.UI
+{
+    /// <summary>
+    /// Android-style title bar that lives in the top 32 px of every screen.
+    /// Shows HH:MM on the left, a row of small status icons on the right
+    /// (USB-plug when VBUS is in, BLE dot when advertising, battery cap +
+    /// percent number).
+    ///
+    /// Power model: caller invokes <see cref="Render"/> each frame; the
+    /// bar internally caches its last-rendered state and only does a partial
+    /// flush when something actually changed (minute roll, battery percent,
+    /// vbus plug state). On full-screen repaints (after wake / screen
+    /// switch) caller passes <c>force = true</c> to skip the cache.
+    ///
+    /// Reserves the top 32 px so screens should render their content from
+    /// y >= <see cref="ReservedHeight"/>.
+    /// </summary>
+    public class StatusBar
+    {
+        public const int ReservedHeight = 64;
+
+        // Glyph scale for the time text (4 = 20x28 px chars). Sized so the
+        // bar is comfortably readable at arm's length on the 410x502 panel.
+        const int TimeScale = 4;
+        const int IconBoxSize = 36;
+        const int IconBoxGap = 12;
+        // The Waveshare ESP32-S3-Touch-AMOLED-2.06 case bezel rounds the
+        // display corners with a sizable R - per the vendor mechanical
+        // drawing the visible AMOLED area is 33.09 x 40.51 mm inside a
+        // 42.00 x 50.80 mm case shell, so roughly 4 mm = ~50 px of inset
+        // along each edge. Drawing in the corner-clipped zones leaves
+        // status icons cut in half. Keep the bar's content inside a
+        // 50-px-from-each-edge safe area.
+        const int CornerSafeInset = 50;
+
+        readonly Bitmap _fb;
+        readonly int _panelWidth;
+        readonly Axp2101Driver _axp;
+        readonly Pcf85063Driver _rtc;
+        // Optional - main loop sets this so the BLE icon mirrors the radio state.
+        // We don't query the BluetoothLEServer directly to keep StatusBar driver-free.
+        bool _bleAdvertising = true;
+
+        // Cached last-rendered values for change detection.
+        int _lastHour = -1;
+        int _lastMinute = -1;
+        int _lastBatteryPercent = int.MinValue;
+        int _lastVbusIn = -1; // 0/1; -1 = not yet read
+        int _lastBleAdvertising = -1;
+
+        public StatusBar(Bitmap fb, int panelWidth, Axp2101Driver axp, Pcf85063Driver rtc)
+        {
+            _fb = fb;
+            _panelWidth = panelWidth;
+            _axp = axp;
+            _rtc = rtc;
+        }
+
+        public void SetBleAdvertising(bool on) => _bleAdvertising = on;
+
+        /// <summary>
+        /// Renders the bar. <paramref name="force"/> bypasses the change-detection
+        /// cache - use after a screen-level full repaint where the bar pixels
+        /// need to be redrawn from scratch (the screen's <c>fb.Clear()</c> wiped
+        /// them first).
+        /// </summary>
+        public void Render(bool force = false)
+        {
+            int hour = _lastHour;
+            int minute = _lastMinute;
+            if (_rtc != null)
+            {
+                if (_rtc.TryRead(out var t))
+                {
+                    hour = t.Hour;
+                    minute = t.Minute;
+                }
+                else
+                {
+                    long elapsedSec = DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond;
+                    hour = (int)((elapsedSec / 3600) % 24);
+                    minute = (int)((elapsedSec / 60) % 60);
+                }
+            }
+
+            int pct = -1;
+            int vbus = 0;
+            if (_axp != null)
+            {
+                try { pct = _axp.ReadBatteryPercent(); } catch { pct = -1; }
+                try { vbus = _axp.IsVbusPresent() ? 1 : 0; } catch { vbus = 0; }
+            }
+
+            int bleVal = _bleAdvertising ? 1 : 0;
+
+            bool changed =
+                force
+                || hour != _lastHour
+                || minute != _lastMinute
+                || pct != _lastBatteryPercent
+                || vbus != _lastVbusIn
+                || bleVal != _lastBleAdvertising;
+            if (!changed) return;
+
+            // Clear the bar region.
+            _fb.FillRectangle(0, 0, _panelWidth, ReservedHeight, Color.Black);
+
+            // Time on the left, kept inside the corner-rounding safe area.
+            string timeStr = TwoDigit(hour) + ":" + TwoDigit(minute);
+            int timeX = CornerSafeInset;
+            int timeY = (ReservedHeight - SmallFont.GlyphHeight * TimeScale) / 2;
+            SmallFont.DrawString(_fb, timeStr, timeX, timeY, TimeScale, Color.White);
+
+            // Icons on the right, drawn right-to-left so we don't have to
+            // measure their composite width up front. Right edge also
+            // respects the corner-rounding safe area.
+            int iconY = (ReservedHeight - IconBoxSize) / 2;
+            int cursor = _panelWidth - CornerSafeInset - IconBoxSize;
+
+            // Battery percent text + battery icon. Render even when pct is
+            // negative so the layout doesn't jump - draw a hollow battery
+            // outline with no fill.
+            DrawBatteryIcon(cursor, iconY, IconBoxSize, pct);
+            cursor -= IconBoxGap + IconBoxSize;
+
+            // BLE dot (filled circle when advertising, hollow ring when off).
+            DrawBleIcon(cursor, iconY, IconBoxSize, bleVal == 1);
+            cursor -= IconBoxGap + IconBoxSize;
+
+            // USB plug indicator - filled square when vbus in, no draw when not.
+            if (vbus == 1)
+            {
+                DrawUsbIcon(cursor, iconY, IconBoxSize);
+            }
+
+            // Bottom-edge separator line so the title bar is visually distinct
+            // from the screen content below.
+            _fb.FillRectangle(0, ReservedHeight - 2, _panelWidth, 2, Color.White);
+
+            // Partial flush of the bar region only - even/odd alignment is
+            // applied automatically by the firmware Bitmap.Flush handler.
+            _fb.Flush(0, 0, _panelWidth, ReservedHeight);
+
+            _lastHour = hour;
+            _lastMinute = minute;
+            _lastBatteryPercent = pct;
+            _lastVbusIn = vbus;
+            _lastBleAdvertising = bleVal;
+        }
+
+        // ----- Icons -----
+
+        void DrawBatteryIcon(int x, int y, int size, int pct)
+        {
+            // Geometry scales with the box size so doubling ReservedHeight
+            // doubles the icon visually without per-icon constants.
+            int bodyW = size - 8;
+            int bodyH = size - 4;
+            int capW = 6;
+            int capH = bodyH - 12;
+            int strokeT = 4;
+            int bodyX = x;
+            int bodyY = y + 2;
+            int capX = bodyX + bodyW;
+            int capY = bodyY + (bodyH - capH) / 2;
+
+            // Outline.
+            _fb.FillRectangle(bodyX, bodyY, bodyW, strokeT, Color.White);
+            _fb.FillRectangle(bodyX, bodyY + bodyH - strokeT, bodyW, strokeT, Color.White);
+            _fb.FillRectangle(bodyX, bodyY, strokeT, bodyH, Color.White);
+            _fb.FillRectangle(bodyX + bodyW - strokeT, bodyY, strokeT, bodyH, Color.White);
+
+            // Cap.
+            _fb.FillRectangle(capX, capY, capW, capH, Color.White);
+
+            if (pct <= 0) return;
+            if (pct > 100) pct = 100;
+
+            int fillPad = strokeT + 2;
+            int maxFillW = bodyW - 2 * fillPad;
+            int fillW = (maxFillW * pct) / 100;
+            fillW &= ~1; // even-align for the CO5300 quirk
+            int fillH = bodyH - 2 * fillPad;
+            fillH &= ~1;
+            if (fillW <= 0 || fillH <= 0) return;
+            Color color;
+            if (pct >= 50) color = Color.LimeGreen;
+            else if (pct >= 20) color = Color.Yellow;
+            else color = Color.Red;
+            _fb.FillRectangle(bodyX + fillPad, bodyY + fillPad, fillW, fillH, color);
+        }
+
+        void DrawBleIcon(int x, int y, int size, bool advertising)
+        {
+            int cx = x + size / 2;
+            int cy = y + size / 2;
+            Color color = Color.White;
+            int strokeT = 4;
+            if (advertising)
+            {
+                // Bowtie approximation - rectangles emanating from center.
+                int armOuter = size / 2 - 2;
+                int armInner = size / 4;
+                _fb.FillRectangle(cx - armInner, cy - armOuter, armInner * 2, strokeT, color);
+                _fb.FillRectangle(cx - armOuter, cy - armOuter + strokeT, armOuter * 2, strokeT, color);
+                _fb.FillRectangle(cx - armOuter, cy + armOuter - 2 * strokeT, armOuter * 2, strokeT, color);
+                _fb.FillRectangle(cx - armInner, cy + armOuter - strokeT, armInner * 2, strokeT, color);
+                _fb.FillRectangle(cx - strokeT / 2, cy - armOuter, strokeT, armOuter * 2, color);
+            }
+            else
+            {
+                // Hollow rectangle so the layout doesn't shift.
+                _fb.FillRectangle(x + 4, y + 4, size - 8, strokeT, color);
+                _fb.FillRectangle(x + 4, y + size - 4 - strokeT, size - 8, strokeT, color);
+                _fb.FillRectangle(x + 4, y + 4, strokeT, size - 8, color);
+                _fb.FillRectangle(x + size - 4 - strokeT, y + 4, strokeT, size - 8, color);
+            }
+        }
+
+        void DrawUsbIcon(int x, int y, int size)
+        {
+            int cx = x + size / 2;
+            int cy = y + 4;
+            Color color = Color.LimeGreen;
+            int strokeT = 4;
+            // Vertical stem + two staggered crossbars.
+            _fb.FillRectangle(cx - strokeT / 2, cy, strokeT, size - 8, color);
+            _fb.FillRectangle(cx - 6, cy + size / 4, 12, strokeT, color);
+            _fb.FillRectangle(cx - 10, cy + size / 2, 20, strokeT, color);
+        }
+
+        static string TwoDigit(int n)
+        {
+            if (n < 0) return "00";
+            if (n >= 100) n = 99;
+            return ((char)('0' + n / 10)).ToString() + ((char)('0' + n % 10)).ToString();
+        }
+    }
+}

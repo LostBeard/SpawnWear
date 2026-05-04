@@ -45,6 +45,18 @@ namespace SpawnWear.UI
         private int _digitsWidth;
         private int _digitsHeight;
 
+        // Page-dots: the navigator owns the index/count and pushes them down
+        // through the constructor. -1 = no dots rendered (single-screen mode).
+        private int _pageDotIndex = -1;
+        private int _pageDotCount = 0;
+        public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
+
+        // Shared status bar. When set, the screen reserves
+        // StatusBar.ReservedHeight px at the top and asks the bar to render
+        // itself on every Tick. Null = no bar (single-screen / kiosk mode).
+        private StatusBar _statusBar;
+        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
+
         // Last rendered values, used to skip redraw if the readout hasn't moved.
         private int _lastH = -1;
         private int _lastM = -1;
@@ -142,9 +154,12 @@ namespace SpawnWear.UI
                 return false; // nothing changed, no flush needed
             }
 
+            // Reserve the top of the panel for the status bar when one is set.
+            int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
+
             int totalWidth = SegmentFont.HhMmSsWidth(DigitWidth, ColonWidth, Spacing);
             _digitsX = (_panelWidth - totalWidth) / 2;
-            _digitsY = (_panelHeight - DigitHeight) / 2;
+            _digitsY = contentTop + (_panelHeight - contentTop - DigitHeight) / 2;
             _digitsWidth = totalWidth;
             _digitsHeight = DigitHeight;
 
@@ -169,12 +184,19 @@ namespace SpawnWear.UI
                     ColonWidth, Spacing,
                     Thickness, Color.White);
                 DrawBatteryBar(batPercent);
+                if (_pageDotCount > 1)
+                {
+                    PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
+                }
                 _fb.Flush();
                 _needsFullRepaint = false;
                 _lastBatteryPercent = batPercent;
+                _statusBar?.Render(force: true);
             }
             else
             {
+                // Per-tick: refresh the status bar (cheap; only flushes on actual change).
+                _statusBar?.Render(force: false);
                 // Partial repaint: clear the digits strip to black, redraw,
                 // and flush ONLY that rectangle. ~25 KB at 16bpp instead of 411 KB.
                 //
