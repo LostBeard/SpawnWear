@@ -39,6 +39,10 @@ if (!Directory.Exists(binDir))
     return 1;
 }
 
+// Note: the actual ceiling check is deferred to AFTER we've assembled the full
+// .pe list (bin/Debug + active package references) below, since some assemblies
+// (e.g. nanoFramework.Device.Bluetooth from packages/) only show up there.
+
 // Find the VS-bundled debugger DLL - it ships in a randomly-named extension folder.
 // Try a few likely roots. Adjust as needed for other VS installs.
 string[] vsRoots = new[]
@@ -88,8 +92,17 @@ var nfproj = projectDir != null ? Directory.GetFiles(projectDir, "*.nfproj").Fir
 var allowedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 if (nfproj != null)
 {
+    // Strip XML comments before matching so Reference elements inside <!-- ... -->
+    // don't get added to the allow-list. Without this, commenting out a
+    // <Reference Include="..."> still pulled the .pe from packages/, defeating
+    // the whole point of trimming references to stay under the deploy ceiling.
     var nfprojXml = File.ReadAllText(nfproj);
-    foreach (var line in nfprojXml.Split('\n'))
+    var stripped = System.Text.RegularExpressions.Regex.Replace(
+        nfprojXml,
+        @"<!--.*?-->",
+        "",
+        System.Text.RegularExpressions.RegexOptions.Singleline);
+    foreach (var line in stripped.Split('\n'))
     {
         var m = System.Text.RegularExpressions.Regex.Match(line, @"<Reference\s+Include=""([^""]+)""");
         if (m.Success) allowedAssemblies.Add(m.Groups[1].Value.Trim());
@@ -121,11 +134,32 @@ if (peFiles.Length == 0)
     return 1;
 }
 Console.WriteLine($"Found {peFiles.Length} .pe assemblies (bin + packages).");
+long peTotalForCheck = 0;
 foreach (var p in peFiles)
 {
     var fi = new FileInfo(p);
     var src = p.Contains("packages", StringComparison.OrdinalIgnoreCase) ? "[pkg]" : "[bin]";
     Console.WriteLine($"  {src} {fi.Name,-50} {fi.Length,8} bytes  {fi.LastWriteTime:HH:mm:ss}");
+    peTotalForCheck += fi.Length;
+}
+
+// Deploy ceiling guard. Empirically the LostBeard nf-interpreter fork on
+// ESP32-S3 silently corrupts the on-flash assembly table when the deploy
+// .pe sum exceeds ~289 KB at the wire-protocol level. The local .pe sum
+// (bin + active package refs) maps roughly 1:1 since the wire overhead
+// adds <1 KB for table headers. Bail loudly so we never ship a brick.
+//
+// Override (after nf-interpreter fix lands): edit DeployCeilingBytes here.
+const int DeployCeilingBytes = 290000;
+Console.WriteLine($"deploy size: {peTotalForCheck} bytes (active .pe sum); ceiling {DeployCeilingBytes}; headroom {DeployCeilingBytes - peTotalForCheck}");
+if (peTotalForCheck > DeployCeilingBytes)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine($"** DEPLOY-CEILING ALERT: total .pe = {peTotalForCheck} > ceiling {DeployCeilingBytes} **");
+    Console.Error.WriteLine($"** This deploy will likely CORRUPT the on-flash assembly table. **");
+    Console.Error.WriteLine($"** Trim a feature or fix nf-interpreter's deploy commit path before retrying. **");
+    Console.Error.WriteLine($"** See feedback_nf_deploy_ceiling_298kb.md (agent memory) for context. **");
+    return 1;
 }
 
 // Reflect: PortBase.CreateInstanceForSerial(false) - we don't need the watcher,
