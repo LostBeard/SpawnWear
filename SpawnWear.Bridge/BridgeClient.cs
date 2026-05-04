@@ -50,6 +50,37 @@ public class BridgeClient : IAsyncDisposable
     public event Action<ButtonEvent>? ButtonEventReceived;
     public event Action<string>? DebugLogReceived;
 
+    // Ring buffer of recent debug-log lines so a Razor page that mounts
+    // AFTER lines have arrived (e.g. user pairs on Home, then navigates
+    // to Console) can backfill its display from history. Without this,
+    // DebugLogReceived only fires for new arrivals - already-delivered
+    // lines are lost to any subscriber that wasn't mounted at the time.
+    const int RecentLogCapacity = 500;
+    readonly LinkedList<string> _recentLogLines = new();
+    readonly object _recentLogLock = new();
+
+    /// <summary>Snapshot (oldest-first) of the last few hundred debug
+    /// lines received from the watch. Pages can call this on mount to
+    /// pre-populate their view, then subscribe to <see cref="DebugLogReceived"/>
+    /// for new arrivals.</summary>
+    public string[] GetRecentLogLines()
+    {
+        lock (_recentLogLock)
+        {
+            var arr = new string[_recentLogLines.Count];
+            _recentLogLines.CopyTo(arr, 0);
+            return arr;
+        }
+    }
+
+    /// <summary>Drop every cached log line. Useful when the user explicitly
+    /// clears the Console tab so a re-mount doesn't restore the cleared
+    /// history.</summary>
+    public void ClearRecentLogLines()
+    {
+        lock (_recentLogLock) _recentLogLines.Clear();
+    }
+
     /// <summary>Use the supplied transport for the next Connect call.
     /// Replaces any prior transport. Closes the previous one.</summary>
     public async Task UseTransportAsync(ITransport transport)
@@ -243,8 +274,17 @@ public class BridgeClient : IAsyncDisposable
                 break;
 
             case ChannelIds.DebugLog:
-                DebugLogReceived?.Invoke(System.Text.Encoding.UTF8.GetString(msg.Payload));
+            {
+                var line = System.Text.Encoding.UTF8.GetString(msg.Payload);
+                lock (_recentLogLock)
+                {
+                    _recentLogLines.AddLast(line);
+                    while (_recentLogLines.Count > RecentLogCapacity)
+                        _recentLogLines.RemoveFirst();
+                }
+                DebugLogReceived?.Invoke(line);
                 break;
+            }
         }
     }
 

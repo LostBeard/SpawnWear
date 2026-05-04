@@ -66,6 +66,12 @@
 
     protected override void OnInitialized()
     {
+        // Pre-populate from BridgeClient's ring buffer so lines that arrived
+        // while we were on a different page (Home, Stats, etc.) are visible
+        // here. Subscribe AFTER the snapshot so we don't double-count any
+        // line that arrives between snapshot and subscribe (DebugLogReceived
+        // is invoked by the same thread that appended to the buffer).
+        foreach (var line in Bridge.GetRecentLogLines()) _lines.Add(line);
         Bridge.DebugLogReceived  += OnLog;
         Bridge.ConnectionChanged += OnConn;
     }
@@ -102,6 +108,7 @@
     void ClearLog()
     {
         _lines.Clear();
+        Bridge.ClearRecentLogLines();
         _error = null;
     }
 
