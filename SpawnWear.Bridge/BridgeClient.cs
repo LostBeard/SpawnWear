@@ -95,6 +95,21 @@ public class BridgeClient : IAsyncDisposable
                 }
                 break;
 
+            case ChannelIds.RtcTime:
+                if (msg.Payload.Length >= 8)
+                {
+                    var t = new RtcTime(
+                        Year:    (ushort)(msg.Payload[0] | (msg.Payload[1] << 8)),
+                        Month:   msg.Payload[2],
+                        Day:     msg.Payload[3],
+                        Hour:    msg.Payload[4],
+                        Minute:  msg.Payload[5],
+                        Second:  msg.Payload[6],
+                        Weekday: msg.Payload[7]);
+                    RtcTimeReceived?.Invoke(t);
+                }
+                break;
+
             case ChannelIds.DebugLog:
                 DebugLogReceived?.Invoke(System.Text.Encoding.UTF8.GetString(msg.Payload));
                 break;
@@ -114,13 +129,16 @@ public class BridgeClient : IAsyncDisposable
 /// the channel-id field of the framed data-channel message.</summary>
 public static class ChannelIds
 {
-    public const string Battery     = "battery";
-    public const string ImuSample   = "imu";
-    public const string RtcTime     = "rtc";
-    public const string Button      = "button";
-    public const string DebugLog    = "log";
-    public const string DebugCmd    = "log.cmd";
-    public const string AppPayload  = "app.payload";
+    public const string Battery         = "battery";
+    public const string ImuSample       = "imu";
+    public const string RtcTime         = "rtc";
+    public const string Button          = "button";
+    public const string DebugLog        = "log";
+    public const string DebugCmd        = "log.cmd";
+    public const string WifiStatus      = "wifi.status";
+    public const string WifiCommand     = "wifi.cmd";
+    public const string WifiCredentials = "wifi.creds";
+    public const string AppPayload      = "app.payload";
 }
 
 public readonly record struct BatteryState(byte Percent, bool IsCharging, bool IsVbusPresent, bool IsLowBattery, ushort VoltageMillivolts, short CurrentMilliamps);
