@@ -160,10 +160,7 @@
         _scanning = true; _status = null; _isError = false;
         try
         {
-            // Firmware's WifiScan characteristic triggers a scan on any write
-            // and notifies results back as "SSID|RSSI\n..." text. Body byte
-            // is ignored; we send 0x01 as a non-empty placeholder.
-            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiScan, new byte[]{ 0x01 }));
+            await Bridge.ScanWifiAsync();
             _status = "Scan triggered. Results will appear below when the watch finishes.";
         }
         catch (Exception ex) { _scanning = false; _status = ex.Message; _isError = true; }
@@ -182,16 +179,7 @@
         _status = null; _isError = false;
         try
         {
-            if (_ssid.Contains('\n')) throw new InvalidOperationException("SSID may not contain newline");
-
-            // Firmware wire format on WifiCredentialsUuid:
-            //   "SSID\nPassword" as a single UTF-8 string, no length prefix.
-            //   See SpawnWear/WifiConfigService.cs::OnCredentialsWriteRequested.
-            var combined = _ssid + "\n" + _password;
-            var payload = System.Text.Encoding.UTF8.GetBytes(combined);
-
-            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCredentials, payload));
-            await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdConnect }));
+            await Bridge.SetWifiAsync(_ssid, _password);
             _status = "Credentials sent. Watch is attempting to join.";
         }
         catch (Exception ex) { _status = ex.Message; _isError = true; }
@@ -199,13 +187,13 @@
 
     async Task Disconnect()
     {
-        try { await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdDisconnect })); _status = "Disconnect command sent."; _isError = false; }
+        try { await Bridge.DisconnectWifiAsync(); _status = "Disconnect command sent."; _isError = false; }
         catch (Exception ex) { _status = ex.Message; _isError = true; }
     }
 
     async Task Forget()
     {
-        try { await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdForget })); _status = "Forget command sent."; _isError = false; }
+        try { await Bridge.ForgetWifiAsync(); _status = "Forget command sent."; _isError = false; }
         catch (Exception ex) { _status = ex.Message; _isError = true; }
     }
 }

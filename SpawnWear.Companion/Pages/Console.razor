@@ -92,8 +92,7 @@
         _error = null;
         try
         {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(_cmd);
-            await Bridge.SendAsync(new TransportMessage(ChannelIds.DebugCmd, bytes));
+            await Bridge.SendDebugCommandAsync(_cmd);
             _lines.Add($"> {_cmd}");
             _cmd = "";
         }
