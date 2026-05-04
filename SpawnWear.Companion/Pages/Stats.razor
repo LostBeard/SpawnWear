@@ -1,0 +1,190 @@
+@page "/stats"
+@using SpawnWear.Bridge
+@inject BridgeClient Bridge
+@implements IDisposable
+
+<PageTitle>Stats &mdash; SpawnWear.Companion</PageTitle>
+
+<div class="page-head">
+    <h1>Telemetry</h1>
+    <span class="badge @(Bridge.IsConnected ? "ok" : "off")">
+        @(Bridge.IsConnected ? "live" : "disconnected")
+    </span>
+</div>
+
+<p class="muted">Every BLE notify channel the watch emits, in one view. Useful for sanity-checking notify rates and spotting drift from firmware while debugging.</p>
+
+<div class="grid">
+    <div class="card panel">
+        <div class="panel-head">Battery</div>
+        @if (_battery is { } b)
+        {
+            <div class="big">@b.Percent<span class="unit">%</span></div>
+            <div class="row"><span>State</span><span class="@StateClass(b)">@StateLabel(b)</span></div>
+            <div class="row"><span>Voltage</span><span class="mono">@b.VoltageMillivolts mV</span></div>
+            <div class="row"><span>Current</span><span class="mono">@b.CurrentMilliamps mA</span></div>
+            <div class="row"><span>Notifies</span><span class="mono">@_batteryCount</span></div>
+        }
+        else
+        {
+            <div class="muted">no data yet</div>
+        }
+    </div>
+
+    <div class="card panel">
+        <div class="panel-head">IMU</div>
+        @if (_imu is { } i)
+        {
+            <div class="row"><span>Accel</span><span class="mono">@i.Ax, @i.Ay, @i.Az</span></div>
+            <div class="row"><span>Gyro</span><span class="mono">@i.Gx, @i.Gy, @i.Gz</span></div>
+            <div class="row"><span>Notifies</span><span class="mono">@_imuCount</span></div>
+            <div class="row"><span>Rate (1s)</span><span class="mono">@_imuRate Hz</span></div>
+        }
+        else
+        {
+            <div class="muted">no data yet</div>
+        }
+    </div>
+
+    <div class="card panel">
+        <div class="panel-head">RTC</div>
+        @if (_rtc is { } t)
+        {
+            <div class="big mono">@($"{t.Year:D4}-{t.Month:D2}-{t.Day:D2} {t.Hour:D2}:{t.Minute:D2}:{t.Second:D2}")</div>
+            <div class="row"><span>Weekday</span><span class="mono">@t.Weekday</span></div>
+            <div class="row"><span>Notifies</span><span class="mono">@_rtcCount</span></div>
+        }
+        else
+        {
+            <div class="muted">no data yet</div>
+        }
+    </div>
+
+    <div class="card panel">
+        <div class="panel-head">Buttons</div>
+        @if (_button is { } btn)
+        {
+            <div class="big">@btn.Button</div>
+            <div class="row"><span>Last action</span><span>@btn.Action</span></div>
+            <div class="row"><span>Events seen</span><span class="mono">@_buttonCount</span></div>
+        }
+        else
+        {
+            <div class="muted">no presses yet</div>
+        }
+    </div>
+
+    <div class="card panel">
+        <div class="panel-head">WiFi</div>
+        @if (_wifi is { } w)
+        {
+            <div class="big">@w.State</div>
+            @if (!string.IsNullOrEmpty(w.IpAddress))
+            {
+                <div class="row"><span>IP</span><span class="mono">@w.IpAddress</span></div>
+            }
+        }
+        else
+        {
+            <div class="muted">no data yet</div>
+        }
+    </div>
+
+    <div class="card panel">
+        <div class="panel-head">Debug log</div>
+        <div class="big">@_logCount</div>
+        <div class="row"><span>Last line</span><span class="mono trim">@(_lastLog ?? "-")</span></div>
+    </div>
+</div>
+
+<style>
+    .page-head { display: flex; align-items: center; gap: 0.8rem; }
+    .page-head h1 { margin: 0; }
+    .badge { padding: 0.18rem 0.6rem; border-radius: 999px; font-size: 0.7rem; letter-spacing: 0.07em; font-weight: 600; }
+    .badge.ok { background: rgba(70,210,140,0.18); color: #6dd9a4; }
+    .badge.off { background: rgba(220,80,90,0.18); color: #ec7986; }
+    .muted { opacity: 0.6; font-size: 0.95rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 0.8rem; margin-top: 0.6rem; }
+    .panel { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.1rem 1.3rem; }
+    .panel-head { font-size: 0.75rem; opacity: 0.55; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.5rem; }
+    .big { font-size: 1.65rem; font-weight: 700; line-height: 1.1; }
+    .big.mono { font-family: ui-monospace, "SF Mono", monospace; font-size: 1.05rem; font-weight: 500; }
+    .unit { font-size: 1rem; opacity: 0.5; margin-left: 0.15rem; }
+    .row { display: flex; justify-content: space-between; padding: 0.18rem 0; font-size: 0.86rem; }
+    .row span:first-child { opacity: 0.55; }
+    .mono { font-family: ui-monospace, "SF Mono", monospace; font-size: 0.86rem; }
+    .charging { color: #6dd9a4; }
+    .low { color: #ec7986; }
+    .usb { color: #f3c668; }
+    .trim { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+
+@code {
+    BatteryState? _battery;
+    ImuSample? _imu;
+    RtcTime? _rtc;
+    ButtonEvent? _button;
+    WifiStatus? _wifi;
+    string? _lastLog;
+
+    int _batteryCount, _imuCount, _rtcCount, _buttonCount, _logCount;
+    int _imuRate;
+
+    System.Threading.Timer? _rateTimer;
+    int _imuLastWindow;
+
+    protected override void OnInitialized()
+    {
+        Bridge.BatteryChanged          += OnBattery;
+        Bridge.ImuSampleReceived       += OnImu;
+        Bridge.RtcTimeReceived         += OnRtc;
+        Bridge.ButtonEventReceived     += OnButton;
+        Bridge.WifiStatusChanged       += OnWifi;
+        Bridge.DebugLogReceived        += OnLog;
+        Bridge.ConnectionChanged       += OnConn;
+
+        _rateTimer = new System.Threading.Timer(_ =>
+        {
+            // 1Hz IMU rate gauge: count samples seen in the last second.
+            int rate = _imuCount - _imuLastWindow;
+            _imuLastWindow = _imuCount;
+            _imuRate = rate;
+            InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+    }
+
+    public void Dispose()
+    {
+        Bridge.BatteryChanged          -= OnBattery;
+        Bridge.ImuSampleReceived       -= OnImu;
+        Bridge.RtcTimeReceived         -= OnRtc;
+        Bridge.ButtonEventReceived     -= OnButton;
+        Bridge.WifiStatusChanged       -= OnWifi;
+        Bridge.DebugLogReceived        -= OnLog;
+        Bridge.ConnectionChanged       -= OnConn;
+        _rateTimer?.Dispose();
+    }
+
+    void OnConn(bool _)              => InvokeAsync(StateHasChanged);
+    void OnBattery(BatteryState b)   { _battery = b; _batteryCount++; InvokeAsync(StateHasChanged); }
+    void OnImu(ImuSample i)          { _imu = i;     _imuCount++; }   // skip per-sample render; rate timer will redraw
+    void OnRtc(RtcTime t)            { _rtc = t;     _rtcCount++; InvokeAsync(StateHasChanged); }
+    void OnButton(ButtonEvent e)     { _button = e;  _buttonCount++; InvokeAsync(StateHasChanged); }
+    void OnWifi(WifiStatus s)        { _wifi = s;    InvokeAsync(StateHasChanged); }
+    void OnLog(string s)             { _lastLog = s; _logCount++; InvokeAsync(StateHasChanged); }
+
+    static string StateClass(BatteryState b)
+    {
+        if (b.IsCharging) return "charging";
+        if (b.IsLowBattery) return "low";
+        if (b.IsVbusPresent) return "usb";
+        return "";
+    }
+    static string StateLabel(BatteryState b)
+    {
+        if (b.IsCharging)  return "charging";
+        if (b.IsLowBattery)return "low battery";
+        if (b.IsVbusPresent) return "USB power";
+        return "on battery";
+    }
+}
