@@ -219,71 +219,19 @@ The PWA companion mirrors every one of these as a remote-UI page reachable via W
 
 The display is the user interface, so it leads. Plumbing (radios, sensors, audio, OTA) is still needed - a watch with no radios is a fancy clock - but each piece gets exposed THROUGH an app or Settings page, not as a substitute for one.
 
-### Phase 1 — Display + touch + input (the UI substrate) — **complete 2026-05-03**
-- [x] CO5300 QSPI driver in C# — landed on `LostBeard/nf-interpreter@feature/qspi-display-driver` and `LostBeard/nanoFramework.Graphics@feature/qspi-display-driver`; PRs to upstream once verified
-- [x] FT3168 touch I²C driver — `SpawnWear/Drivers/Touch/Ft3168Driver.cs`, reports finger-down / finger-up via `TouchEvent`
-- [x] Frame-buffer + drawing primitives — sits on top of `nanoFramework.Graphics` with new `DisplayControl.Sleep / Wake / SetBrightness` upstream extensions
-- [x] Touch + button input dispatcher feeding a UI message loop — `Services/EventLoop.cs` is the host loop; tap classification + cycle-on-tap is in `Program.cs`
-- [x] BOOT button polling on GPIO0 (single press dispatch) — single-press = force panel Sleep. Double / long press semantics reserved for Phase 2.
+**Where we are as of 2026-05-04:**
 
-### Phase 2 — UI Framework + Launcher
-- [ ] Drawing primitives: text, rounded rects, gradients, icons, scrollable lists, keyboard
-- [ ] Navigation stack + app lifecycle (`OnCreate` / `OnResume` / `OnPause` / `OnDestroy`)
-- [ ] Theme + system widgets (status bar, dialog, toast, list view, slider, switch)
-- [ ] **Launcher app**: clock face + app grid + status row (battery / WiFi / BLE / time)
+- ✅ **Phase 1** - Display + touch + input substrate. Complete 2026-05-03.
+- ✅ **Phase 2** - UI Framework + Launcher. Largely complete 2026-05-04: gradient tiles + rounded corners + status bar with WiFi/USB/battery + Android-style pill page indicator + 3x3 launcher with notification badges + screen navigation.
+- 🚧 **Phase 3** - System Services. AXP2101 + PCF85063 + WiFi + HTTP server shipped; service-host scaffold + QMI8658 IMU + Storage + Logger still TODO.
+- ⏭ **Phase 4** - Settings app (next focus once service-host scaffold lands)
+- ⏭ **Phase 5** - Clock app (V1 watchface with date label already shipped; alarms + multiple faces are Phase 5)
+- ⏭ **Phase 6** - Audio service + Voice Recorder + Media Player
+- ⏭ **Phase 7** - WebRTC + AI Assistant (flagship)
+- ⏭ **Phase 8** - OTA + SD-card-loadable apps. Architecture verified against nf-interpreter source; full design in `Plans/sd-card-apps.md` + `Plans/app-contracts-v1.md`.
+- ⏭ **Phase 9** - Activity app + user-contributed apps
 
-### Phase 3 — System Services + power/sensors plumbing
-- [x] Project scaffolding (nanoFramework solution, BLE GATT layout, gitignore, repo at github.com/LostBeard/SpawnWear)
-- [ ] Service host: singletons, lifecycle, inter-service events
-- [ ] AXP2101 driver: battery V / I / SOC, charge state, USB-VBUS detect, PWR button via EXIO6
-- [ ] PCF85063 RTC driver: read / set time, weekday, alarms
-- [ ] QMI8658 IMU driver: accel + gyro + step-count
-- [ ] Storage service: TF/microSD mount + simple key-value store in internal flash for settings persistence
-- [ ] Logger service: ring buffer + USB-CDC sink + BLE notify sink
-
-### Phase 4 — Settings app
-- [ ] Page: **Battery** — level, charging state, USB-VBUS, charge target slider
-- [ ] Page: **Display** — brightness slider (CO5300 reg 0x51), sleep timeout, rotation
-- [ ] Page: **Time / RTC** — read PCF85063, set fields, sync-from-NTP toggle
-- [ ] Page: **About** — firmware version, MAC, IP, free heap, uptime
-- [ ] Page: **WiFi** — toggle, SSID list, on-screen keyboard for password, current connection details
-- [ ] Page: **Bluetooth** — radio toggle, paired devices, scan
-- [ ] Page: **BLE** — GATT-server visibility toggle, advertised name editor
-
-### Phase 5 — Clock app
-- [ ] Multiple watch faces (analog, digital, complications)
-- [ ] Alarms (RTC alarm interrupt → wake from low-power)
-- [ ] Timer + stopwatch
-
-### Phase 6 — Audio service + Voice Recorder + Media Player
-- [ ] ES8311 playback driver (I²S) — depends on `nanoFramework.Hardware.Esp32` I²S surface
-- [ ] ES7210 capture driver (PDM dual mic + echo cancel ADC)
-- [ ] Audio service: shared pipeline, volume, mute, mic gain, format negotiation
-- [ ] Page: Settings → **Sound** (volume / mic gain / test-tone / mic-level meter)
-- [ ] **Voice Recorder app**: capture to TF, listen back, delete, share over WiFi
-- [ ] **Media Player app**: play files from TF, basic transport controls; HTTP streaming if airtime allows
-
-### Phase 7 — WebRTC service + AI Assistant app (flagship)
-- [ ] WebRTC peer service: SpawnDev.RTC integration; signaling via the companion PWA or a small HTTP signaling relay; ICE / SDP plumbing
-- [ ] **AI Assistant app**: push-to-talk button, on-screen keyboard for text, live transcript display, TTS playback through speaker, conversation history persisted to TF
-- [ ] PC-side counterpart: a small Blazor / .NET host on TJ's PC that the watch dials, runs the assistant model, returns audio + text
-
-### Phase 8 — OTA + app install
-- [ ] OTA firmware update path (nanoFramework standard)
-- [ ] Page: **About → Update** — pull URL field, "Check for update" button, download + reboot flow
-- [ ] App install: ship apps as separate managed payloads where the runtime allows; otherwise treat "install an app" as "OTA the firmware with an updated app set"
-
-### Phase 9 — Activity app + later
-- [ ] **Activity app**: step count, daily totals, motion log
-- [ ] User-contributed apps via the install path
-- [ ] Polish, theming, watchface marketplace ideas
-
-### Companion Blazor WASM PWA (parallel track, starts in Phase 4)
-- [ ] Scaffolded with SpawnDev.BlazorJS
-- [ ] Mirrors every Settings page over BLE (provisioning + diagnostics work even before the on-device keyboard is comfortable)
-- [ ] Mirrors every built-in app (remote launcher)
-- [ ] Live system log viewer over BLE notify
-- [ ] PWA installable so it lives on a phone home screen
+Full per-phase task list with current completion state lives in **[`Plans/roadmap.md`](Plans/roadmap.md)**. Forward-looking design sketches for specific features live in [`Plans/`](Plans/). Completed work tracked in the [Status / Milestones](#status--milestones) table below.
 
 ---
 
