@@ -102,12 +102,25 @@
             await stream.CopyToAsync(ms);
             var bytes = ms.ToArray();
 
+            // Pre-flight parse the .pe header so we can warn before
+            // POSTing if the assembly will fail to load (e.g. native
+            // interop sets c_Flags_NeedReboot which makes Assembly.Load
+            // return CLR_E_BUSY on the watch). Layout matches
+            // tools/check-pe-header.cs / nanoCLR_Types.h CLR_RECORD_ASSEMBLY.
+            var preflight = InspectPe(bytes, file.Name);
+            if (preflight.NeedsReboot)
+            {
+                _lastResult = $"{preflight.Summary}  Refusing to upload: this .pe references native interop (c_Flags_NeedReboot is SET). Assembly.Load(byte[]) on the watch would return CLR_E_BUSY. Strip the native reference and rebuild.";
+                _isError = true;
+                return;
+            }
+
             var url = _watchUrl.TrimEnd('/') + "/loadapp";
             using var content = new ByteArrayContent(bytes);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             using var resp = await Http.PostAsync(url, content);
             var body = await resp.Content.ReadAsStringAsync();
-            _lastResult = $"{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}";
+            _lastResult = $"{preflight.Summary}\n{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}";
             _isError = !resp.IsSuccessStatusCode;
         }
         catch (Exception ex) { _lastResult = ex.Message; _isError = true; }
@@ -116,5 +129,21 @@
             _uploading = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    record PeHeader(string Summary, bool NeedsReboot);
+
+    static PeHeader InspectPe(byte[] bytes, string name)
+    {
+        if (bytes.Length < 40) return new PeHeader($"{name} ({bytes.Length} bytes) - too small to be a valid .pe", true);
+        uint flags          = BitConverter.ToUInt32(bytes, 16);
+        uint nativeChecksum = BitConverter.ToUInt32(bytes, 20);
+        ushort vMaj         = BitConverter.ToUInt16(bytes, 28);
+        ushort vMin         = BitConverter.ToUInt16(bytes, 30);
+        ushort vBld         = BitConverter.ToUInt16(bytes, 32);
+        ushort vRev         = BitConverter.ToUInt16(bytes, 34);
+        bool needsReboot    = (flags & 1u) != 0;
+        var summary = $"{name} ({bytes.Length} bytes) v{vMaj}.{vMin}.{vBld}.{vRev}, native checksum 0x{nativeChecksum:X8}, flags 0x{flags:X8}";
+        return new PeHeader(summary, needsReboot);
     }
 }
