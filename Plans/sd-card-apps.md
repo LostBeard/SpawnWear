@@ -54,12 +54,42 @@ App load + launch flow:
 6. Push the app's `IScreen`-equivalent onto the navigation stack
 7. On exit, `OnPause` → `OnDestroy`, drop the reference, let the GC reclaim the assembly + its heap
 
-## Constraints we need to verify before betting on this
+## Constraints verified by reading nf-interpreter source
 
-- **Assembly unloading**: `Assembly.Load(byte[])` works, but does the runtime actually free the assembly's metadata when the last reference goes away? Need to test by loading + unloading the same app 100x and watching the managed heap. If it leaks, "launching the same app multiple times" becomes a slow death.
-- **Native-method limits**: per `c_Flags_NeedReboot` (line 983 of `nanoCLR_Types.h`), assemblies with native entries need reboot-to-load. We need to confirm that an app built only against managed assemblies (`mscorlib`, `nanoFramework.Graphics`, etc.) does NOT get this flag. The flag is set by the build/metadata stage, so the test is: build a tiny "hello world" app, inspect the .pe header bytes, see if the flag is clear.
-- **Cross-assembly calls**: when our core firmware exposes `IServiceHost` from `SpawnWear.AppContracts`, an app loaded at runtime invokes a method on that interface. That call has to traverse the assembly boundary. nanoFramework's type system handles this for built-in assemblies; we need to confirm it works for runtime-loaded ones too.
-- **Same-version requirement**: an app built against `SpawnWear.AppContracts v1.0` may or may not work against firmware running v1.1, depending on whether the runtime checks struct layouts strictly. Need to design `ISpawnApp` to be genuinely stable, with extensibility through optional capability interfaces (e.g. `IAppHasNotifications`) rather than method additions to the base contract.
+(Done 2026-05-04 against `D:/users/tj/Projects/SpawnWear/_vendor-nf-interpreter/`. Updated from "we need to verify" to "this is what the code does.")
+
+### 1. Assembly unloading - no public API; reboot is the only full reclaim
+
+- **`CLR_RT_Assembly::DestroyInstance()`** exists (`Core/TypeSystem.cpp:1885`). It (a) clears the type-system slot via `g_CLR_RT_TypeSystem.m_assemblies[m_idx - 1] = NULL`, (b) frees the header memory IF the `FreeOnDestroy` flag is set (`m_flags & 0x100`), and (c) appends the assembly object to the event cache for recycling.
+- **It is called from two places**: the Load() error path (`CorLib/corlib_native_System_Reflection_Assembly.cpp:395`, only on failure) and `CLR_RT_TypeSystem::TypeSystem_Cleanup()` (`Core/TypeSystem.cpp:3438`, only at full CLR shutdown).
+- **No public managed-side API** wraps DestroyInstance for a successfully-loaded assembly. Gemini was right that there's no `Assembly.Unload()`.
+- **`FreeOnDestroy` is NOT set on byte[]-loaded assemblies.** The Load() native impl rooted the byte[] in `assm->m_pFile = array;` (`corlib_native_System_Reflection_Assembly.cpp:319`) and never sets the flag. So even if DestroyInstance were called, the header memory stays alive (it's GC-managed via the byte[], not malloc-allocated). `CLRStartup.cpp:306` is the only place that DOES set `FreeOnDestroy`, and only for non-XIP startup loads.
+- **Cross-reference dangling-pointer concern**: real but bounded. Other assemblies' `m_pCrossReference_AssemblyRef[i].m_target` would point to a recycled CLR_RT_Assembly. `NANOCLR_FOREACH_ASSEMBLY` iteration skips NULL slots in `m_assemblies[]`, so type-system traversal stays safe; but specific resolved cross-references would dangle. Don't unload an assembly that other live assemblies reference.
+
+**Implication for the V1 plan**: a "Soft Reboot (ClrOnly)" cycle is the only full-reclaim path. Apps can be loaded freely until heap pressure builds up, at which point a reboot is needed. UI design should treat reboot as cheap (~3 s) and explicit ("Restart the watch to reclaim memory") rather than something to hide.
+
+### 2. `c_Flags_NeedReboot` - returns CLR_E_BUSY, not a forced reboot
+
+- **Actual behavior** (`corlib_native_System_Reflection_Assembly.cpp:312-315`): `if (header->flags & CLR_RECORD_ASSEMBLY::c_Flags_NeedReboot) NANOCLR_SET_AND_LEAVE(CLR_E_BUSY);`. That's an HRESULT failure, propagated as an exception to managed code. NOT a forced reboot. NOT a "LinkFailure".
+- **The managed caller decides what to do**: catch the exception, prompt the user, save a "pending app" pointer, call `Power.RebootDevice(RebootOption.ClrOnly)`. None of that is built in - we'd have to write it.
+- **What sets the flag in the .pe header**: the build pipeline sets `c_Flags_NeedReboot` when the assembly contains native interop method definitions whose checksum doesn't match the running CLR's compiled-in native methods table. Pure managed app code referencing only managed surfaces should NOT have this flag.
+- **Verification step**: build a "hello world" `.pe` for the watch (managed-only, references `SpawnWear.AppContracts.dll` only), dump the first 32 bytes of the file, check the `flags` field at offset 16 (`CLR_RECORD_ASSEMBLY` layout: 8-byte marker, 4-byte headerCRC, 4-byte assemblyCRC, then 4-byte flags). Bit 0 should be clear.
+
+### 3. Name collision - the loader does NOT dedupe; both copies link
+
+- **Gemini's claim "loader returns the existing handle" is WRONG for the Assembly.Load(byte[]) path.** Looking at `corlib_native_System_Reflection_Assembly.cpp:317-321`: `CreateInstance(header, assm)` followed immediately by `g_CLR_RT_TypeSystem.Link(assm)`. There is NO `FindAssembly()` call before linking.
+- **`Link()` itself** (`Core/TypeSystem.cpp:3454`) iterates `NANOCLR_FOREACH_ASSEMBLY_NULL` to find the first NULL slot and stores the new pointer there. Both the existing AND the newly-loaded assembly end up in `m_assemblies[]`, in different slots.
+- **`FindAssembly(name, version, exact)`** (`Core/TypeSystem.cpp:3486`) iterates and returns the FIRST match - so subsequent type-resolution lookups would consistently pick whichever assembly happens to be in the lower-indexed slot. Two distinct CLR_RT_Assembly instances exist, but only one is reachable via name lookup.
+- **AppDomain-level deduplication DOES exist** (`Core/TypeSystem.cpp:2284-2286`: `if (FindAppDomainAssembly(assm) != NULL) return S_OK;`), but that's at a higher layer that the Load(byte[]) path doesn't traverse for its initial Link.
+- **`CLR_E_ASSM_WRONG_CHECKSUM`** (`nf_errors_exceptions.h:83`) is for native-interop checksum mismatches at deploy-time, not for name collisions. Different code path.
+
+**Implication**: don't rely on the loader to dedupe. The launcher's app loader MUST call `Assembly.GetAssemblies()` (or equivalent metadata API), check for an existing match by name+version, and either skip the load or fail the install BEFORE handing bytes to the CLR.
+
+### 4. Same-version contract design
+
+- An app built against `SpawnWear.AppContracts v1.0` may load against firmware running v1.1 IF the version comparison in `FindAssembly` accepts non-exact matches. The `fExact` parameter (line 3500) is what controls this.
+- For interfaces specifically, the contract surface is the method signatures recorded in the .pe metadata. Adding a method to `ISpawnApp` would change the interface's metadata and potentially break apps built against the older contract.
+- **Design rule**: `SpawnWear.AppContracts.dll` must be APPEND-ONLY at the type level. Existing methods on `ISpawnApp` never change. New capabilities arrive as new interfaces (`IAppHasNotifications`, `IAppHasBackgroundService`) that the firmware checks via `is` casts at runtime.
 
 ## Performance + UX
 
