@@ -29,6 +29,18 @@ public static class BridgeServiceCollectionExtensions
             return client;
         });
         services.AddScoped<WatchHttp>();
+
+        // Phase 7 WebRTC. Options + factory; the consumer can override
+        // BridgeWebRtcOptions before this call to point at a different
+        // hub. The factory holds the signaling-client pool + the
+        // 20-byte peer id; constructing a transport for a paired watch
+        // is a single CreateTransport(pairingRecord) call.
+        services.AddScoped<WebRtc.BridgeWebRtcOptions>();
+        services.AddScoped<WebRtc.WebRtcTransportFactory>(sp =>
+            new WebRtc.WebRtcTransportFactory(
+                sp.GetService<WebRtc.BridgeWebRtcOptions>(),
+                sp.GetRequiredService<SpawnDev.BlazorJS.Cryptography.IPortableCrypto>()));
+
         return services;
     }
 }
