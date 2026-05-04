@@ -1,8 +1,10 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using nanoFramework.Device.Bluetooth;
-using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
+// BLE temporarily stripped 2026-05-04 to clear the wire-protocol commit-phase
+// deploy ceiling (CLR runs out of native heap loading too many assemblies at
+// once with all of [Bluetooth + Wifi + Net + Graphics] referenced). Restore
+// once nf-interpreter's deploy-commit memory budget is lifted.
 using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
@@ -90,13 +92,14 @@ namespace SpawnWear
             StartTouchProbe();
             StartBootButton();
             StartWifi();
+            // BLE stripped - see using comment above.
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
             // when it starts; if BLE wins the race for PSRAM the graphics heap gets
             // whatever scraps remain (~100KB observed) and FullScreen Bitmap OOMs.
             // Order: power -> touch -> display (claims PSRAM) -> BLE -> watchface.
             Bitmap fb = StartDisplay();
-            StartBleAdvertising();
+            // StartBleAdvertising(); // BLE temporarily stripped to clear deploy ceiling
 
             if (fb != null)
             {
@@ -105,9 +108,17 @@ namespace SpawnWear
                 // Will be a no-op if WiFi failed to connect.
                 if (_wifi != null && _wifi.IsConnected)
                 {
-                    _http = new HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
-                    _http.Start();
-                    Debug.WriteLine("[SpawnWear] HTTP at http://" + _wifi.IpAddress + "/");
+                    _http = new HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, port: 8080);
+                    try
+                    {
+                        _http.Start();
+                        Debug.WriteLine("[SpawnWear] HTTP at http://" + _wifi.IpAddress + ":8080/");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("[SpawnWear] HTTP start failed: " + ex.Message);
+                        _http = null;
+                    }
                 }
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
@@ -182,19 +193,12 @@ namespace SpawnWear
         /// </summary>
         static int OnTick(EventLoop.WakeReason reason)
         {
-            // Drain a pending screenshot capture before painting. We do this on the
-            // main-loop thread (not in the BOOT-button ISR) because Screenshot.Capture
-            // does ~52 KB of GetPixel reads + base64 + Debug.WriteLine traffic that
-            // would block the GPIO event handler for several seconds.
+            // BOOT-button screenshot capture lived here - removed in favor of the
+            // HTTP server's /screenshot.bin endpoint. The boot-button click pending
+            // flag is harmless if set; just drained without action.
             if (_bootButtonClickPending > 0)
             {
                 _bootButtonClickPending = 0;
-                if (_fb != null)
-                {
-                    Debug.WriteLine("[Boot] capturing screenshot...");
-                    int bytes = Screenshot.Capture(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
-                    Debug.WriteLine("[Boot] screenshot " + bytes + " bytes done");
-                }
             }
 
             try
@@ -510,39 +514,8 @@ namespace SpawnWear
             }
         }
 
-        static void StartBleAdvertising()
-        {
-            try
-            {
-                Debug.WriteLine("[SpawnWear] BLE-1 - Calling BluetoothLEServer.Instance");
-                BluetoothLEServer server = BluetoothLEServer.Instance;
-                Debug.WriteLine("[SpawnWear] BLE-2 - Got BluetoothLEServer.Instance");
-
-                string name = "SW-" + _displayStatus + "-" + _touchStatus;
-                if (name.Length > 20) name = name.Substring(0, 20);
-                server.DeviceName = name;
-                Debug.WriteLine("[SpawnWear] BLE-3 - DeviceName='" + name + "'");
-
-                Debug.WriteLine("[SpawnWear] BLE-4 - GattServiceProvider.Create");
-                var result = GattServiceProvider.Create(BleUuids.WifiServiceUuid);
-                if (result.Error != BluetoothError.Success)
-                {
-                    Debug.WriteLine("[SpawnWear] BLE-5-fail - Create error=" + result.Error);
-                    return;
-                }
-                Debug.WriteLine("[SpawnWear] BLE-5 - Service created");
-
-                result.ServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
-                {
-                    IsConnectable = true,
-                    IsDiscoverable = true,
-                });
-                Debug.WriteLine("[SpawnWear] BLE-6 - Advertising as '" + name + "'");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("[SpawnWear] BLE-EX " + ex.GetType().Name + ": " + ex.Message);
-            }
-        }
+        // BLE startup stripped 2026-05-04. Restore once the firmware deploy-commit
+        // memory budget is lifted; the source above is preserved in git history
+        // (commit 767015a and earlier). The watch is HTTP-only for now.
     }
 }

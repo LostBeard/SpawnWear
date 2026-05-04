@@ -31,68 +31,19 @@ namespace SpawnWear.Drivers.Wifi
         {
             try
             {
-                // Give the WiFi stack a moment to come up after boot. Without this,
-                // early WifiAdapter.Connect calls can fail with vague status codes
-                // because the underlying esp_wifi_start hasn't initialized the
-                // station-mode context yet.
-                Thread.Sleep(1500);
-
-                // Persist the SSID + password + auth/encryption type in
-                // Wireless80211Configuration FIRST. WifiNetworkHelper assumes
-                // a stored configuration exists; without one it throws
-                // InvalidOperationException from inside ScanAndConnectDhcp.
-                Debug.WriteLine("[WiFi] W1 - Storing Wireless80211Configuration for '" + WifiCredentials.Ssid + "'");
-                var configs = Wireless80211Configuration.GetAllWireless80211Configurations();
-                if (configs == null || configs.Length == 0)
-                {
-                    Debug.WriteLine("[WiFi] W1-fail - no Wireless80211Configuration slots");
-                    return false;
-                }
-                var cfg = configs[0];
-                cfg.Ssid = WifiCredentials.Ssid;
-                cfg.Password = WifiCredentials.Password;
-                cfg.Authentication = AuthenticationType.WPA2;
-                cfg.Encryption = EncryptionType.WPA2_PSK;
-                cfg.Radio = RadioType.NotSpecified;
-                cfg.SaveConfiguration();
-                Debug.WriteLine("[WiFi] W1a - cfg saved auth=" + cfg.Authentication + " enc=" + cfg.Encryption);
-
-                Debug.WriteLine("[WiFi] W2 - WifiAdapter.Connect direct (post-config-save)");
-                var adapter = WifiAdapter.FindAllAdapters()[0];
-                adapter.Disconnect();
-                Thread.Sleep(500);
-                // Try ScanAsync first to "warm up" the radio - some bindings need
-                // an initial scan before Connect succeeds.
-                try
-                {
-                    Debug.WriteLine("[WiFi] W2a - ScanAsync warm-up");
-                    adapter.ScanAsync();
-                    Thread.Sleep(2500);
-                    var rep = adapter.NetworkReport;
-                    int n = (rep != null && rep.AvailableNetworks != null) ? rep.AvailableNetworks.Length : 0;
-                    Debug.WriteLine("[WiFi] W2b - scan saw " + n + " networks");
-                    bool foundOurs = false;
-                    if (rep != null && rep.AvailableNetworks != null)
-                    {
-                        for (int i = 0; i < rep.AvailableNetworks.Length; i++)
-                        {
-                            var nw = rep.AvailableNetworks[i];
-                            if (nw.Ssid == WifiCredentials.Ssid)
-                            {
-                                foundOurs = true;
-                                Debug.WriteLine("[WiFi]    target rssi=" + nw.NetworkRssiInDecibelMilliwatts);
-                            }
-                        }
-                    }
-                    Debug.WriteLine("[WiFi] W2c - target SSID found=" + foundOurs);
-                }
-                catch (Exception scanEx)
-                {
-                    Debug.WriteLine("[WiFi] W2-scan EX " + scanEx.GetType().Name + ": " + scanEx.Message);
-                }
-                var connectResult = adapter.Connect(WifiCredentials.Ssid, WifiReconnectionKind.Automatic, WifiCredentials.Password);
-                Debug.WriteLine("[WiFi] W2d - Connect returned status=" + connectResult.ConnectionStatus);
-                bool ok = connectResult.ConnectionStatus == WifiConnectionStatus.Success;
+                // Direct call - no Wireless80211Configuration prelude. Mirrors
+                // NanoFrameTest1's working pattern from the same chip family.
+                Debug.WriteLine("[WiFi] W1 - WifiNetworkHelper.ConnectDhcp '" + WifiCredentials.Ssid + "' (timeout=" + timeoutMs + "ms)");
+                var cts = new CancellationTokenSource(timeoutMs);
+                bool ok = WifiNetworkHelper.ConnectDhcp(
+                    WifiCredentials.Ssid,
+                    WifiCredentials.Password,
+                    WifiReconnectionKind.Automatic,
+                    requiresDateTime: false,
+                    wifiAdapterId: 0,
+                    token: cts.Token);
+                Debug.WriteLine("[WiFi] W1a - ok=" + ok + " status=" + WifiNetworkHelper.Status +
+                    (WifiNetworkHelper.HelperException != null ? (" ex=" + WifiNetworkHelper.HelperException.Message) : ""));
 
                 if (!ok) return false;
 

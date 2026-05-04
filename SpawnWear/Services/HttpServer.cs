@@ -48,7 +48,19 @@ namespace SpawnWear.Services
         {
             if (_running) return;
             _listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _listener.Bind(new IPEndPoint(IPAddress.Any, _port));
+            // SO_REUSEADDR so the socket can rebind after a CLR-only restart
+            // (the previous run's listener may still be in TIME_WAIT).
+            try { _listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true); }
+            catch { /* not all builds support ReuseAddress; bind may still succeed */ }
+            try
+            {
+                _listener.Bind(new IPEndPoint(IPAddress.Any, _port));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Http] bind failed on " + _port + ": " + ex.Message + " - power cycle the watch to clear the stale socket");
+                throw;
+            }
             _listener.Listen(2);
             _running = true;
             _thread = new Thread(AcceptLoop);
@@ -96,7 +108,10 @@ namespace SpawnWear.Services
                 int sp = firstLine.IndexOf(' ', 4);
                 if (sp > 4) path = firstLine.Substring(4, sp - 4);
             }
-            Debug.WriteLine("[Http] " + firstLine);
+            // Strip the query string (?t=cache-buster, etc.) before route match.
+            int q = path.IndexOf('?');
+            if (q >= 0) path = path.Substring(0, q);
+            Debug.WriteLine("[Http] " + firstLine + " -> path=" + path);
 
             if (path == "/" || path == "/index.html")
             {
