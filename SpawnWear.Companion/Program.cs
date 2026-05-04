@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using SpawnDev.BlazorJS;
 using SpawnWear.Bridge;
 using SpawnWear.Companion;
+using SpawnWear.Companion.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -12,5 +13,6 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 
 builder.Services.AddBlazorJSRuntime();
 builder.Services.AddSpawnWearBridge();
+builder.Services.AddScoped<WatchPrefs>();
 
 await builder.Build().BlazorJSRunAsync();

@@ -2,9 +2,11 @@
 @using SpawnDev.BlazorJS
 @using SpawnDev.BlazorJS.JSObjects
 @using SpawnWear.Bridge
+@using SpawnWear.Companion.Services
 @inject BlazorJSRuntime JS
 @inject HttpClient Http
 @inject BridgeClient Bridge
+@inject WatchPrefs Prefs
 @implements IDisposable
 
 <PageTitle>Apps &mdash; SpawnWear.Companion</PageTitle>
@@ -21,7 +23,7 @@
 <div class="card controls">
     <label>
         <span>Watch URL</span>
-        <input type="text" @bind="_watchUrl" @bind:event="oninput" placeholder="http://192.168.1.171" />
+        <input type="text" @bind="_watchUrl" @bind:event="oninput" @bind:after="OnUrlChanged" placeholder="http://192.168.1.171" />
     </label>
 
     <label class="dropzone">
@@ -69,14 +71,19 @@
     protected override void OnInitialized()
     {
         Bridge.WifiStatusChanged += OnWifi;
+        var saved = Prefs.WatchUrl;
+        if (!string.IsNullOrEmpty(saved)) _watchUrl = saved;
     }
     public void Dispose() => Bridge.WifiStatusChanged -= OnWifi;
+
+    void OnUrlChanged() { Prefs.WatchUrl = _watchUrl; }
 
     void OnWifi(WifiStatus s)
     {
         if (s.State == WifiState.Connected && !string.IsNullOrEmpty(s.IpAddress) && string.IsNullOrEmpty(_watchUrl))
         {
             _watchUrl = "http://" + s.IpAddress;
+            Prefs.WatchUrl = _watchUrl;
             InvokeAsync(StateHasChanged);
         }
     }

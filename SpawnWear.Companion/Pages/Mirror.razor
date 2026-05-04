@@ -2,9 +2,11 @@
 @using SpawnDev.BlazorJS
 @using SpawnDev.BlazorJS.JSObjects
 @using SpawnWear.Bridge
+@using SpawnWear.Companion.Services
 @inject BlazorJSRuntime JS
 @inject HttpClient Http
 @inject BridgeClient Bridge
+@inject WatchPrefs Prefs
 @implements IDisposable
 
 <PageTitle>Mirror &mdash; SpawnWear.Companion</PageTitle>
@@ -21,7 +23,7 @@
 <div class="card controls">
     <label>
         <span>Watch URL</span>
-        <input type="text" @bind="_watchUrl" @bind:event="oninput" placeholder="http://192.168.1.171" />
+        <input type="text" @bind="_watchUrl" @bind:event="oninput" @bind:after="OnUrlChanged" placeholder="http://192.168.1.171" />
     </label>
 
     <div class="actions">
@@ -84,6 +86,10 @@
     {
         Bridge.WifiStatusChanged += OnWifi;
 
+        // Restore last watch URL the user typed in this browser, if any.
+        var saved = Prefs.WatchUrl;
+        if (!string.IsNullOrEmpty(saved)) _watchUrl = saved;
+
         // Page Visibility wiring - when the tab is backgrounded we suspend
         // auto-refresh so we're not pegging the watch's WiFi + screenshot
         // pipeline for nobody to look at. Resume on next visibility flip.
@@ -97,6 +103,8 @@
         };
         _doc.OnVisibilityChange += _onVisibility;
     }
+
+    void OnUrlChanged() { Prefs.WatchUrl = _watchUrl; }
 
     public void Dispose()
     {
@@ -112,6 +120,7 @@
         if (s.State == WifiState.Connected && !string.IsNullOrEmpty(s.IpAddress) && string.IsNullOrEmpty(_watchUrl))
         {
             _watchUrl = "http://" + s.IpAddress;
+            Prefs.WatchUrl = _watchUrl;
             InvokeAsync(StateHasChanged);
         }
     }
