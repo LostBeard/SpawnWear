@@ -48,6 +48,8 @@ public class BleTransport : ITransport, IAsyncDisposable
 
     public bool IsConnected { get; private set; }
 
+    public string? PeerName => _device?.Name;
+
     public event Action<bool>? ConnectionChanged;
     public event Action<TransportMessage>? MessageReceived;
 

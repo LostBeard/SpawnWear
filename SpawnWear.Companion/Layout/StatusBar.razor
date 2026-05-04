@@ -12,7 +12,16 @@
 
 <div class="statusbar">
     <span class="dot @(Bridge.IsConnected ? "ok" : "off")"></span>
-    <span class="label">@(Bridge.IsConnected ? "Watch live" : "Not paired")</span>
+    <span class="label">
+        @if (Bridge.IsConnected)
+        {
+            <text>@(Bridge.PeerName ?? "Watch")</text>
+        }
+        else
+        {
+            <text>Not paired</text>
+        }
+    </span>
 
     @if (_battery is { } b)
     {

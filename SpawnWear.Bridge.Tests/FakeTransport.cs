@@ -14,6 +14,8 @@ public class FakeTransport : ITransport
 {
     public bool IsConnected { get; private set; }
 
+    public string? PeerName { get; set; } = "FakeWatch";
+
     public event Action<bool>? ConnectionChanged;
     public event Action<TransportMessage>? MessageReceived;
 

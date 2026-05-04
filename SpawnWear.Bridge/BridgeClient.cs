@@ -29,6 +29,11 @@ public class BridgeClient : IAsyncDisposable
     /// <summary>True when an underlying transport is connected.</summary>
     public bool IsConnected => _transport?.IsConnected ?? false;
 
+    /// <summary>Best-effort human-readable peer identifier from the
+    /// active transport (e.g. "SW-OK-Tok" from BLE), or null if not
+    /// connected.</summary>
+    public string? PeerName => _transport?.PeerName;
+
     public event Action<bool>? ConnectionChanged;
     public event Action<BatteryState>? BatteryChanged;
     public event Action<ImuSample>? ImuSampleReceived;

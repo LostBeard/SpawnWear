@@ -18,6 +18,12 @@ public interface ITransport
     /// <summary>True when the underlying connection is established.</summary>
     bool IsConnected { get; }
 
+    /// <summary>Best-effort human-readable identifier for the paired
+    /// peer (e.g. <c>SW-OK-Tok</c> from a BLE advertising name).
+    /// <c>null</c> when not connected or when the transport doesn't
+    /// have a name to report.</summary>
+    string? PeerName { get; }
+
     /// <summary>Fires when IsConnected flips. Bool argument is the new value.</summary>
     event Action<bool>? ConnectionChanged;
 

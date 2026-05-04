@@ -33,6 +33,8 @@ public class WebRtcTransport : ITransport
 
     public bool IsConnected { get; private set; }
 
+    public string? PeerName => null;  // Phase 7 fills this from the SDP/identity.
+
     // Events are the public contract; Phase 7 fills in the senders when
     // SpawnDev.RTC + BLE-as-signaling are wired. Suppressing CS0067 here
     // keeps the warning-clean build until then.
