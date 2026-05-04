@@ -67,6 +67,7 @@ namespace SpawnWear
 
             EnablePowerRails();
             StartTouchProbe();
+            StartBootButton();
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
             // when it starts; if BLE wins the race for PSRAM the graphics heap gets
@@ -321,6 +322,42 @@ namespace SpawnWear
                 if (t.Length > 8) t = t.Substring(0, 8);
                 _touchStatus = "Tex" + t;
                 Debug.WriteLine("[Touch] EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Wires the BOOT button on GPIO0 as an event source for the main loop. Phase 1
+        /// roadmap item from the README. The button is pulled-up internally (active LOW),
+        /// so a press triggers a falling edge.
+        ///
+        /// V1 dispatch: a single press IMMEDIATELY transitions the screen state to Sleep
+        /// (DisplayControl.Sleep + 30 s tick budget). A subsequent touch wakes the panel
+        /// via the existing state-machine path. Long-press / double-press semantics are
+        /// reserved for Phase 2 once the system gets a real input dispatcher.
+        /// </summary>
+        static void StartBootButton()
+        {
+            try
+            {
+                Debug.WriteLine("[Boot] B1 - Opening GPIO" + BoardPins.BootButton);
+                var pin = BoardSetup.GpioController.OpenPin(BoardPins.BootButton);
+                pin.SetPinMode(System.Device.Gpio.PinMode.InputPullUp);
+                pin.ValueChanged += (sender, args) =>
+                {
+                    if (args.ChangeType != System.Device.Gpio.PinEventTypes.Falling) return;
+                    Debug.WriteLine("[Boot] PRESS - forcing Sleep");
+                    // Reset _lastTouchUtcTicks far enough into the past that the next OnTick
+                    // computes idle >= SleepAfterSeconds and transitions the state machine
+                    // to Sleep, which then drives DisplayControl.Sleep().
+                    _lastTouchUtcTicks = DateTime.UtcNow.Ticks - (SleepAfterSeconds + 1) * TimeSpan.TicksPerSecond;
+                    _fingerDown = false;
+                    if (_eventLoop != null) _eventLoop.Wake();
+                };
+                Debug.WriteLine("[Boot] B2 - Falling-edge handler attached");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Boot] EX " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
