@@ -76,6 +76,13 @@ namespace SpawnWear.UI
         private const int BatteryStrokeThickness = 2;
         private const int BatteryGapBelowDigits = 30;
 
+        // Date label below the time. Renders as "MON  MAY 04" in SmallFont
+        // when the RTC is reporting valid time; collapses (zero-height) when
+        // the RTC is invalid so we don't display 1970-01-01.
+        private const int DateLabelScale = 3;
+        private const int DateGapBelowDigits = 12;
+        private int _dateLabelX, _dateLabelY, _dateLabelW, _dateLabelH;
+
         // Cached battery rectangle so partial flush after a percentage change
         // can target only the bar + cap region.
         private int _batX, _batY, _batW, _batH;
@@ -135,11 +142,13 @@ namespace SpawnWear.UI
             // reboot. Falls back to uptime via DateTime.UtcNow.Ticks when the RTC
             // is missing or its OS flag is asserted.
             int h, m, s;
+            string dateLabel = null;
             if (_rtc != null && _rtc.TryRead(out var rtcTime))
             {
                 h = rtcTime.Hour;
                 m = rtcTime.Minute;
                 s = rtcTime.Second;
+                dateLabel = FormatDate(rtcTime);
             }
             else
             {
@@ -163,11 +172,23 @@ namespace SpawnWear.UI
             _digitsWidth = totalWidth;
             _digitsHeight = DigitHeight;
 
+            // Date label rect (only valid when dateLabel != null).
+            if (dateLabel != null)
+            {
+                _dateLabelW = SmallFont.MeasureString(dateLabel, DateLabelScale);
+                _dateLabelH = SmallFont.GlyphHeight * DateLabelScale;
+                _dateLabelX = (_panelWidth - _dateLabelW) / 2;
+                _dateLabelY = _digitsY + _digitsHeight + DateGapBelowDigits;
+            }
+            int batteryYOffset = (dateLabel != null)
+                ? DateGapBelowDigits + _dateLabelH + BatteryGapBelowDigits
+                : BatteryGapBelowDigits;
+
             // Battery bar bounding rect (includes cap on the right side).
             _batW = BatteryBodyWidth + BatteryCapWidth;
             _batH = BatteryBodyHeight;
             _batX = (_panelWidth - _batW) / 2;
-            _batY = _digitsY + _digitsHeight + BatteryGapBelowDigits;
+            _batY = _digitsY + _digitsHeight + batteryYOffset;
 
             int batPercent = ReadBatteryPercentSafe();
             bool batChanged = batPercent != _lastBatteryPercent;
@@ -183,6 +204,10 @@ namespace SpawnWear.UI
                     DigitWidth, DigitHeight,
                     ColonWidth, Spacing,
                     Thickness, Color.White);
+                if (dateLabel != null)
+                {
+                    SmallFont.DrawString(_fb, dateLabel, _dateLabelX, _dateLabelY, DateLabelScale, Color.FromArgb(180, 180, 180));
+                }
                 DrawBatteryBar(batPercent);
                 if (_pageDotCount > 1)
                 {
@@ -246,6 +271,22 @@ namespace SpawnWear.UI
             _lastM = m;
             _lastS = s;
             return true;
+        }
+
+        private static readonly string[] WeekdayNames = new[] { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+        private static readonly string[] MonthNames = new[] { "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
+
+        private static string FormatDate(Pcf85063Driver.RtcTime t)
+        {
+            // "MON  MAY 04" - 2 spaces between weekday and month group so the
+            // eye reads them as separate fields. Bails to "---" placeholders if
+            // the RTC's reported indices are out of range.
+            string wd = (t.Weekday >= 0 && t.Weekday < WeekdayNames.Length) ? WeekdayNames[t.Weekday] : "---";
+            string mo = (t.Month >= 1 && t.Month <= 12) ? MonthNames[t.Month] : "---";
+            string day = t.Day < 10
+                ? "0" + ((char)('0' + t.Day)).ToString()
+                : ((char)('0' + t.Day / 10)).ToString() + ((char)('0' + t.Day % 10)).ToString();
+            return wd + "  " + mo + " " + day;
         }
 
         private int ReadBatteryPercentSafe()
