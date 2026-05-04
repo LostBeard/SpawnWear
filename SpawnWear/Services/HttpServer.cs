@@ -21,6 +21,12 @@ namespace SpawnWear.Services
     ///   GET /screenshot.bin    -> Raw RGB565 big-endian bytes preceded by
     ///                              a small ASCII header line "w=W h=H\n" so
     ///                              the JS knows how to slice the canvas
+    ///   POST /loadapp          -> Body is a SpawnWear .pe assembly; loaded
+    ///                              dynamically and pushed onto the screen stack
+    ///   POST /touch            -> Body is 4 bytes [x_u16_LE][y_u16_LE]; injects
+    ///                              a tap event into the active screen so the
+    ///                              PWA Mirror page becomes a real remote
+    ///   OPTIONS *              -> 204 No Content (CORS preflight)
     ///   anything else          -> 404
     ///
     /// Single-threaded: handles one connection at a time on a dedicated thread.
@@ -158,10 +164,50 @@ namespace SpawnWear.Services
             {
                 ServeLoadApp(client, reqHeader, buf, n, headerEnd);
             }
+            else if (path == "/touch" && method == "POST")
+            {
+                ServeTouch(client, reqHeader, buf, n, headerEnd);
+            }
             else
             {
                 ServeNotFound(client);
             }
+        }
+
+        // POST /touch - body is 4 bytes [x_u16_LE][y_u16_LE]. Routes through
+        // ScreenNavigator.HandleTap so the active screen sees it the same way
+        // it would see a real FT3168 finger-up tap event.
+        void ServeTouch(Socket client, string reqHeader, byte[] buf, int n, int headerEnd)
+        {
+            if (_navigator == null)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nNavigator not attached");
+                return;
+            }
+            int contentLen = ParseContentLength(reqHeader);
+            if (contentLen != 4)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nExpected 4 bytes [x_u16_LE][y_u16_LE], got " + contentLen);
+                return;
+            }
+            byte[] body = ReadBody(client, contentLen, buf, n, headerEnd);
+            int x = body[0] | (body[1] << 8);
+            int y = body[2] | (body[3] << 8);
+            // Bound check - panel is _panelWidth x _panelHeight. Anything
+            // outside is ignored (a misbehaving client shouldn't crash the
+            // navigator).
+            if (x < 0 || x >= _panelWidth || y < 0 || y >= _panelHeight)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nTap (" + x + "," + y + ") out of " + _panelWidth + "x" + _panelHeight + " panel");
+                return;
+            }
+            try { _navigator.HandleTap(x, y); }
+            catch (System.Exception ex)
+            {
+                ServeText(client, "500 Internal Server Error\r\n\r\nHandleTap EX: " + ex.GetType().Name + ": " + ex.Message);
+                return;
+            }
+            ServeText(client, "OK tap=(" + x + "," + y + ")");
         }
 
         void ServeNoContent(Socket client)
