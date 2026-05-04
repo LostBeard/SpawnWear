@@ -145,12 +145,17 @@ foreach (var p in peFiles)
 
 // Deploy ceiling guard. Empirically the LostBeard nf-interpreter fork on
 // ESP32-S3 silently corrupts the on-flash assembly table when the deploy
-// .pe sum exceeds ~289 KB at the wire-protocol level. The local .pe sum
-// (bin + active package refs) maps roughly 1:1 since the wire overhead
-// adds <1 KB for table headers. Bail loudly so we never ship a brick.
+// .pe sum exceeds ~242 KB. Confirmed 2026-05-05: 242068 bytes deployed +
+// booted clean; 243168 bytes corrupted SpawnWear.pe's metadata strings.
+// The corruption is silent - nf-deploy reports 100%, but nf-attach shows
+// garbled assembly names. Bail loudly so we never ship a brick.
+//
+// Earlier (2026-05-04) measurement showed corruption at ~290 KB but that
+// was inflated by silently-included BLE.pe through a regex bug. With the
+// regex fix the real ceiling on this firmware is much lower.
 //
 // Override (after nf-interpreter fix lands): edit DeployCeilingBytes here.
-const int DeployCeilingBytes = 290000;
+const int DeployCeilingBytes = 242500;
 Console.WriteLine($"deploy size: {peTotalForCheck} bytes (active .pe sum); ceiling {DeployCeilingBytes}; headroom {DeployCeilingBytes - peTotalForCheck}");
 if (peTotalForCheck > DeployCeilingBytes)
 {

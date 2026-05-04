@@ -37,6 +37,7 @@
     <Compile Include="Services\HttpServer.cs" />
     <Compile Include="Services\ServiceHost.cs" />
     <Compile Include="UI\AboutScreen.cs" />
+    <Compile Include="UI\WifiScreen.cs" />
     <Compile Include="UI\IScreen.cs" />
     <Compile Include="UI\LauncherScreen.cs" />
     <Compile Include="UI\ListView.cs" />

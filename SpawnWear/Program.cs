@@ -137,6 +137,7 @@ namespace SpawnWear
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
+                var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
 
                 // Launcher tiles map directly to the per-app screen indices in the
                 // navigator below. Phase 2.5 will let SD-card-loaded apps register
@@ -152,27 +153,29 @@ namespace SpawnWear
                     new LauncherScreen.Tile { Label = "MUSIC",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
                     new LauncherScreen.Tile { Label = "VIDEO",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
                     new LauncherScreen.Tile { Label = "GALLERY",  TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Gallery },
-                    // Row 3: WIFI placeholder (Phase 4), VOICE placeholder, ABOUT functional.
-                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Wifi },
+                    // Row 3: WIFI functional, VOICE placeholder, ABOUT functional.
+                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5,  Icon = LauncherScreen.IconKind.Wifi,     Background = System.Drawing.Color.FromArgb(20, 60, 90) },
                     new LauncherScreen.Tile { Label = "VOICE",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
                     new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 4,  Icon = LauncherScreen.IconKind.Settings, Background = System.Drawing.Color.FromArgb(50, 30, 60) },
                 };
                 var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
                     targetIndex => { _nav.GoTo(targetIndex); });
 
-                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about });
+                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen });
                 // Wire page-dot indices + the shared status bar into each screen.
                 // Each screen renders the bar in its own Tick / Invalidate path.
-                launcher.SetPageDots(0, 5);
-                watchface.SetPageDots(1, 5);
-                stats.SetPageDots(2, 5);
-                settings.SetPageDots(3, 5);
-                about.SetPageDots(4, 5);
+                launcher.SetPageDots(0, 6);
+                watchface.SetPageDots(1, 6);
+                stats.SetPageDots(2, 6);
+                settings.SetPageDots(3, 6);
+                about.SetPageDots(4, 6);
+                wifiScreen.SetPageDots(5, 6);
                 launcher.SetStatusBar(statusBar);
                 watchface.SetStatusBar(statusBar);
                 stats.SetStatusBar(statusBar);
                 settings.SetStatusBar(statusBar);
                 about.SetStatusBar(statusBar);
+                wifiScreen.SetStatusBar(statusBar);
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps

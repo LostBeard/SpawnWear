@@ -11,20 +11,10 @@ namespace SpawnWear.UI
     /// has visibility into watch state even if the SD card is removed,
     /// corrupted, or unmounted.
     ///
-    /// Renders a vertical stack of LABEL: VALUE rows in SmallFont 2x scale:
-    ///   BUILD:   2026-05-05
-    ///   WIFI:    192.168.1.171
-    ///   SSID:    SDN2
-    ///   BAT:     087% 4123mV
-    ///   USB:     IN / OUT
-    ///   RTC:     2026-05-05 14:23   (or "INVALID" if OS flag set)
-    ///   HEAP:    NNNN KB
-    ///   UPTIME:  HH:MM:SS
-    ///
-    /// First-pass implementation does a full repaint on every visible Tick;
-    /// future polish can add per-row cached values + partial flush like
-    /// StatsScreen does. The full-screen flush takes ~25 ms; at 1 Hz it's
-    /// imperceptible and keeps this code short.
+    /// Power model: full repaint only on Invalidate / OnResume. Per-tick
+    /// just refreshes the status bar (which itself only flushes when its
+    /// content changes). This avoids the visible status-bar flash the
+    /// earlier full-repaint-every-tick implementation produced.
     /// </summary>
     public class AboutScreen : IScreen
     {
@@ -34,11 +24,7 @@ namespace SpawnWear.UI
         readonly IServiceHost _services;
         readonly DateTime _bootTime;
 
-        // Compile-time build identity. Bumping these is a one-line edit on
-        // every redeploy; eventually we'll inject the value at build time
-        // via a generated constant or a manifest file.
         const string BuildDate = "2026-05-05";
-
         const int LabelScale = 2;
         const int RowGap = 6;
         const int MarginX = 28;
@@ -63,17 +49,25 @@ namespace SpawnWear.UI
         public void Invalidate() { _needsRepaint = true; }
         public void OnResume() => Invalidate();
         public void OnPause() { }
-        public bool OnTap(int x, int y) => false; // navigator handles long-press = home
+        public bool OnTap(int x, int y) => false;
 
         public void Tick()
         {
-            if (!_needsRepaint)
+            if (_needsRepaint)
             {
-                // Idle redraw cadence - refresh once per second so live values
-                // (battery percent, RTC time, uptime) update.
-                _needsRepaint = true;
+                FullRepaint();
+                _needsRepaint = false;
+                return;
             }
+            // Per-tick just refreshes the status bar (which only flushes when
+            // its own content changes). The body of the screen stays put.
+            _statusBar?.Render(force: false);
+        }
 
+        void FullRepaint()
+        {
+            var wifi = _services != null ? _services.GetWifi() : null;
+            var power = _services != null ? _services.GetPower() : null;
             int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
             int rowH = SmallFont.GlyphHeight * LabelScale;
             int rowStride = rowH + RowGap;
@@ -81,27 +75,14 @@ namespace SpawnWear.UI
             _fb.Clear();
             _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
 
-            // Lay out from top of content area; leave 60 px at the bottom for
-            // page dots.
             int y = contentTop + 16;
-
-            var wifi = _services != null ? _services.GetWifi() : null;
-            var power = _services != null ? _services.GetPower() : null;
-
-            DrawRow(MarginX, y, "BUILD",  BuildDate);
-            y += rowStride;
-            DrawRow(MarginX, y, "WIFI",   wifi != null ? wifi.IpAddress : "");
-            y += rowStride;
-            DrawRow(MarginX, y, "SSID",   wifi != null ? wifi.ConnectedSsid : "");
-            y += rowStride;
-            DrawRow(MarginX, y, "BAT",    FormatBattery());
-            y += rowStride;
-            DrawRow(MarginX, y, "USB",    (power != null && power.IsVbusPresent) ? "IN" : "OUT");
-            y += rowStride;
-            DrawRow(MarginX, y, "RTC",    FormatRtc());
-            y += rowStride;
-            DrawRow(MarginX, y, "HEAP",   FormatHeap());
-            y += rowStride;
+            DrawRow(MarginX, y, "BUILD",  BuildDate); y += rowStride;
+            DrawRow(MarginX, y, "WIFI",   wifi != null ? wifi.IpAddress : ""); y += rowStride;
+            DrawRow(MarginX, y, "SSID",   wifi != null ? wifi.ConnectedSsid : ""); y += rowStride;
+            DrawRow(MarginX, y, "BAT",    FormatBattery()); y += rowStride;
+            DrawRow(MarginX, y, "USB",    (power != null && power.IsVbusPresent) ? "IN" : "OUT"); y += rowStride;
+            DrawRow(MarginX, y, "RTC",    FormatRtc()); y += rowStride;
+            DrawRow(MarginX, y, "HEAP",   FormatHeap()); y += rowStride;
             DrawRow(MarginX, y, "UPTIME", FormatUptime());
 
             if (_pageDotCount > 1)
@@ -111,13 +92,10 @@ namespace SpawnWear.UI
 
             _fb.Flush();
             _statusBar?.Render(force: true);
-            _needsRepaint = false;
         }
 
         void DrawRow(int x, int y, string label, string value)
         {
-            // Label in dim gray, value in white. Two columns: label left, value
-            // right of a fixed indent so they line up across rows.
             const int LabelColW = 110;
             SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
             SmallFont.DrawString(_fb, value == null ? "" : value, x + LabelColW, y, LabelScale, Color.White);
@@ -138,25 +116,13 @@ namespace SpawnWear.UI
         {
             var r = _services != null ? _services.GetRtc() : null;
             if (r == null || !r.IsValid) return "INVALID";
-            // YYYY-MM-DD HH:MM
-            return r.Year.ToString() + "-" +
-                TwoDigit(r.Month) + "-" + TwoDigit(r.Day) + " " +
-                TwoDigit(r.Hour) + ":" + TwoDigit(r.Minute);
+            return r.Year.ToString() + "-" + TwoDigit(r.Month) + "-" + TwoDigit(r.Day) + " " + TwoDigit(r.Hour) + ":" + TwoDigit(r.Minute);
         }
 
         string FormatHeap()
         {
-            // nanoFramework.Runtime.Native.GC has Run(false) returning bytes free.
-            // Format as KB rounded down.
-            try
-            {
-                uint freeBytes = nanoFramework.Runtime.Native.GC.Run(false);
-                return (freeBytes / 1024).ToString() + "KB";
-            }
-            catch
-            {
-                return "?";
-            }
+            try { return (nanoFramework.Runtime.Native.GC.Run(false) / 1024).ToString() + "KB"; }
+            catch { return "?"; }
         }
 
         string FormatUptime()
@@ -179,9 +145,7 @@ namespace SpawnWear.UI
         {
             if (n < 0) n = 0;
             if (n >= 1000) return n.ToString();
-            return ((char)('0' + (n / 100) % 10)).ToString() +
-                   ((char)('0' + (n / 10) % 10)).ToString() +
-                   ((char)('0' + n % 10)).ToString();
+            return ((char)('0' + (n / 100) % 10)).ToString() + ((char)('0' + (n / 10) % 10)).ToString() + ((char)('0' + n % 10)).ToString();
         }
     }
 }

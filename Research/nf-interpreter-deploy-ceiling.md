@@ -8,14 +8,14 @@ Discovered 2026-05-04 during SpawnWear bring-up.
 
 Configuration A — works:
 - 16 active references (no `nanoFramework.Device.Bluetooth`)
-- Total `.pe` sum: 234,572 bytes
-- Wire-protocol deploy total: ~235,316 bytes
+- Total `.pe` sum: 242,068 bytes
+- Wire-protocol deploy total: ~242,824 bytes
 - Result: deploys cleanly, app boots, all 16 assemblies show correct names in `nf-attach`
 
 Configuration B — corrupts:
-- 17 active references (BLE reference enabled + 4 BLE service `.cs` files in `<Compile>` group)
-- Total `.pe` sum: 297,872 bytes
-- Wire-protocol deploy total: 297,872 bytes
+- 16 active references (same set), but ~1 KB more SpawnWear.pe code
+- Total `.pe` sum: 243,168 bytes
+- Wire-protocol deploy total: 243,008 bytes (re-measured 2026-05-05)
 - Result: nf-deploy reports 100% / `Done.`, but `nf-attach` shows:
   ```
   [first ~10 entries clean]
