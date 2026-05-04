@@ -19,14 +19,17 @@
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
     <Compile Include="BleUuids.cs" />
+    <Compile Include="Config\WifiCredentials.cs" />
     <Compile Include="Drivers\BoardPins.cs" />
     <Compile Include="Drivers\BoardSetup.cs" />
     <Compile Include="Drivers\Power\Axp2101Driver.cs" />
     <Compile Include="Drivers\Rtc\Pcf85063Driver.cs" />
     <Compile Include="Drivers\Touch\Ft3168Driver.cs" />
+    <Compile Include="Drivers\Wifi\WifiService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\EventLoop.cs" />
+    <Compile Include="Services\HttpServer.cs" />
     <Compile Include="UI\IScreen.cs" />
     <Compile Include="UI\LauncherScreen.cs" />
     <Compile Include="UI\ListView.cs" />
@@ -82,6 +85,12 @@
     </Reference>
     <Reference Include="System.Threading">
       <HintPath>..\packages\nanoFramework.System.Threading.1.1.52\lib\System.Threading.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Device.Wifi">
+      <HintPath>..\packages\nanoFramework.System.Device.Wifi.1.5.139\lib\System.Device.Wifi.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net">
+      <HintPath>..\packages\nanoFramework.System.Net.1.11.50\lib\System.Net.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>

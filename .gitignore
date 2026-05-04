@@ -367,3 +367,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# WiFi credentials - never commit real values. Copy WifiCredentials.cs.template
+# to WifiCredentials.cs and fill in your local network's SSID + password.
+SpawnWear/Config/WifiCredentials.cs

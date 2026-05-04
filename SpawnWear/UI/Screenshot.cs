@@ -22,10 +22,13 @@ namespace SpawnWear.UI
         // Downsample factor: read every Nth pixel in both dimensions. 2 = quarter
         // resolution (~205 x 251 = 51 KB at RGB565). Larger = smaller / faster.
         const int Downsample = 2;
-        // Bytes per chunk. Wire protocol Debug.WriteLine appears to hard-wrap
-        // around 128 chars per line. 80 raw bytes = 108 base64 chars - fits in
-        // one line so the host parser can match each chunk to one regex hit.
-        const int ChunkBytes = 80;
+        // Bytes per chunk. The wire protocol hard-wraps Debug.WriteLine around
+        // 128 chars per line, so chunks larger than ~90 raw bytes (=120 base64
+        // chars) get split across multiple lines. The host parser
+        // (tools/nf-screenshot.cs) was updated to handle wrap-continuation
+        // lines, so we use 256 here for ~3x faster transmission - cuts a full
+        // capture from ~60s to ~20s.
+        const int ChunkBytes = 256;
 
         /// <summary>
         /// Captures a thumbnail of the FullScreen Bitmap and dumps it via

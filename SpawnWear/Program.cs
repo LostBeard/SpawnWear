@@ -9,6 +9,7 @@ using SpawnWear.Drivers;
 using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Rtc;
 using SpawnWear.Drivers.Touch;
+using SpawnWear.Drivers.Wifi;
 using SpawnWear.Services;
 using SpawnWear.UI;
 
@@ -28,6 +29,8 @@ namespace SpawnWear
         static ScreenNavigator _nav;
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
+        static WifiService _wifi;
+        static HttpServer _http;
         static Bitmap _fb; // shared framebuffer reference for screenshots
         static int _bootButtonClickPending; // set by ISR, drained by main loop
         static bool _fingerDown;
@@ -86,6 +89,7 @@ namespace SpawnWear
             StartRtc();
             StartTouchProbe();
             StartBootButton();
+            StartWifi();
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
             // when it starts; if BLE wins the race for PSRAM the graphics heap gets
@@ -97,6 +101,14 @@ namespace SpawnWear
             if (fb != null)
             {
                 _fb = fb;
+                // Start the HTTP server now that we have a framebuffer to serve from.
+                // Will be a no-op if WiFi failed to connect.
+                if (_wifi != null && _wifi.IsConnected)
+                {
+                    _http = new HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                    _http.Start();
+                    Debug.WriteLine("[SpawnWear] HTTP at http://" + _wifi.IpAddress + "/");
+                }
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
@@ -412,6 +424,21 @@ namespace SpawnWear
                 if (t.Length > 8) t = t.Substring(0, 8);
                 _touchStatus = "Tex" + t;
                 Debug.WriteLine("[Touch] EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        static void StartWifi()
+        {
+            try
+            {
+                Debug.WriteLine("[WiFi] Starting...");
+                _wifi = new WifiService();
+                bool ok = _wifi.Connect(timeoutMs: 20000);
+                Debug.WriteLine("[WiFi] " + (ok ? "connected ip=" + _wifi.IpAddress : "FAILED"));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[WiFi] EX " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
