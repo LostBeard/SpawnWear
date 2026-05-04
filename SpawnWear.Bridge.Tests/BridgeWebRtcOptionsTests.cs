@@ -6,10 +6,10 @@ namespace SpawnWear.Bridge.Tests;
 public class BridgeWebRtcOptionsTests
 {
     [Fact]
-    public void Defaults_point_at_hub_spawndev_com()
+    public void Defaults_point_at_hub_spawndev_com_44365()
     {
         var opts = new BridgeWebRtcOptions();
-        Assert.Equal("wss://hub.spawndev.com/announce", opts.AnnounceUrl);
+        Assert.Equal("wss://hub.spawndev.com:44365/announce", opts.AnnounceUrl);
         Assert.Contains("stun:hub.spawndev.com:3478", opts.StunUrls);
         Assert.Equal("max-bundle", opts.BundlePolicy);
         Assert.Equal("all", opts.IceTransportPolicy);
