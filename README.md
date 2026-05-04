@@ -24,6 +24,7 @@ Constrained by the silicon: ESP32-S3R8 with 8 MB PSRAM and 32 MB flash. Everythi
 
 | Folder | What's in it |
 |---|---|
+| **[`Apps.md`](Apps.md)** | The app library + how to drop your own apps onto the watch |
 | **[`Docs/`](Docs/)** | Reference: [architecture](Docs/architecture.md), [hardware pin map + IC list](Docs/hardware.md), [dev loop](Docs/dev-loop.md), [milestones](Docs/milestones.md), [nanoFramework compatibility](Docs/nanoframework-compatibility.md) |
 | **[`Plans/`](Plans/)** | Forward-looking design: [roadmap](Plans/roadmap.md), [launcher Android-quality plan](Plans/launcher-android-quality.md), [SD-card-loadable apps](Plans/sd-card-apps.md), [AppContracts v1 spec](Plans/app-contracts-v1.md), [companion PWA](Plans/companion-pwa.md) |
 | **[`Research/`](Research/)** | Investigations + findings: [nf-interpreter deploy ceiling](Research/nf-interpreter-deploy-ceiling.md), [WiFi router compatibility](Research/esp32s3-wifi-router-compatibility.md), [FT3168 burst-read layout](Research/ft3168-burst-read-layout.md) |
