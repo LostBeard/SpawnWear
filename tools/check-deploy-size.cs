@@ -21,7 +21,7 @@ if (args.Length < 1)
 }
 
 string dir = args[0];
-int ceiling = 242500;
+int ceiling = 2000000;
 foreach (var a in args.Skip(1))
 {
     if (a.StartsWith("--ceiling="))

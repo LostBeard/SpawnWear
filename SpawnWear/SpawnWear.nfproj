@@ -54,14 +54,9 @@
     <Reference Include="mscorlib">
       <HintPath>..\packages\nanoFramework.CoreLibrary.1.17.11\lib\mscorlib.dll</HintPath>
     </Reference>
-    <!-- BLE temporarily stripped 2026-05-04 to clear the wire-protocol commit-phase
-         deploy ceiling. Restore once nf-interpreter's deploy-commit native heap is
-         expanded. The package itself stays in packages.config so restoration is a
-         one-line reference uncomment.
     <Reference Include="nanoFramework.Device.Bluetooth">
       <HintPath>..\packages\nanoFramework.Device.Bluetooth.1.1.115\lib\nanoFramework.Device.Bluetooth.dll</HintPath>
     </Reference>
-    -->
     <Reference Include="nanoFramework.Graphics">
       <HintPath>..\packages\nanoFramework.Graphics.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.dll</HintPath>
     </Reference>

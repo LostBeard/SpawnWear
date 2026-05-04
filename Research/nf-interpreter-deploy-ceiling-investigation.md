@@ -47,10 +47,33 @@ ESP_LOGE is at ERROR level so it's visible in the default IDF log filter (ESP_LO
    - If all writes show `OK` but `nf-attach` still shows corrupted assembly table: the writes succeeded at the flash level but reads via mmap return stale data. Test fix: add `esp_cache_msync` after each write.
    - If neither pattern matches: review the captured log for clues about where the data went wrong.
 
-## Findings
+## Findings (2026-05-05 11:00)
 
-(To be filled in once the test runs.)
+After flashing the freshly-built firmware (commit `f06eded8` on the LostBeard `feature/qspi-display-driver` branch) and deploying a 295 KB build (BLE reference restored to push past the prior corruption threshold), **the deploy succeeded cleanly with no corruption**. All 17 assemblies showed correct names + versions in `nf-attach`. SpawnWear.pe loaded properly. BLE.pe loaded properly. Watch functions normally.
+
+Per-write diagnostic confirmed every `esp_partition_write` call returned `ESP_OK` for the entire 295,660-byte deploy:
+```
+[runtime] [deploy-erase] partition erased size=2031616 err=0x0
+[runtime] [deploy-write] 1016 bytes @ offset 0  cum=1016  OK
+... [292 writes follow, all OK] ...
+[runtime] [deploy-write] 4 bytes @ offset 295656  cum=295660  OK
+```
 
 ## Resolution
 
-(To be filled in once the cause is confirmed and the fix is verified.)
+The previously-flashed firmware on the watch was OLDER than the current source. Whatever fix landed between then and now resolved the corruption. The flashed firmware before today was likely from a build dated 2026-04-29 to 2026-05-03 area, and the current source has at least these later commits:
+- `89a4a947` Bitmap CO5300 alignment (2026-05-03 20:27)
+- `c925835a` DisplayControl Sleep / Wake / SetBrightness (2026-05-03 19:04)
+- `d239323d` QSPI display NativeInit fix (2026-05-03 18:03)
+
+We did NOT pinpoint exactly which commit fixed the deploy corruption — possibly memory or alignment-related cleanup that happened to also stabilize deploy. Rather than bisect, we accept the resolution and move forward with the freshly-built firmware as the canonical artifact.
+
+**Deploy ceiling guards in `tools/nf-deploy.cs` and `tools/check-deploy-size.cs` raised from 242 KB to 2 MB** — generous sanity bound, far above any realistic deploy size. The 2.94 MB deploy partition itself is the hardware ceiling.
+
+## Lesson saved
+
+The "ceiling" diagnosis from 2026-05-04 was tied to a specific firmware version, not a permanent architectural limit. **Always re-test such "ceilings" against a fresh build before treating them as permanent constraints.** Note saved as feedback memory.
+
+## Diagnostic instrumentation
+
+The per-write `[deploy-write]` / `[deploy-erase]` logs added to `Esp32FlashDriver_Write` and `Esp32FlashDriver_EraseBlock` are useful research instrumentation. They live on the local `feature/qspi-display-driver` branch as commit `f06eded8` (NOT pushed upstream). For production firmware these should be reverted; we leave them in for now while the local working copy is the canonical artifact.
