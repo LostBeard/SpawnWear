@@ -47,6 +47,19 @@ dotnet run tools/nf-attach.cs COM9 30      # COM9, 30s poll
 
 **Caveat:** `ExecutionMode` from this CLI path is misleading — see the comment block at the top of `nf-attach.cs`. Use VS breakpoints for crash diagnosis, not this tool's `GetExecutionMode()` reading.
 
+## check-deploy-size.cs — guard against the nf-interpreter deploy ceiling
+
+Sums every `.pe` in the bin directory and bails non-zero if the total exceeds the empirical ~289 KB wire-protocol deploy ceiling we hit on this fork of nf-interpreter. The wire-protocol overhead adds ~55 KB on top of the local .pe sum, so the local-side guard is at 235 KB.
+
+```bash
+dotnet run tools/check-deploy-size.cs SpawnWear/bin/Debug
+# exit 0 = under ceiling; exit 1 = over ceiling (DO NOT DEPLOY)
+```
+
+Run this BEFORE every `nf-deploy.cs` invocation. If you ignore it and deploy past the ceiling, the watch's flash assembly table gets silently corrupted starting at SpawnWear.pe — `nf-attach.cs` will show garbled assembly names like `__StaticArrayInitTypeSize=10` instead of `SpawnWear`. Recovery requires deploying a smaller config + power-cycling the watch.
+
+Background investigation in `feedback_nf_deploy_ceiling_298kb.md` (in agent memory) — fix is needed in nf-interpreter's `Esp32FlashDriver_Write` (likely missing mmap cache invalidation).
+
 ## ble-scan.cs — BLE advertisement scanner
 
 (Not yet copied into this folder — currently lives in `%TEMP%`. Will be added as a tool when the SpawnWear PWA companion is wired up so the watch <-> PWA discovery flow can be smoke-tested without launching a browser.)
