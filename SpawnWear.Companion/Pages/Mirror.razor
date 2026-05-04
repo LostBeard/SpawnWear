@@ -29,6 +29,10 @@
         <label class="row">
             <input type="checkbox" @bind="_auto" @bind:after="OnAutoToggled" /> auto every 1s
         </label>
+        @if (_auto && _hidden)
+        {
+            <span class="muted-pill" title="Auto-refresh suspended while this tab is in the background">paused (tab hidden)</span>
+        }
     </div>
 
     @if (_lastError is not null)
@@ -55,6 +59,7 @@
     .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
     .actions button { background: linear-gradient(120deg,#5b8def,#9d6bff); color: white; border: 0; padding: 0.55rem 1.05rem; border-radius: 999px; font-weight: 600; cursor: pointer; }
     .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .muted-pill { background: #2c2f3a; color: #d8dae4; opacity: 0.7; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.78rem; }
     .canvas-wrap { margin-top: 1rem; display: flex; justify-content: center; }
     canvas { background: #000; border: 1px solid #2c2f3a; border-radius: 12px; image-rendering: pixelated; max-width: 90vw; height: auto; }
     .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.4rem; margin-top: 0.6rem; }
@@ -68,17 +73,37 @@
     DateTime? _lastFetchUtc;
     System.Threading.Timer? _timer;
 
+    Document? _doc;
+    bool _hidden;
+    Action<Event>? _onVisibility;
+
     string SinceLast => _lastFetchUtc is null ? "" :
         $"{(int)(DateTime.UtcNow - _lastFetchUtc.Value).TotalSeconds}s ago";
 
     protected override void OnInitialized()
     {
         Bridge.WifiStatusChanged += OnWifi;
+
+        // Page Visibility wiring - when the tab is backgrounded we suspend
+        // auto-refresh so we're not pegging the watch's WiFi + screenshot
+        // pipeline for nobody to look at. Resume on next visibility flip.
+        _doc = JS.Get<Document>("document");
+        _hidden = _doc.Hidden;
+        _onVisibility = _ =>
+        {
+            _hidden = _doc!.Hidden;
+            ApplyTimer();
+            InvokeAsync(StateHasChanged);
+        };
+        _doc.OnVisibilityChange += _onVisibility;
     }
 
     public void Dispose()
     {
         Bridge.WifiStatusChanged -= OnWifi;
+        if (_doc is not null && _onVisibility is not null)
+            _doc.OnVisibilityChange -= _onVisibility;
+        _doc?.Dispose();
         _timer?.Dispose();
     }
 
@@ -91,11 +116,14 @@
         }
     }
 
-    void OnAutoToggled()
+    void OnAutoToggled() => ApplyTimer();
+
+    void ApplyTimer()
     {
         _timer?.Dispose();
         _timer = null;
-        if (_auto)
+        // Run only when both auto-refresh is on AND the tab is visible.
+        if (_auto && !_hidden)
         {
             _timer = new System.Threading.Timer(_ => InvokeAsync(FetchOnceAsync), null, 0, 1000);
         }
