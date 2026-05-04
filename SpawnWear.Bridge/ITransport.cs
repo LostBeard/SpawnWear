@@ -50,6 +50,21 @@ public interface ITransport
 
     /// <summary>Disconnect cleanly.</summary>
     Task DisconnectAsync();
+
+    /// <summary>Phase 7 pairing helper — read the watch's Ed25519
+    /// public key (32 raw bytes) from its <c>PairingPubKeyUuid</c>
+    /// characteristic. Throws if the characteristic isn't present
+    /// (firmware hasn't deployed Phase 7 yet) or if the watch returns
+    /// the wrong number of bytes. Transports without a watch-side
+    /// equivalent (WebRTC) implement as throw NotSupportedException.</summary>
+    Task<byte[]> ReadWatchPublicKeyAsync(CancellationToken ct = default);
+
+    /// <summary>Phase 7 pairing helper — write the 116-byte handshake
+    /// payload to <c>PairingHandshakeUuid</c> and wait for the watch's
+    /// 64-byte signature notify response. The byte layouts are
+    /// documented on <c>SpawnWear.Bridge.Pairing.PairingHandshakeWire</c>.
+    /// Single round trip; caller times out via <paramref name="ct"/>.</summary>
+    Task<byte[]> ExchangePairingHandshakeAsync(byte[] companionWritePayload, CancellationToken ct = default);
 }
 
 /// <summary>

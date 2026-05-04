@@ -58,5 +58,14 @@ public class WebRtcTransport : ITransport
     /// via push from the watch over the data channel. No-op.</summary>
     public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;
 
+    /// <summary>Pairing happens over BLE, not WebRTC. WebRTC is the
+    /// post-pairing transport.</summary>
+    public Task<byte[]> ReadWatchPublicKeyAsync(CancellationToken ct = default) =>
+        throw new NotSupportedException("WebRTC transport doesn't carry pairing - pair over BLE first.");
+
+    /// <summary>Pairing happens over BLE, not WebRTC.</summary>
+    public Task<byte[]> ExchangePairingHandshakeAsync(byte[] companionWritePayload, CancellationToken ct = default) =>
+        throw new NotSupportedException("WebRTC transport doesn't carry pairing - pair over BLE first.");
+
     public Task DisconnectAsync() => Task.CompletedTask;
 }

@@ -14,5 +14,6 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddBlazorJSRuntime();
 builder.Services.AddSpawnWearBridge();
 builder.Services.AddScoped<WatchPrefs>();
+builder.Services.AddScoped<SpawnWear.Bridge.Pairing.IPairingStore, LocalStoragePairingStore>();
 
 await builder.Build().BlazorJSRunAsync();

@@ -50,6 +50,34 @@ public class FakeTransport : ITransport
 
     public int RefreshCallCount { get; private set; }
 
+    /// <summary>Test seam: set this to the watch's "advertised" pubkey
+    /// before exercising pairing flows.</summary>
+    public byte[]? FakeWatchPubKey { get; set; }
+
+    /// <summary>Test seam: when set, ExchangePairingHandshakeAsync
+    /// returns these bytes (simulates the watch's signed-response notify).
+    /// When null, throws NotSupportedException.</summary>
+    public byte[]? FakeHandshakeResponse { get; set; }
+
+    /// <summary>Captured payload from the most recent
+    /// ExchangePairingHandshakeAsync call.</summary>
+    public byte[]? LastHandshakePayloadSent { get; private set; }
+
+    public Task<byte[]> ReadWatchPublicKeyAsync(CancellationToken ct = default)
+    {
+        if (FakeWatchPubKey is null)
+            return Task.FromException<byte[]>(new NotSupportedException("FakeWatchPubKey not set in test."));
+        return Task.FromResult(FakeWatchPubKey);
+    }
+
+    public Task<byte[]> ExchangePairingHandshakeAsync(byte[] companionWritePayload, CancellationToken ct = default)
+    {
+        LastHandshakePayloadSent = companionWritePayload;
+        if (FakeHandshakeResponse is null)
+            return Task.FromException<byte[]>(new NotSupportedException("FakeHandshakeResponse not set in test."));
+        return Task.FromResult(FakeHandshakeResponse);
+    }
+
     /// <summary>Drive a TransportMessage into the BridgeClient as if it
     /// arrived over the wire.</summary>
     public void Push(TransportMessage message) => MessageReceived?.Invoke(message);

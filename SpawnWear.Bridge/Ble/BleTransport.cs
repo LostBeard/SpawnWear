@@ -41,6 +41,11 @@ public class BleTransport : ITransport, IAsyncDisposable
     BluetoothRemoteGATTCharacteristic? _wifiCredentials;
     BluetoothRemoteGATTCharacteristic? _debugCommand;
 
+    // Phase 7 pairing characteristics (resolved on Connect; null if
+    // firmware hasn't shipped them yet)
+    BluetoothRemoteGATTCharacteristic? _pairingPubKey;
+    BluetoothRemoteGATTCharacteristic? _pairingHandshake;
+
     public BleTransport(BlazorJSRuntime js)
     {
         _js = js;
@@ -94,6 +99,8 @@ public class BleTransport : ITransport, IAsyncDisposable
         _wifiCommand    = await TryGetCharacteristic(_service, BleUuids.WifiCommandUuid);
         _wifiCredentials = await TryGetCharacteristic(_service, BleUuids.WifiCredentialsUuid);
         _debugCommand   = await TryGetCharacteristic(_service, BleUuids.DebugCommandInputUuid);
+        _pairingPubKey   = await TryGetCharacteristic(_service, BleUuids.PairingPubKeyUuid);
+        _pairingHandshake = await TryGetCharacteristic(_service, BleUuids.PairingHandshakeUuid);
 
         // Wire notifies. Each subscription routes inbound bytes to
         // MessageReceived with the channel-id matching the source.
@@ -167,6 +174,64 @@ public class BleTransport : ITransport, IAsyncDisposable
         await characteristic.WriteValueWithResponse(message.Payload);
     }
 
+    public async Task<byte[]> ReadWatchPublicKeyAsync(CancellationToken ct = default)
+    {
+        if (!IsConnected) throw new InvalidOperationException("Not connected");
+        if (_pairingPubKey is null)
+            throw new NotSupportedException(
+                "Watch firmware does not advertise PairingPubKeyUuid - upgrade the watch to a Phase 7 build first.");
+
+        using var view = await _pairingPubKey.ReadValue();
+        var bytes = view.ReadBytes();
+        if (bytes is null || bytes.Length != Pairing.PairingHandshake.PubKeyLength)
+            throw new InvalidOperationException(
+                $"PairingPubKey returned {bytes?.Length ?? 0} bytes, expected {Pairing.PairingHandshake.PubKeyLength}.");
+        return bytes;
+    }
+
+    public async Task<byte[]> ExchangePairingHandshakeAsync(byte[] companionWritePayload, CancellationToken ct = default)
+    {
+        if (!IsConnected) throw new InvalidOperationException("Not connected");
+        if (_pairingHandshake is null)
+            throw new NotSupportedException(
+                "Watch firmware does not advertise PairingHandshakeUuid - upgrade the watch to a Phase 7 build first.");
+        if (companionWritePayload is null || companionWritePayload.Length != Pairing.PairingHandshake.CompanionToWatchLength)
+            throw new ArgumentException(
+                $"companionWritePayload must be exactly {Pairing.PairingHandshake.CompanionToWatchLength} bytes.",
+                nameof(companionWritePayload));
+
+        // Subscribe BEFORE the write so the watch's notify response is
+        // captured even if it arrives almost immediately. We use a TCS
+        // to await the first notify after the write.
+        var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<Event> handler = e =>
+        {
+            try
+            {
+                using var c = e.TargetAs<BluetoothRemoteGATTCharacteristic>();
+                using var v = c.Value;
+                if (v is null) { tcs.TrySetException(new InvalidOperationException("Pairing handshake notify carried no value.")); return; }
+                tcs.TrySetResult(v.ReadBytes());
+            }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        };
+        _pairingHandshake.OnCharacteristicValueChanged += handler;
+        try
+        {
+            await _pairingHandshake.StartNotifications();
+            await _pairingHandshake.WriteValueWithResponse(companionWritePayload);
+            using (ct.Register(() => tcs.TrySetCanceled(ct)))
+            {
+                return await tcs.Task;
+            }
+        }
+        finally
+        {
+            _pairingHandshake.OnCharacteristicValueChanged -= handler;
+            try { await _pairingHandshake.StopNotifications(); } catch { /* may already be torn down */ }
+        }
+    }
+
     public async Task DisconnectAsync()
     {
         if (!IsConnected && _device is null) return;
@@ -185,6 +250,8 @@ public class BleTransport : ITransport, IAsyncDisposable
         DisposeAndClear(ref _wifiCommand);
         DisposeAndClear(ref _wifiCredentials);
         DisposeAndClear(ref _debugCommand);
+        DisposeAndClear(ref _pairingPubKey);
+        DisposeAndClear(ref _pairingHandshake);
 
         _service?.Dispose();    _service = null;
 
