@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SpawnWear.Bridge</RootNamespace>
+    <AssemblyName>SpawnWear.Bridge</AssemblyName>
+    <Authors>SpawnDev (LostBeard / TJ Tanner)</Authors>
+    <Description>Razor Class Library bridging Blazor WebAssembly apps to the SpawnWear watch firmware over BLE GATT (Web Bluetooth) and WebRTC data channels (SpawnDev.RTC). Reusable by any Blazor consumer that wants to pair with, mirror, or control a SpawnWear-powered ESP32-S3 watch. A future SpawnWear.Bridge.Desktop crate will offer the same surface for non-browser .NET consumers using SpawnDev.RTC for WebRTC.</Description>
+    <PackageId>SpawnWear.Bridge</PackageId>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.7" />
+    <!-- Web Bluetooth + typed JS interop (today). Browser-target only.
+         Pinned >= what SpawnDev.RTC requires transitively. -->
+    <PackageReference Include="SpawnDev.BlazorJS" Version="3.5.3" />
+    <!-- WebRTC peer (Phase 7). Same package supports desktop too,
+         setting up the future SpawnWear.Bridge.Desktop crate to use
+         the same WebRTC plumbing via SpawnDev.RTC. -->
+    <PackageReference Include="SpawnDev.RTC" Version="1.1.0" />
+  </ItemGroup>
+
+</Project>

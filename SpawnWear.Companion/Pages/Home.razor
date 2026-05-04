@@ -1,0 +1,119 @@
+@page "/"
+@using SpawnWear.Bridge
+@inject BridgeClient Bridge
+@implements IDisposable
+
+<PageTitle>SpawnWear Companion</PageTitle>
+
+<div class="hero">
+    <h1>SpawnWear Companion</h1>
+    <p class="tagline">Pair, mirror, and control your SpawnWear watch from the browser.</p>
+</div>
+
+<div class="card">
+    <div class="card-row">
+        <span class="badge @(Bridge.IsConnected ? "ok" : "off")">
+            @(Bridge.IsConnected ? "CONNECTED" : "DISCONNECTED")
+        </span>
+        @if (!Bridge.IsConnected)
+        {
+            <button class="primary" @onclick="ConnectAsync">Pair watch</button>
+        }
+        else
+        {
+            <button class="secondary" @onclick="DisconnectAsync">Disconnect</button>
+        }
+    </div>
+
+    @if (_lastError is not null)
+    {
+        <div class="error">@_lastError</div>
+    }
+</div>
+
+<div class="cards">
+    <div class="card stat">
+        <div class="stat-label">Battery</div>
+        <div class="stat-value">@(_battery?.Percent.ToString() ?? "-")<span class="unit">%</span></div>
+        <div class="stat-sub">@(_battery is null ? "no data" : (_battery.Value.IsCharging ? "charging" : (_battery.Value.IsVbusPresent ? "USB" : "on battery")))</div>
+    </div>
+
+    <div class="card stat">
+        <div class="stat-label">IMU</div>
+        <div class="stat-value tiny">@FormatImu()</div>
+        <div class="stat-sub">accel + gyro raw</div>
+    </div>
+
+    <div class="card stat">
+        <div class="stat-label">Last log</div>
+        <div class="stat-value tiny">@(_lastLog ?? "-")</div>
+        <div class="stat-sub">debug stream</div>
+    </div>
+</div>
+
+<style>
+    .hero { padding: 2rem 0 1rem; text-align: center; }
+    .hero h1 { font-size: 2.4rem; margin: 0; background: linear-gradient(120deg,#5b8def,#9d6bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .tagline { opacity: 0.7; margin: 0.4rem 0 0; }
+    .card { background: var(--card-bg, #1f2330); border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.2rem 1.4rem; margin: 0.8rem 0; }
+    .card-row { display: flex; align-items: center; gap: 1rem; }
+    .badge { padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.06em; font-weight: 600; }
+    .badge.ok { background: rgba(70,210,140,0.15); color: #6dd9a4; }
+    .badge.off { background: rgba(220,80,90,0.15); color: #ec7986; }
+    .error { color: #ec7986; margin-top: 0.6rem; font-size: 0.9rem; }
+    button.primary { margin-left: auto; background: linear-gradient(120deg,#5b8def,#9d6bff); color: white; border: 0; padding: 0.55rem 1.1rem; border-radius: 999px; font-weight: 600; cursor: pointer; }
+    button.secondary { margin-left: auto; background: #2c2f3a; color: #d8dae4; border: 0; padding: 0.55rem 1.1rem; border-radius: 999px; font-weight: 500; cursor: pointer; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 0.8rem; }
+    .stat { text-align: left; }
+    .stat-label { opacity: 0.6; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; margin: 0.2rem 0; }
+    .stat-value.tiny { font-size: 0.85rem; font-weight: 500; font-family: ui-monospace, "SF Mono", monospace; word-break: break-all; }
+    .stat-sub { opacity: 0.55; font-size: 0.78rem; }
+    .unit { font-size: 1rem; opacity: 0.5; margin-left: 0.15rem; }
+</style>
+
+@code {
+    BatteryState? _battery;
+    ImuSample? _imu;
+    string? _lastLog;
+    string? _lastError;
+
+    protected override void OnInitialized()
+    {
+        Bridge.ConnectionChanged   += OnConnectionChanged;
+        Bridge.BatteryChanged      += OnBattery;
+        Bridge.ImuSampleReceived   += OnImu;
+        Bridge.DebugLogReceived    += OnLog;
+    }
+
+    public void Dispose()
+    {
+        Bridge.ConnectionChanged -= OnConnectionChanged;
+        Bridge.BatteryChanged    -= OnBattery;
+        Bridge.ImuSampleReceived -= OnImu;
+        Bridge.DebugLogReceived  -= OnLog;
+    }
+
+    void OnConnectionChanged(bool connected) => InvokeAsync(StateHasChanged);
+    void OnBattery(BatteryState b)           { _battery = b;  InvokeAsync(StateHasChanged); }
+    void OnImu(ImuSample i)                  { _imu = i;      InvokeAsync(StateHasChanged); }
+    void OnLog(string msg)                   { _lastLog = msg;InvokeAsync(StateHasChanged); }
+
+    async Task ConnectAsync()
+    {
+        _lastError = null;
+        try { await Bridge.ConnectAsync(); }
+        catch (NotImplementedException ex) { _lastError = "BLE transport not yet wired (Phase 4a). " + ex.Message; }
+        catch (Exception ex) { _lastError = ex.Message; }
+    }
+
+    async Task DisconnectAsync()
+    {
+        try { await Bridge.DisconnectAsync(); }
+        catch (Exception ex) { _lastError = ex.Message; }
+    }
+
+    string FormatImu() => _imu is null
+        ? "-"
+        : $"a={_imu.Value.Ax},{_imu.Value.Ay},{_imu.Value.Az}  g={_imu.Value.Gx},{_imu.Value.Gy},{_imu.Value.Gz}";
+}

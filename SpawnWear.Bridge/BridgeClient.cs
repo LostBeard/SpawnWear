@@ -1,0 +1,128 @@
+namespace SpawnWear.Bridge;
+
+/// <summary>
+/// High-level client for talking to a SpawnWear watch. Holds an
+/// <see cref="ITransport"/> (BLE today, WebRTC in Phase 7) and exposes
+/// strongly-typed events + commands on top of the channel-id messages
+/// the transport delivers.
+///
+/// Typical Blazor consumer pattern:
+///
+/// <code>
+/// // Program.cs
+/// builder.Services.AddSpawnWearBridge();
+///
+/// // Consumer page
+/// [Inject] BridgeClient Bridge { get; set; } = default!;
+/// await Bridge.ConnectAsync(); // shows the Web Bluetooth picker
+/// Bridge.BatteryChanged += (s, e) => { ... };
+/// </code>
+///
+/// V0.1: skeleton with connection lifecycle + a couple of event hooks.
+/// Wire-up of the BLE transport + characteristic subscriptions lands in
+/// follow-up commits as the firmware-side WatchProfileService stabilizes.
+/// </summary>
+public class BridgeClient : IAsyncDisposable
+{
+    ITransport? _transport;
+
+    /// <summary>True when an underlying transport is connected.</summary>
+    public bool IsConnected => _transport?.IsConnected ?? false;
+
+    public event Action<bool>? ConnectionChanged;
+    public event Action<BatteryState>? BatteryChanged;
+    public event Action<ImuSample>? ImuSampleReceived;
+    public event Action<RtcTime>? RtcTimeReceived;
+    public event Action<string>? DebugLogReceived;
+
+    /// <summary>Use the supplied transport for the next Connect call.
+    /// Replaces any prior transport. Closes the previous one.</summary>
+    public async Task UseTransportAsync(ITransport transport)
+    {
+        if (_transport != null)
+        {
+            _transport.ConnectionChanged -= OnConnectionChanged;
+            _transport.MessageReceived -= OnMessageReceived;
+            await _transport.DisconnectAsync();
+        }
+        _transport = transport;
+        if (_transport != null)
+        {
+            _transport.ConnectionChanged += OnConnectionChanged;
+            _transport.MessageReceived += OnMessageReceived;
+        }
+    }
+
+    public Task ConnectAsync(CancellationToken ct = default) =>
+        _transport?.ConnectAsync(ct) ?? Task.CompletedTask;
+
+    public Task DisconnectAsync() =>
+        _transport?.DisconnectAsync() ?? Task.CompletedTask;
+
+    void OnConnectionChanged(bool connected) => ConnectionChanged?.Invoke(connected);
+
+    void OnMessageReceived(TransportMessage msg)
+    {
+        // Channel-id-based dispatch. Each branch decodes the payload
+        // according to its schema (defined in firmware's
+        // SpawnWear/WatchProfileService.cs).
+        switch (msg.ChannelId)
+        {
+            case ChannelIds.Battery:
+                if (msg.Payload.Length >= 8)
+                {
+                    var b = new BatteryState(
+                        Percent: msg.Payload[0],
+                        IsCharging: msg.Payload[1] != 0,
+                        IsVbusPresent: msg.Payload[2] != 0,
+                        IsLowBattery: msg.Payload[3] != 0,
+                        VoltageMillivolts: (ushort)(msg.Payload[4] | (msg.Payload[5] << 8)),
+                        CurrentMilliamps: (short)(msg.Payload[6] | (msg.Payload[7] << 8)));
+                    BatteryChanged?.Invoke(b);
+                }
+                break;
+
+            case ChannelIds.ImuSample:
+                if (msg.Payload.Length >= 12)
+                {
+                    short ax = (short)(msg.Payload[0] | (msg.Payload[1] << 8));
+                    short ay = (short)(msg.Payload[2] | (msg.Payload[3] << 8));
+                    short az = (short)(msg.Payload[4] | (msg.Payload[5] << 8));
+                    short gx = (short)(msg.Payload[6] | (msg.Payload[7] << 8));
+                    short gy = (short)(msg.Payload[8] | (msg.Payload[9] << 8));
+                    short gz = (short)(msg.Payload[10] | (msg.Payload[11] << 8));
+                    ImuSampleReceived?.Invoke(new ImuSample(ax, ay, az, gx, gy, gz));
+                }
+                break;
+
+            case ChannelIds.DebugLog:
+                DebugLogReceived?.Invoke(System.Text.Encoding.UTF8.GetString(msg.Payload));
+                break;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_transport != null) await _transport.DisconnectAsync();
+        _transport = null;
+        GC.SuppressFinalize(this);
+    }
+}
+
+/// <summary>Channel identifiers used in <see cref="TransportMessage.ChannelId"/>.
+/// On BLE these map 1:1 to GATT characteristic UUIDs; on WebRTC they're
+/// the channel-id field of the framed data-channel message.</summary>
+public static class ChannelIds
+{
+    public const string Battery     = "battery";
+    public const string ImuSample   = "imu";
+    public const string RtcTime     = "rtc";
+    public const string Button      = "button";
+    public const string DebugLog    = "log";
+    public const string DebugCmd    = "log.cmd";
+    public const string AppPayload  = "app.payload";
+}
+
+public readonly record struct BatteryState(byte Percent, bool IsCharging, bool IsVbusPresent, bool IsLowBattery, ushort VoltageMillivolts, short CurrentMilliamps);
+public readonly record struct ImuSample(short Ax, short Ay, short Az, short Gx, short Gy, short Gz);
+public readonly record struct RtcTime(ushort Year, byte Month, byte Day, byte Hour, byte Minute, byte Second, byte Weekday);
