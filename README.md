@@ -299,11 +299,13 @@ SpawnWear/                              ← REPO ROOT (this folder)
 ├── SpawnWear.slnx                      ← .NET nanoFramework solution
 ├── SpawnWear/                          ← firmware project (.nfproj)
 ├── packages/                           ← NuGet packages (committed for offline builds)
-├── Notes/                              ← living documentation: gotchas, chip quirks, flashing recipes
-│   ├── README.md                       ← Notes index (start here)
-│   ├── flashing.md                     ← step-by-step nanoFramework flash recipe with every gotcha
-│   └── co5300-quirks.md                ← AMOLED driver reverse-engineering notes
-├── BlazorWasmSpawnWear/                ← companion Blazor WASM PWA (TBD)
+├── screenshots/                        ← live framebuffer captures (README hero shot lives here)
+├── tools/                              ← .NET 10 CLI scripts (deploy, attach, screenshot, size guard)
+├── Docs/                               ← reference material (architecture, hardware, dev loop)
+├── Plans/                              ← forward-looking design (roadmap + per-feature sketches)
+├── Research/                           ← investigations + findings (deploy ceiling, WiFi compat, etc.)
+├── Notes/                              ← operational know-how: chip quirks, flashing recipes, build env
+├── BlazorWasmSpawnWear/                ← companion Blazor WASM PWA (TBD - see Plans/companion-pwa.md)
 └── SpawnWear.Tests/                    ← Playwright + smoke tests for the PWA (TBD)
 ```
 
