@@ -45,6 +45,12 @@
     </div>
 
     <div class="card stat">
+        <div class="stat-label">Last button</div>
+        <div class="stat-value tiny">@FormatButton()</div>
+        <div class="stat-sub">BOOT / PWR events</div>
+    </div>
+
+    <div class="card stat">
         <div class="stat-label">Last log</div>
         <div class="stat-value tiny">@(_lastLog ?? "-")</div>
         <div class="stat-sub">debug stream</div>
@@ -75,6 +81,7 @@
 @code {
     BatteryState? _battery;
     ImuSample? _imu;
+    ButtonEvent? _button;
     string? _lastLog;
     string? _lastError;
 
@@ -83,21 +90,28 @@
         Bridge.ConnectionChanged   += OnConnectionChanged;
         Bridge.BatteryChanged      += OnBattery;
         Bridge.ImuSampleReceived   += OnImu;
+        Bridge.ButtonEventReceived += OnButton;
         Bridge.DebugLogReceived    += OnLog;
     }
 
     public void Dispose()
     {
-        Bridge.ConnectionChanged -= OnConnectionChanged;
-        Bridge.BatteryChanged    -= OnBattery;
-        Bridge.ImuSampleReceived -= OnImu;
-        Bridge.DebugLogReceived  -= OnLog;
+        Bridge.ConnectionChanged   -= OnConnectionChanged;
+        Bridge.BatteryChanged      -= OnBattery;
+        Bridge.ImuSampleReceived   -= OnImu;
+        Bridge.ButtonEventReceived -= OnButton;
+        Bridge.DebugLogReceived    -= OnLog;
     }
 
     void OnConnectionChanged(bool connected) => InvokeAsync(StateHasChanged);
     void OnBattery(BatteryState b)           { _battery = b;  InvokeAsync(StateHasChanged); }
     void OnImu(ImuSample i)                  { _imu = i;      InvokeAsync(StateHasChanged); }
+    void OnButton(ButtonEvent e)             { _button = e;   InvokeAsync(StateHasChanged); }
     void OnLog(string msg)                   { _lastLog = msg;InvokeAsync(StateHasChanged); }
+
+    string FormatButton() => _button is null
+        ? "-"
+        : $"{_button.Value.Button} {_button.Value.Action}";
 
     async Task ConnectAsync()
     {

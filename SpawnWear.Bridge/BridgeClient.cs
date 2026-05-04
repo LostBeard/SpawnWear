@@ -35,6 +35,7 @@ public class BridgeClient : IAsyncDisposable
     public event Action<RtcTime>? RtcTimeReceived;
     public event Action<WifiStatus>? WifiStatusChanged;
     public event Action<WifiScanResult[]>? WifiScanResultsReceived;
+    public event Action<ButtonEvent>? ButtonEventReceived;
     public event Action<string>? DebugLogReceived;
 
     /// <summary>Use the supplied transport for the next Connect call.
@@ -143,6 +144,19 @@ public class BridgeClient : IAsyncDisposable
                 }
                 break;
 
+            case ChannelIds.Button:
+                if (msg.Payload.Length >= 2)
+                {
+                    // Firmware schema (WatchProfileService.NotifyButtonEvent):
+                    //   [button:u8][action:u8]
+                    //   button: 0x01=BOOT, 0x02=PWR (BleUuids.Button*)
+                    //   action: 0x01=Down, 0x02=Up, 0x03=Click, 0x04=DoubleClick, 0x05=LongPress
+                    ButtonEventReceived?.Invoke(new ButtonEvent(
+                        Button: (WatchButton)msg.Payload[0],
+                        Action: (ButtonAction)msg.Payload[1]));
+                }
+                break;
+
             case ChannelIds.RtcTime:
                 if (msg.Payload.Length >= 8)
                 {
@@ -212,3 +226,24 @@ public readonly record struct WifiStatus(WifiState State, string IpAddress);
 /// <c>"SSID|RSSI"</c> line format produced by
 /// <c>WifiConfigService.PerformWifiScan</c>.</summary>
 public readonly record struct WifiScanResult(string Ssid, int RssiDbm);
+
+/// <summary>Watch-side hardware buttons. Mirrors firmware constants
+/// in <c>BleUuids.Button*</c>.</summary>
+public enum WatchButton : byte
+{
+    Boot = 0x01,
+    Pwr  = 0x02,
+}
+
+/// <summary>Press / release / click cadence for a watch button.
+/// Mirrors firmware constants in <c>BleUuids.Action*</c>.</summary>
+public enum ButtonAction : byte
+{
+    Down        = 0x01,
+    Up          = 0x02,
+    Click       = 0x03,
+    DoubleClick = 0x04,
+    LongPress   = 0x05,
+}
+
+public readonly record struct ButtonEvent(WatchButton Button, ButtonAction Action);

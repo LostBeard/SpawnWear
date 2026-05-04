@@ -186,6 +186,33 @@ public class BridgeClientDecoderTests
         Assert.Equal("", got.Value.IpAddress);
     }
 
+    [Theory]
+    [InlineData(0x01, 0x01, WatchButton.Boot, ButtonAction.Down)]
+    [InlineData(0x01, 0x03, WatchButton.Boot, ButtonAction.Click)]
+    [InlineData(0x02, 0x05, WatchButton.Pwr,  ButtonAction.LongPress)]
+    [InlineData(0x02, 0x04, WatchButton.Pwr,  ButtonAction.DoubleClick)]
+    [InlineData(0x01, 0x02, WatchButton.Boot, ButtonAction.Up)]
+    public async Task Button_decodes_button_and_action_bytes(byte b, byte a, WatchButton expectedBtn, ButtonAction expectedAct)
+    {
+        var (client, transport) = await NewBridge();
+        ButtonEvent? got = null;
+        client.ButtonEventReceived += e => got = e;
+        transport.Push(new TransportMessage(ChannelIds.Button, new byte[]{ b, a }));
+        Assert.NotNull(got);
+        Assert.Equal(expectedBtn, got!.Value.Button);
+        Assert.Equal(expectedAct, got.Value.Action);
+    }
+
+    [Fact]
+    public async Task Button_too_short_payload_fires_no_event()
+    {
+        var (client, transport) = await NewBridge();
+        bool fired = false;
+        client.ButtonEventReceived += _ => fired = true;
+        transport.Push(new TransportMessage(ChannelIds.Button, new byte[]{ 0x01 }));
+        Assert.False(fired);
+    }
+
     [Fact]
     public async Task WifiScan_decodes_pipe_separated_lines()
     {
