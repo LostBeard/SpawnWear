@@ -61,8 +61,6 @@ namespace SpawnWear
         byte[] _peerPubKey;
         byte[] _roomKey;
 
-        bool _initialized;
-
         public bool Initialize(GattLocalService service)
         {
             EnsureKeyPair();
@@ -97,7 +95,6 @@ namespace SpawnWear
             _handshakeChar = hsResult.Characteristic;
             _handshakeChar.WriteRequested += OnHandshakeWrite;
 
-            _initialized = true;
             Debug.WriteLine("[Pair] Characteristics attached (STUB Ed25519 - signatures will not verify)");
             return true;
         }
