@@ -1,45 +1,65 @@
 # Building nf-interpreter (Custom nanoFramework Firmware)
 
-To ship the QSPI display driver upstream, we build our own nf-interpreter image. This document captures the working build recipe on Windows so anyone can reproduce it.
+To ship the QSPI display driver upstream, we build our own nf-interpreter image. This document captures the working build recipe on Windows so anyone (or any future agent) can reproduce it without re-deriving the paths.
+
+## TL;DR — current state of the world (verified 2026-05-05)
+
+**Active build source**: `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` on branch `feature/qspi-display-driver`. **NOT** the `_vendor-nf-interpreter\` checkout in the SpawnWear repo's parent folder — that one is a read-only reference clone.
+
+**Build script**: `D:\users\tj\Projects\SpawnWear\SpawnWear\tools\nf-build.bat [preset]` (preset defaults to `ESP32_S3_BLE_QSPI`).
+
+**Flash script**: `D:\users\tj\Projects\SpawnWear\SpawnWear\tools\nf-flash-full.bat <COM>` (watch must be in bootloader mode, typically COM10).
+
+**ESP-IDF version**: **v5.5.4**, NOT 5.4.x. The build bat does `call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat`. Earlier versions of this doc said 5.4 - that's stale.
+
+**Python**: System Python 3.13 (NOT 3.11). ESP-IDF v5.5.4 uses the `idf5.5_py3.13_env` venv, picked automatically by `export.bat` based on the system Python version on PATH. Don't manually prepend 3.11.
+
+**Build output**: `D:\users\tj\Projects\nf-interpreter\nf-interpreter\build\` containing:
+- `nanoCLR.bin` - the firmware blob (writes to flash @ 0x10000)
+- `bootloader\bootloader.bin` - bootloader (writes @ 0x0)
+- `partition-table\partition-table.bin` (writes @ 0x8000)
 
 ## Prerequisites
 
 | Component | Version | Where it comes from |
 |---|---|---|
-| ESP-IDF | **v5.4.x** (we use 5.4.1) | Espressif Tools Installer for Windows: <https://dl.espressif.com/dl/esp-idf/> |
-| Bundled Python | 3.11 (matches the venv ESP-IDF creates) | Espressif installer drops this at `C:\Espressif\tools\idf-python\3.11.2\` |
-| cmake | 3.30+ | Bundled with ESP-IDF at `C:\Espressif\tools\cmake\3.30.2\` |
+| ESP-IDF | **v5.5.4** | Espressif Tools Installer for Windows: <https://dl.espressif.com/dl/esp-idf/> |
+| Bundled Python | 3.13 | Espressif installer drops this at `C:\Espressif\tools\idf-python\` |
+| cmake | 3.30+ | Bundled with ESP-IDF |
 | Ninja | latest | Bundled with ESP-IDF |
 | Xtensa toolchain | esp32s3-elf gcc | Bundled with ESP-IDF |
-| nf-interpreter source | <https://github.com/nanoframework/nf-interpreter> | Cloned with submodules - see below |
-
-System Python (Python 3.13 from the official installer) is NOT used for the build - the bundled 3.11 wins because the ESP-IDF Python venv only matches that version.
+| nf-interpreter source | <https://github.com/nanoframework/nf-interpreter> | Cloned at `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` (LostBeard fork on `feature/qspi-display-driver` branch) |
 
 ## One-time setup
 
 ### 1. Install ESP-IDF (if not already there)
 
-Run the Espressif Tools Installer with ESP-IDF v5.4.x selected. Default install location is `C:\Espressif\`. Confirms when done:
+Run the Espressif Tools Installer with ESP-IDF v5.5.4 selected. Default install location is `C:\Espressif\`. Should produce:
 
 ```
-C:\Espressif\frameworks\esp-idf-v5.4.1\          <- ESP-IDF source
-C:\Espressif\tools\cmake\3.30.2\bin\cmake.exe    <- cmake
-C:\Espressif\tools\idf-python\3.11.2\python.exe  <- bundled Python
-C:\Espressif\python_env\idf5.4_py3.11_env\       <- IDF Python venv
-C:\Espressif\frameworks\esp-idf-v5.4.1\export.bat <- env activation script
+C:\Espressif\frameworks\esp-idf-v5.5.4\          <- ESP-IDF source
+C:\Espressif\tools\cmake\<version>\bin\cmake.exe <- cmake
+C:\Espressif\tools\idf-python\<version>\python.exe <- bundled Python
+C:\Espressif\python_env\idf5.5_py3.13_env\       <- IDF Python venv
+C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat <- env activation script
 ```
 
-### 2. Clone nf-interpreter with submodules
+### 2. Clone nf-interpreter (LostBeard fork)
 
-The `targets-community` directory is a git submodule and must be initialized for cmake's preset loader to succeed (otherwise it errors with `File not found: targets-community/CMakePresets.json`).
+The active build source is `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` on `feature/qspi-display-driver`. If it doesn't exist, clone it:
 
 ```bash
-git clone https://github.com/nanoframework/nf-interpreter.git _vendor-nf-interpreter
-cd _vendor-nf-interpreter
+git clone https://github.com/LostBeard/nf-interpreter.git D:\users\tj\Projects\nf-interpreter\nf-interpreter
+cd D:\users\tj\Projects\nf-interpreter\nf-interpreter
+git checkout feature/qspi-display-driver
 git submodule update --init --depth 1 targets-community
 ```
 
-A `--depth 1` shallow clone is fine for the working tree (~150 MB cloned, ~600 MB after submodule init).
+The `targets-community` submodule must be initialized for CMake's preset loader (otherwise: `File not found: targets-community/CMakePresets.json`).
+
+A `--depth 1` shallow clone is fine (~150 MB cloned, ~600 MB after submodule init).
+
+**The `_vendor-nf-interpreter\` folder in the SpawnWear repo's parent is a separate, read-only reference checkout used for cross-referencing the upstream code — DO NOT build from it.** Only `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` is the active source.
 
 ### 3. Create the user config files
 
@@ -56,7 +76,7 @@ Create `config/user-tools-repos.json`:
             "description": "ESP32-only build paths.",
             "hidden": true,
             "cacheVariables": {
-                "ESP32_IDF_PATH": "C:/Espressif/frameworks/esp-idf-v5.4.1",
+                "ESP32_IDF_PATH": "C:/Espressif/frameworks/esp-idf-v5.5.4",
                 "TOOL_HEX2DFU_PREFIX": null,
                 "TOOL_SRECORD_PREFIX": null,
                 "CHIBIOS_SOURCE_FOLDER": null,
@@ -120,7 +140,7 @@ Note: `BUILD_VERSION` must be a pure numeric `MAJOR.MINOR.PATCH.BUILD` (cmake `p
 Two gotchas conspire on Git Bash:
 
 1. **`export.bat` refuses to run if `$MSYSTEM` is set.** The first lines of the script bail out with `This .bat file is for Windows CMD.EXE shell only.` if it detects the MSYS env var. Workaround: clear `MSYSTEM` (and `MSYS`) at the top of any wrapper.
-2. **System Python 3.13 shadows the bundled 3.11.** The Espressif venv is `idf5.4_py3.11_env`, the export script auto-detects via `python.exe --version` and goes looking for `idf5.4_py3.13_env` if it sees system 3.13. Workaround: prepend `C:\Espressif\tools\idf-python\3.11.2` to PATH before calling `export.bat`.
+2. **(Historical, ESP-IDF v5.4 era - no longer applies as of v5.5.4)** System Python 3.13 shadowed the bundled 3.11. With ESP-IDF v5.5.4 the venv name is `idf5.5_py3.13_env` so system Python 3.13 is the correct match - just don't prepend the older 3.11 path.
 
 The wrapper script that handles both:
 
@@ -129,7 +149,7 @@ The wrapper script that handles both:
 set MSYSTEM=
 set MSYS=
 set "PATH=C:\Espressif\tools\idf-python\3.11.2;%PATH%"
-call C:\Espressif\frameworks\esp-idf-v5.4.1\export.bat > %TEMP%\nf-export.log 2>&1
+call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat > %TEMP%\nf-export.log 2>&1
 cd /d D:\users\tj\Projects\SpawnWear\_vendor-nf-interpreter
 :: now do whatever cmake/idf.py command you need
 ```
@@ -283,7 +303,7 @@ nf-interpreter ties itself to a specific ESP-IDF version via `set(ESP32_IDF_TAG 
 
 If your installed ESP-IDF doesn't match what `main` wants, you have two options:
 
-1. **Install the matching ESP-IDF**: re-run the Espressif Tools Installer with the right version, or `git fetch && git checkout v5.5.4` inside the existing `C:\Espressif\frameworks\esp-idf-v5.4.1\` clone (and re-run `install.bat` to refresh the bundled tools + Python venv).
+1. **Install the matching ESP-IDF**: re-run the Espressif Tools Installer with the right version, or `git fetch && git checkout v5.5.4` inside the existing `C:\Espressif\frameworks\esp-idf-v5.5.4\` clone (and re-run `install.bat` to refresh the bundled tools + Python venv).
 2. **Check out an older nf-interpreter commit that matches your ESP-IDF**: `cd _vendor-nf-interpreter && git checkout 53be3026` (the IDF 5.4.2 era). Cleanly recovers without installing more software. Apply your own changes on top, rebase to `main` later when you upgrade IDF.
 
 ### Symptom of a mismatch
@@ -299,7 +319,7 @@ cmake configures successfully but `cmake --build` enters a perpetual reconfig lo
 ...
 ```
 
-Each pass takes ~13 s; we observed 40+ passes in 9 minutes with no actual compilation step ever starting. The signature in the configure output is a line like `ESP32 IDF v5.5.4 source from: C:/Espressif/frameworks/esp-idf-v5.4.1` — nf detects a mismatch (it wants v5.5.4 but the path is v5.4.1) and keeps trying to reconcile.
+Each pass takes ~13 s; we observed 40+ passes in 9 minutes with no actual compilation step ever starting. The signature in the configure output is a line like `ESP32 IDF v5.5.4 source from: C:/Espressif/frameworks/esp-idf-v5.5.4` — nf detects a mismatch (it wants v5.5.4 but the path is v5.4.1) and keeps trying to reconcile.
 
 Fix is one of the two options above. SpawnWear takes option 2 currently (build at commit `53be3026`, IDF 5.4.x era). Final upstream contribution will be rebased onto whatever `main` wants at PR time.
 
@@ -404,7 +424,7 @@ The SpawnWear-specific defaults file `targets/ESP32/_IDF/sdkconfig.default_octal
 
 ## Files this build environment touches outside the repo
 
-- `_vendor-nf-interpreter/config/user-tools-repos.json` (created here, machine-specific)
+- `config/user-tools-repos.json` inside the active build source (`D:\users\tj\Projects\nf-interpreter\nf-interpreter\config\`) - machine-specific, NOT in the SpawnWear repo's `_vendor-nf-interpreter\`
 - `_vendor-nf-interpreter/config/user-prefs.json` (created here, machine-specific)
 - `_vendor-nf-interpreter/build/` (cmake output, gitignored upstream)
 
