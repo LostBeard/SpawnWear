@@ -370,3 +370,7 @@ FodyWeavers.xsd
 # WiFi credentials - never commit real values. Copy WifiCredentials.cs.template
 # to WifiCredentials.cs and fill in your local network's SSID + password.
 SpawnWear/Config/WifiCredentials.cs
+
+# Tools output - screenshots/diagnostic dumps from tools/*.cs scripts.
+# The scripts themselves are tracked; their captured artifacts aren't.
+tools/companion-readability-screenshots/
