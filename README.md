@@ -5,7 +5,7 @@ A small wearable OS - written in C# on .NET nanoFramework - for the **Waveshare 
 ## Current state of the UI
 
 <p align="center">
-  <img src="screenshots/launcher-2026-05-05.png" alt="SpawnWear launcher screenshot 2026-05-05" width="240">
+  <img src="screenshots/launcher-ble-2026-05-05.png" alt="SpawnWear launcher with BLE 2026-05-05" width="240">
   <img src="screenshots/about-2026-05-05.png" alt="SpawnWear About screen 2026-05-05" width="240">
   <img src="screenshots/counter-app-2026-05-05.png" alt="SpawnWear Counter demo app 2026-05-05" width="240">
 </p>

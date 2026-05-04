@@ -27,6 +27,10 @@
     <Compile Include="AppContracts\IWifiService.cs" />
     <Compile Include="BleUuids.cs" />
     <Compile Include="Config\WifiCredentials.cs" />
+    <Compile Include="DebugConsoleService.cs" />
+    <Compile Include="DeviceInfoService.cs" />
+    <Compile Include="WatchProfileService.cs" />
+    <Compile Include="WifiConfigService.cs" />
     <Compile Include="Drivers\BoardPins.cs" />
     <Compile Include="Drivers\BoardSetup.cs" />
     <Compile Include="Drivers\Power\Axp2101Driver.cs" />

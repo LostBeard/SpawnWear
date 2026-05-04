@@ -1,10 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-// BLE temporarily stripped 2026-05-04 to clear the wire-protocol commit-phase
-// deploy ceiling (CLR runs out of native heap loading too many assemblies at
-// once with all of [Bluetooth + Wifi + Net + Graphics] referenced). Restore
-// once nf-interpreter's deploy-commit memory budget is lifted.
+using nanoFramework.Device.Bluetooth;
+using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
 using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
@@ -99,7 +97,7 @@ namespace SpawnWear
             // whatever scraps remain (~100KB observed) and FullScreen Bitmap OOMs.
             // Order: power -> touch -> display (claims PSRAM) -> BLE -> watchface.
             Bitmap fb = StartDisplay();
-            // StartBleAdvertising(); // BLE temporarily stripped to clear deploy ceiling
+            StartBleAdvertising();
 
             if (fb != null)
             {
@@ -126,7 +124,7 @@ namespace SpawnWear
                 // and -1 (hidden) when not. Phase 2 will read RSSI from the
                 // adapter and map it to 1-4 bars.
                 statusBar.SetWifiBars(_wifi != null && _wifi.IsConnected ? 4 : -1);
-                statusBar.SetBleAdvertising(false); // BLE not in this build
+                statusBar.SetBleAdvertising(true);
 
                 // Service host - the single point through which screens consume
                 // system services via the AppContracts interfaces. Phase 8
@@ -287,6 +285,52 @@ namespace SpawnWear
                 case ScreenState.Sleep:
                     DisplayControl.Sleep();
                     break;
+            }
+        }
+
+        static void StartBleAdvertising()
+        {
+            try
+            {
+                Debug.WriteLine("[SpawnWear] BLE-1 - Calling BluetoothLEServer.Instance");
+                BluetoothLEServer server = BluetoothLEServer.Instance;
+                Debug.WriteLine("[SpawnWear] BLE-2 - Got BluetoothLEServer.Instance");
+
+                string name = "SW-" + _displayStatus + "-" + _touchStatus;
+                if (name.Length > 20) name = name.Substring(0, 20);
+                server.DeviceName = name;
+                Debug.WriteLine("[SpawnWear] BLE-3 - DeviceName='" + name + "'");
+
+                Debug.WriteLine("[SpawnWear] BLE-4 - Constructing helper services");
+                var debugSvc = new DebugConsoleService();
+                var profile = new WatchProfileService();
+                var wifi = new WifiConfigService(debugSvc, profile);
+                Debug.WriteLine("[SpawnWear] BLE-5 - Helper services constructed");
+
+                Debug.WriteLine("[SpawnWear] BLE-6 - Calling wifi.Initialize()");
+                if (!wifi.Initialize())
+                {
+                    Debug.WriteLine("[SpawnWear] BLE-7-fail - wifi.Initialize returned false");
+                    return;
+                }
+                Debug.WriteLine("[SpawnWear] BLE-7 - wifi.Initialize OK");
+
+                var serviceDataWriter = new DataWriter();
+                serviceDataWriter.WriteByte(0x01);
+
+                Debug.WriteLine("[SpawnWear] BLE-8 - Calling StartAdvertising");
+                wifi.ServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
+                {
+                    IsConnectable = true,
+                    IsDiscoverable = true,
+                    ServiceData = serviceDataWriter.DetachBuffer()
+                });
+                Debug.WriteLine("[SpawnWear] BLE-9 - Advertising as '" + name + "'");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[SpawnWear] BLE-EX " + ex.GetType().Name + ": " + ex.Message);
+                Debug.WriteLine("[SpawnWear] BLE-EX stack: " + ex.StackTrace);
             }
         }
 
