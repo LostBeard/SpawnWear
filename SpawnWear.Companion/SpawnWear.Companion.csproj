@@ -10,6 +10,16 @@
     <AssemblyName>SpawnWear.Companion</AssemblyName>
   </PropertyGroup>
 
+  <!-- Build timestamp - injected at compile time so the running app can prove
+       which build is live. Read via Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+       on startup; surfaced both in the browser console and in the StatusBar footer. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildTimestamp</_Parameter1>
+      <_Parameter2>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")) UTC</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.7" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.7" PrivateAssets="all" />

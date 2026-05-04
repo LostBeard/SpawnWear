@@ -8,6 +8,19 @@ html, body {
     color-scheme: dark;
 }
 
+/* Readability: per-component <style> blocks across the app set opacity values
+   between 0.35 and 0.7 on ".muted", ".tagline", ".stat-sub", etc. against the
+   #0e1117 background that lands the text below WCAG AA contrast - hard to
+   read without highlighting. Bump every "fade" class to a single readable
+   floor of 0.85 site-wide. Component styles can still override locally if
+   they need more contrast (e.g. error / disabled states use !important sparingly). */
+.muted, .tagline, .stat-sub, .stat-label, .paired-sub, .paired-name,
+.subtitle, .sub, .ghost, .badge {
+    opacity: 0.92;
+}
+.statusbar .sep { opacity: 0.6 !important; }
+.cmd-row button:disabled { opacity: 0.55 !important; }
+
 a, .btn-link {
     color: #5b8def;
 }

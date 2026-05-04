@@ -1,4 +1,5 @@
 @using SpawnWear.Bridge
+@using SpawnWear.Companion
 @inject BridgeClient Bridge
 @implements IDisposable
 
@@ -45,6 +46,8 @@
         <span class="sep">·</span>
         <span class="metric muted">@btn.Button @btn.Action</span>
     }
+
+    <span class="build" title="Companion build timestamp">build @BuildInfo.Timestamp</span>
 </div>
 
 <style>
@@ -69,7 +72,8 @@
     .metric.connected { color: #6dd9a4; }
     .metric.connecting { color: #f3c668; }
     .metric.failed { color: #ec7986; }
-    .metric.muted { opacity: 0.6; }
+    .metric.muted { opacity: 0.85; }
+    .build { margin-left: auto; font-family: ui-monospace, "SF Mono", monospace; font-size: 0.72rem; color: #9aa0b0; }
 </style>
 
 @code {
