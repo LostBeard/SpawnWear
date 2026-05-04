@@ -11,6 +11,13 @@
     <PackageId>SpawnWear.Bridge</PackageId>
     <Version>0.1.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Ship XML docs alongside the assembly so consuming Blazor apps
+         get IntelliSense on BridgeClient events + ITransport methods.
+         NoWarn 1591 keeps undocumented public members from spamming the
+         build; we'll document everything that matters in C# but won't
+         force docstrings on every getter. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
     <RepositoryUrl>https://github.com/LostBeard/SpawnWear</RepositoryUrl>
     <PackageProjectUrl>https://github.com/LostBeard/SpawnWear</PackageProjectUrl>
     <PackageTags>spawnwear;blazor;bluetooth;webrtc;esp32;nanoframework;wearable</PackageTags>
