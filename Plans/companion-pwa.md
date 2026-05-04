@@ -96,6 +96,12 @@ The Bridge picks whichever is reachable. All three transports terminate at the s
 
 Each built-in app gets a corresponding PWA page that drives its UI remotely. Settings and Clock are easiest (mostly read-write of state); Voice Recorder and AI Assistant need bidirectional audio over WebRTC.
 
+### Phase 7 - BLE pairing → Ed25519 trust → WebRTC always-on
+
+Pair once over BLE, exchange Ed25519 keypairs, agree on a room id. From then on the watch and Companion meet at `hub.spawndev.com`, mutually verify with signed challenges, and talk over a WebRTC data channel regardless of which network either side is on. Bluetooth becomes the recovery / re-pair path, not the everyday transport.
+
+Full design: [`Plans/phase7-webrtc-handoff.md`](phase7-webrtc-handoff.md).
+
 ## Test surface
 
 `SpawnWear.Bridge.Tests` (xUnit, net10.0) holds 25 wire-format regression tests:
