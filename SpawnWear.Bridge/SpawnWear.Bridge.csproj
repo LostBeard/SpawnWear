@@ -10,7 +10,15 @@
     <Description>Razor Class Library bridging Blazor WebAssembly apps to the SpawnWear watch firmware over BLE GATT (Web Bluetooth) and WebRTC data channels (SpawnDev.RTC). Reusable by any Blazor consumer that wants to pair with, mirror, or control a SpawnWear-powered ESP32-S3 watch. A future SpawnWear.Bridge.Desktop crate will offer the same surface for non-browser .NET consumers using SpawnDev.RTC for WebRTC.</Description>
     <PackageId>SpawnWear.Bridge</PackageId>
     <Version>0.1.0</Version>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/LostBeard/SpawnWear</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/LostBeard/SpawnWear</PackageProjectUrl>
+    <PackageTags>spawnwear;blazor;bluetooth;webrtc;esp32;nanoframework;wearable</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <SupportedPlatform Include="browser" />
