@@ -67,33 +67,44 @@ The Bridge picks whichever is reachable. All three transports terminate at the s
 
 ### Phase 4a - Provisioning (concurrent with Settings app)
 
-- [x] **`SpawnWear.Bridge` RCL scaffolded** (2026-05-05) - SpawnDev.BlazorJS 3.5.3 + SpawnDev.RTC 1.1.0 referenced; ITransport abstraction; BleTransport stub; WebRtcTransport stub; BridgeClient with typed events; AddSpawnWearBridge DI extension; BleUuids + ChannelIds duplicated from firmware (will graduate to a shared `SpawnWear.Protocol` library when duplication starts to hurt)
-- [x] **`SpawnWear.Companion` PWA scaffolded** (2026-05-05) - Blazor WASM PWA + service worker; ProjectReference to Bridge; Home page with Connect button + live Battery/IMU/log cards bound to BridgeClient events; builds clean
-- [x] **BleTransport real implementation** (2026-05-05) - Web Bluetooth `RequestDevice` filtered on `WifiServiceUuid` + `SW-` name-prefix fallback, `GATT.Connect`, `GetPrimaryService`, every characteristic resolved (battery / IMU / RTC / button / wifi-status / debug-log on notify side; wifi-cmd / wifi-creds / debug-cmd on write side), `StartNotifications` + `OnCharacteristicValueChanged` subscriptions wired, `Device.OnGATTServerDisconnected` cleanup. SpawnDev.BlazorJS typed wrappers throughout - no raw JS, no IJSRuntime.
-- [x] **`Wifi.razor` page** (2026-05-05) - SSID + password form, "Save & connect" writes credentials + `WifiCmdConnect` to the watch; "Tell watch to disconnect" + "Forget saved network" send the matching command bytes
-- [x] **`Console.razor` page** (2026-05-05) - live `Debug.WriteLine` stream from the watch (decoded UTF-8 from `DebugLogOutputUuid` notifies); command-line input writes UTF-8 to `DebugCommandInputUuid`. Capped at 500 lines for memory.
-- [ ] **Verify on real silicon** - browser pairing UI + GATT subscription against the actual watch firmware. TJ's daily watch on COM9 / WiFi 192.168.1.171.
-- [ ] Battery / RTC / IP readout displayed in PWA - data plumbing is live; UI cards show "no data" until first watch notify lands
+- [x] **`SpawnWear.Bridge` RCL** (2026-05-05) - SpawnDev.BlazorJS 3.5.3 + SpawnDev.RTC 1.1.0; ITransport abstraction; BridgeClient with typed events; AddSpawnWearBridge DI extension; BleUuids + ChannelIds duplicated from firmware (drift-locked by `BleUuidsParityTest`).
+- [x] **`SpawnWear.Companion` PWA** (2026-05-05) - Blazor WASM PWA + service worker; six pages (Home / Stats / WiFi / Mirror / Apps / Console); ProjectReference to Bridge; SpawnWear-branded dark theme app-wide; persistent StatusBar component across all pages.
+- [x] **BleTransport real implementation** (2026-05-05) - Web Bluetooth `RequestDevice` filtered on `WifiServiceUuid` + `SW-` name-prefix fallback, every characteristic resolved (battery / IMU / RTC / button / wifi-status / wifi-scan / debug-log on notify side; wifi-cmd / wifi-creds / debug-cmd on write side), `StartNotifications` + `OnCharacteristicValueChanged` subscriptions wired, `Device.OnGATTServerDisconnected` cleanup. SpawnDev.BlazorJS typed wrappers throughout - no raw JS, no IJSRuntime.
+- [x] **`Home.razor`** (2026-05-05) - Connect button + live Battery / IMU / Last button / Last log cards.
+- [x] **`Stats.razor`** (2026-05-05) - All-channel telemetry dashboard with notify counters + 1Hz IMU rate gauge; useful for sanity-checking firmware notify rates.
+- [x] **`Wifi.razor`** (2026-05-05) - SSID + password form (`SSID\nPassword` UTF-8 to credentials char), Save & connect / Disconnect / Forget command bytes, "Scan networks" trigger + RSSI-bar list of results, watch-reported status pill.
+- [x] **`Console.razor`** (2026-05-05) - Live `Debug.WriteLine` stream from the watch (UTF-8 from `DebugLogOutputUuid`); command-line input writes UTF-8 to `DebugCommandInputUuid`. Capped at 500 lines.
+- [ ] **Verify on real silicon** - browser pairing UI + GATT subscription against the actual watch firmware on TJ's daily watch.
 
 ### Phase 4b - Debug console mirror
 
-- [ ] DebugConsoleService BLE notify subscriber on the PWA - shows the watch's `Debug.WriteLine` output in a terminal-style page in real time
-- [ ] PWA can send commands back to the watch (e.g. "force sleep", "wake", "redraw screen") via a write characteristic
+- [x] **DebugConsoleService BLE notify subscriber** (2026-05-05) - `Console.razor`, see above.
+- [x] **PWA-to-watch debug commands** (2026-05-05) - command bar in `Console.razor` writes UTF-8 to `DebugCommandInputUuid`. Watch-side handler is wired in firmware's DebugConsoleService.
 
 ### Phase 4c - Live screen mirror over WiFi
 
-- [x] **`Mirror.razor` page** (2026-05-05) - Watch URL input (auto-fills from `WifiStatusChanged` IP), Refresh button + 1 Hz auto-refresh toggle, RGB565 BE → RGBA8 conversion in managed C#, single `ImageData` push to a `<canvas>` via SpawnDev.BlazorJS typed Canvas API. Cache-buster query string per fetch.
-- [x] **CORS headers on watch HTTP server** (2026-05-05) - `Access-Control-Allow-Origin: *` + OPTIONS preflight handler so the PWA can fetch `/screenshot.bin` from a different origin without the browser blocking.
-- [ ] Touch coordinates from the PWA → POST to a `/touch` endpoint → injected into the watch's event loop (this turns the PWA into a fully-remote launcher)
+- [x] **`Mirror.razor`** (2026-05-05) - Watch URL input (auto-fills from `WifiStatusChanged` IP), Refresh button + 1 Hz auto-refresh toggle (suspends when tab hidden via Page Visibility API), RGB565 BE → RGBA8 conversion in managed C#, single `ImageData` push to `<canvas>` via SpawnDev.BlazorJS typed Canvas API. Cache-buster query string per fetch.
+- [x] **CORS headers on watch HTTP server** (2026-05-05) - `Access-Control-Allow-Origin: *` + OPTIONS preflight so the PWA can fetch `/screenshot.bin` from a different origin.
+- [ ] **Tap-to-touch on Mirror canvas** - PWA-side tap handler scales canvas coords to panel coords and POSTs to `/touch`; watch-side `/touch` endpoint injects into `ScreenNavigator.HandleTap`. (Firmware-side endpoint half-built in working tree, on hold pending Captain sign-off.)
 
 ### Phase 5 - Drop-on-watch app installer
 
-- [x] **`Apps.razor` page** (2026-05-05) - drag-drop / browse a `.pe` file, POSTs the raw bytes to the watch's `http://<watch-ip>/loadapp` endpoint. Pulls watch URL from `WifiStatusChanged` so the user types it once. Hooks the existing firmware-side dynamic-load path that finds the `ISpawnApp` implementer via reflection and pushes it onto the screen stack as the foreground app.
-- [ ] Drag-drop binary file (currently click-to-pick only; drag-drop's `DataTransfer.files` needs a typed wrapper round on SpawnDev.BlazorJS to work cleanly through Blazor's DragEventArgs)
+- [x] **`Apps.razor`** (2026-05-05) - click-to-pick a `.pe` file, POSTs raw bytes to the watch's `http://<watch-ip>/loadapp` endpoint. Pulls watch URL from `WifiStatusChanged`. Hooks the firmware's existing dynamic-load path (reflection-loaded, pushed onto screen stack as foreground app).
+- [ ] Drag-drop binary file handoff (currently click-to-pick only; needs a typed `DataTransfer.files` wrapper round in SpawnDev.BlazorJS to work cleanly through Blazor's `DragEventArgs`).
 
 ### Phase 6 onwards - Per-app mirrors
 
 Each built-in app gets a corresponding PWA page that drives its UI remotely. Settings and Clock are easiest (mostly read-write of state); Voice Recorder and AI Assistant need bidirectional audio over WebRTC.
+
+## Test surface
+
+`SpawnWear.Bridge.Tests` (xUnit, net10.0) holds 25 wire-format regression tests:
+
+- Channel decoders: Battery (full + low + too-short), IMU, RTC, Button (5 mappings + too-short), WifiStatus (4 states + IP roundtrip + state-only), WifiScan (3 lines + pipe-in-name + empty), DebugLog (UTF-8 with emoji).
+- BridgeClient: connection lifecycle event re-fire, SendAsync routing through transport, SendAsync without transport throws.
+- `BleUuidsParityTest`: reads `SpawnWear/BleUuids.cs` (firmware) and `SpawnWear.Bridge/BleUuids.cs` (bridge) at test time, regex-extracts every named GUID + every byte constant, asserts byte-for-byte parity. Drift in either file fails the test.
+
+Run with `dotnet test SpawnWear.Bridge.Tests/SpawnWear.Bridge.Tests.csproj`.
 
 ## What the PWA is NOT
 
