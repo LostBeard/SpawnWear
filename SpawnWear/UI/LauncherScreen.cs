@@ -182,9 +182,9 @@ namespace SpawnWear.UI
             int topR = placeholder ? 70 : tile.Background.R;
             int topG = placeholder ? 70 : tile.Background.G;
             int topB = placeholder ? 70 : tile.Background.B;
-            int botR = placeholder ? 35 : (topR * 45) / 100;
-            int botG = placeholder ? 35 : (topG * 45) / 100;
-            int botB = placeholder ? 35 : (topB * 45) / 100;
+            int botR = placeholder ? 35 : (topR * 25) / 100;
+            int botG = placeholder ? 35 : (topG * 25) / 100;
+            int botB = placeholder ? 35 : (topB * 25) / 100;
             for (int b = 0; b < bands; b++)
             {
                 int rC = topR + ((botR - topR) * b) / (bands - 1);
