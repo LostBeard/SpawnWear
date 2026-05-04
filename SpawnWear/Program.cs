@@ -137,6 +137,8 @@ namespace SpawnWear
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
+                var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
 
@@ -148,30 +150,34 @@ namespace SpawnWear
                 {
                     // Row 1: built-in core surfaces.
                     new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
-                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(50, 30, 60) },
-                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
-                    // Row 2: dynamic-app slot + planned tiles.
-                    new LauncherScreen.Tile { Label = "APP",      TargetScreenIndex = 4, Icon = LauncherScreen.IconKind.Empty,    Background = Color.FromArgb(60, 30, 70) },
+                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40), BadgeCount = 3 },
+                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20), BadgeCount = 1 },
+                    // Row 2: app surfaces.
+                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 4, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(50, 30, 60) },
+                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
+                    new LauncherScreen.Tile { Label = "APP",      TargetScreenIndex = 6, Icon = LauncherScreen.IconKind.Empty,    Background = Color.FromArgb(60, 30, 70) },
+                    // Row 3: planned apps.
                     new LauncherScreen.Tile { Label = "MUSIC",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
                     new LauncherScreen.Tile { Label = "VIDEO",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
-                    // Row 3: planned apps.
                     new LauncherScreen.Tile { Label = "GALLERY",  TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Gallery },
-                    new LauncherScreen.Tile { Label = "VOICE",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
-                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Stats },
                 };
                 var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
                     targetIndex => { _nav.GoTo(targetIndex); });
 
-                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, about, wifiScreen, loadedApp });
+                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
                 _http?.AttachAppLoader(loadedApp);
                 // Wire page-dot indices + the shared status bar into each screen.
-                launcher.SetPageDots(0, 5);
-                watchface.SetPageDots(1, 5);
-                about.SetPageDots(2, 5);
-                wifiScreen.SetPageDots(3, 5);
-                loadedApp.SetPageDots(4, 5);
+                launcher.SetPageDots(0, 7);
+                watchface.SetPageDots(1, 7);
+                stats.SetPageDots(2, 7);
+                settings.SetPageDots(3, 7);
+                about.SetPageDots(4, 7);
+                wifiScreen.SetPageDots(5, 7);
+                loadedApp.SetPageDots(6, 7);
                 launcher.SetStatusBar(statusBar);
                 watchface.SetStatusBar(statusBar);
+                stats.SetStatusBar(statusBar);
+                settings.SetStatusBar(statusBar);
                 about.SetStatusBar(statusBar);
                 wifiScreen.SetStatusBar(statusBar);
                 loadedApp.SetStatusBar(statusBar);
