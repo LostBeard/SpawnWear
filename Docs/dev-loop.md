@@ -65,6 +65,29 @@ nanoff --target ESP32_S3_BLE --serialport COM10 --update               # Runtime
 
 The COM port number changes between bootloader mode (COM10 in our setup) and runtime mode (COM9). Re-run `nanoff --listports` whenever a port "disappears". Bootloader mode requires the chip to be in download mode (hold BOOT during cold boot via PWR power-cycle). Full first-flash recipe with every gotcha is in `Notes/flashing.md`.
 
+## Companion PWA dev loop
+
+For working on `SpawnWear.Companion` (Blazor WASM PWA) and `SpawnWear.Bridge` (RCL):
+
+```bash
+# Build + serve the PWA on http://localhost:5251
+dotnet run --project SpawnWear.Companion -- --urls http://localhost:5251
+
+# Run the wire-format regression suite
+dotnet test SpawnWear.Bridge.Tests
+```
+
+To pair a real watch from the dev server:
+
+1. Watch must be powered on, BLE advertising as `SW-OK-Tok`.
+2. Open `http://localhost:5251/` in **Chrome / Edge / Opera on desktop or Android** (Web Bluetooth not available in Safari / Firefox).
+3. Click **Pair watch** on the Home page → browser shows a Bluetooth picker filtered to SpawnWear devices → select the watch.
+4. The Home page lights up with live battery / IMU / button / log cards. The other pages (`Stats`, `WiFi`, `Mirror`, `Apps`, `Console`) all share the same `BridgeClient` and surface their channels.
+
+Hot-reload works for `.razor` and `.css` edits. `BridgeClient` event subscriptions persist across navigations because the client is a scoped DI service - no re-pair needed on page change.
+
+If you change a wire format in `SpawnWear/BleUuids.cs` or any firmware-side `Notify*` producer, run `dotnet test SpawnWear.Bridge.Tests` first. The `BleUuidsParityTest` will fail until you mirror the change to `SpawnWear.Bridge/BleUuids.cs`. The channel decoder tests will fail until you update both the firmware schema and the Bridge decoder.
+
 ## Live screen capture over WiFi
 
 When WiFi is up + HTTP server is listening (port 8080 by default):
