@@ -167,6 +167,50 @@ nanoFramework's `nanoFramework.Hardware.Esp32.NonVolatileStorage` is the canonic
 
 If NVS isn't a fit (e.g. we want to nuke the pairing on a deliberate "factory reset" while keeping WiFi creds), the SD card path from Phase 8 is also available — `IDisplayBuffer`-side persistence is already wired.
 
+## WebRTC peer integration (Stack B)
+
+**Chosen path (TJ 2026-05-05):** [libdatachannel](https://github.com/paullouisageneau/libdatachannel) + ESP-IDF mbedtls, integrated into the LostBeard nf-interpreter fork as a native component, exposed to managed code through nanoCLR primitives.
+
+### Why libdatachannel
+
+- C++ WebRTC stack with minimal external deps (only mbedtls for DTLS + a usrsctp build for SCTP), purpose-built for embedded / server / non-browser use.
+- Actively maintained; cross-implementation interop with Chrome / Firefox / SipSorcery is regression-tested in the project's own CI.
+- Data-channel-only mode is a first-class API surface — we don't have to wade through media-track machinery we won't use on the watch (audio/video tracks may come later via the same library).
+- ESP32-S3 is a stated supported target on the project's docs (`README.md` mentions ESP-IDF compatibility).
+- Permissive license (MPL-2.0 via `master`; the `embedded` submodule is BSD-style).
+
+### Integration shape (nf-interpreter fork)
+
+1. **Submodule under `targets/ESP32/_IDF_v5.5.4/components/libdatachannel/`.** Mirror the pattern the fork already uses for QSPI display: native C++ component compiled via the ESP-IDF CMake build, no managed code yet.
+2. **Native primitives via nanoCLR.** Add a `nanoFramework.WebRTC` sub-namespace in `nanoCLR_Native_Bindings.cpp` with thin wrappers over the libdatachannel C API:
+   - `RtcPeer.Create(IceServerConfig[]) -> handle`
+   - `RtcPeer.SetLocalDescription(handle) -> sdp`
+   - `RtcPeer.SetRemoteDescription(handle, sdp)`
+   - `RtcPeer.AddIceCandidate(handle, candidate)`
+   - `RtcDataChannel.Create(peer, label) -> dc_handle`
+   - `RtcDataChannel.Send(dc_handle, byte[])`
+   - `RtcDataChannel.OnMessage` event (managed callback signature)
+   - `RtcPeer.Dispose(handle)` / `RtcDataChannel.Dispose(dc_handle)`
+3. **Managed wrapper package `nanoFramework.WebRTC`.** Pure-managed surface that mirrors the `IRTCPeerConnection` / `IRTCDataChannel` shape from `SpawnDev.RTC`. Publishes to the local feed at `D:\users\SpawnDevPackages` like the other watch packages. SpawnWear firmware references it.
+4. **WatchWebRtcTransport** (firmware-side, this repo). The watch-side equivalent of the Companion's `WebRtcTransport` — opens the data channel, runs the same `WebRtcChallenge` mutual verification (writes the same byte layouts the Bridge tests already lock), then routes `TransportMessage`s in / out via `WebRtcDataFraming`. Same channel-id stream the BLE transport carries.
+5. **Signaling on the watch side.** libdatachannel doesn't ship its own signaling client — that's deliberately decoupled. Our firmware-side signaling client would use the same WebTorrent-tracker WebSocket protocol the Companion uses (`wss://hub.spawndev.com:44365/announce`). nanoFramework has a WebSocket client (`System.Net.WebSockets.WebSocket`) we can build on; a thin wrapper that speaks the bittorrent-tracker JSON wire format gets us there. ~200 lines of managed code.
+
+### Build-side concerns
+
+- **Flash budget.** libdatachannel + mbedtls + usrsctp adds estimated ~400-700 KB of code + rodata. Fits the 32 MB flash but pushes us further toward the deploy ceiling for the managed app (the documented ~290 KB budget — see `Research/nf-interpreter-deploy-ceiling.md`). The deploy ceiling is per-managed-deploy, not total firmware, so this is OK.
+- **PSRAM usage.** WebRTC peer state + DTLS handshake buffers + per-channel SCTP state = ~50-100 KB per active connection. PSRAM (8 MB) handles this easily. Watch out for fragmentation if multiple peers connect simultaneously (rare but possible: laptop + phone Companions both online).
+- **CPU.** DTLS handshake is the spike — 100s of milliseconds on ESP32-S3 with mbedtls's ECDSA-P256. Once the channel is open, SRTP per-packet overhead is small (AES-GCM in hardware via `mbedtls_aes_setkey_enc` + ESP32-S3's hardware AES accelerator). Audio / video tracks would change this calculus; data-channel-only is comfortable.
+- **Power.** WebRTC peer connection idle is ~0 mA — DTLS keepalive is per-minute, SCTP HEARTBEAT is per-30s. Active throughput pushes the WiFi radio at full duty, similar power profile to a sustained HTTP fetch. The AXP2101 already handles WiFi-active power; no new rail issues expected.
+
+### Phasing
+
+1. **Phase 7a — pairing only** (this doc above). Ship the BLE handshake + Ed25519 verify with stub crypto first, then real crypto. No WebRTC yet. Companion's "Establish trust" button works end-to-end.
+2. **Phase 7b — libdatachannel landing.** Submodule in nf-interpreter fork; native primitives wired to nanoCLR; minimal managed wrapper package; firmware can `new RtcPeerConnection()` without crashing.
+3. **Phase 7c — WatchWebRtcTransport.** Firmware-side ITransport-equivalent that mirrors the Companion's `WebRtcTransport`. Implements the `WebRtcChallenge` mutual-verify flow (byte layouts already locked) + `WebRtcDataFraming` (already locked) over libdatachannel's data channel.
+4. **Phase 7d — production hub.** TJ's `hub.spawndev.com:44365` already runs the tracker + STUN. The TURN cred-minting flow (open question #6 in [`phase7-webrfc-handoff.md`](phase7-webrtc-handoff.md)) gets settled here; the watch's `WatchWebRtcTransport` mints TURN creds via whichever pattern wins (probably tracker-gated ephemeral with a per-pair derived secret).
+
+Each phase independently verifiable; each builds on what's locked before. The Bridge-side wire formats (BLE pairing handshake, WebRTC challenge, WebRTC data framing) are already locked by 26 tests in `SpawnWear.Bridge.Tests` — when phases 7b/7c land, they hit the same byte layouts the Companion already speaks fluently.
+
 ## Pairing UI
 
 Optional but TJ-friendly: a watch-side LauncherScreen tile labeled "PAIR" that, when tapped:
