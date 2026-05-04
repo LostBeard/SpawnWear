@@ -6,24 +6,29 @@ using nanoFramework.System.IO.FileSystem;
 namespace SpawnWear.Drivers.SdCard
 {
     /// <summary>
-    /// Mounts the watch's microSD slot. The Waveshare 2.06 watch wires the slot
-    /// to the ESP32-S3's SDMMC peripheral (1-bit MMC mode), NOT SPI. Earlier
-    /// scaffold used SDCardSpiParameters and never matched the hardware, which
-    /// is why every boot logged CLR_E_VOLUME_NOT_FOUND with a card inserted.
+    /// Mounts the watch's microSD slot. The Waveshare 2.06 watch wiki documents
+    /// the slot as SPI-mode (interface table on
+    /// https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.06):
     ///
-    /// Pin assignments (vendor pin_config.h `07_LVGL_SD_Test`):
-    ///   SDMMC_CLK  = GPIO 2  -> SDMMC1_CLOCK
-    ///   SDMMC_CMD  = GPIO 1  -> SDMMC1_COMMAND
-    ///   SDMMC_DATA = GPIO 3  -> SDMMC1_D0
-    ///   (GPIO 17 was the SPI CS in the old config; unused in MMC mode.)
+    ///   CS   (SS)   = GPIO 17  -> chipSelectPin
+    ///   DI   (MOSI) = GPIO 1   -> SPI2_MOSI
+    ///   DO   (MISO) = GPIO 3   -> SPI2_MISO
+    ///   SCK  (SCLK) = GPIO 2   -> SPI2_CLOCK
     ///
-    /// Vendor demo uses `SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA)` +
-    /// `SD_MMC.begin("/sdcard", true)` - the `true` arg is "1-bit mode", which
-    /// matches `SDCardMmcParameters.dataWidth = SDCard.SDDataWidth._1_bit`.
+    /// (The vendor's `07_LVGL_SD_Test` Arduino demo uses SD_MMC because the
+    /// ESP32-S3 SDMMC peripheral can address the same pins, but the wiki's
+    /// SPI mapping is the documented contract.)
     ///
-    /// On successful mount, slot 0 surfaces at `D:\` (per nanoFramework's
-    /// SDCardMmcParameters.slotIndex doc: "Slot 0 will mount as drive D:\,
-    /// slot 1 = E:\ etc").
+    /// On successful mount the volume surfaces at `D:\` per nanoFramework's
+    /// SDCardSpiParameters.slotIndex doc.
+    ///
+    /// Note 2026-05-05: small (1GB) cards typically ship pre-formatted FAT16,
+    /// which the runtime's FATFS rejects with CLR_E_VOLUME_NOT_FOUND. Reformat
+    /// to FAT32 (Windows: `format X: /FS:FAT32 /Q`) before expecting Mount()
+    /// to succeed. In-watch reformat via DriveInfo.Format isn't viable on this
+    /// runtime - the SD slot's mount failure prevents drive registration, so
+    /// there's no DriveInfo for the format to operate on. The /sdformat HTTP
+    /// endpoint is wired but currently 500s for the same reason.
     /// </summary>
     public class SdCardService
     {
@@ -35,14 +40,15 @@ namespace SpawnWear.Drivers.SdCard
         {
             try
             {
-                Configuration.SetPinFunction(2, DeviceFunction.SDMMC1_CLOCK);
-                Configuration.SetPinFunction(1, DeviceFunction.SDMMC1_COMMAND);
-                Configuration.SetPinFunction(3, DeviceFunction.SDMMC1_D0);
+                Configuration.SetPinFunction(2, DeviceFunction.SPI2_CLOCK);
+                Configuration.SetPinFunction(1, DeviceFunction.SPI2_MOSI);
+                Configuration.SetPinFunction(3, DeviceFunction.SPI2_MISO);
 
-                var parameters = new SDCardMmcParameters
+                var parameters = new SDCardSpiParameters
                 {
                     slotIndex = 0,
-                    dataWidth = SDCard.SDDataWidth._1_bit,
+                    spiBus = 2,
+                    chipSelectPin = 17,
                 };
 
                 _card = new SDCard(parameters, new CardDetectParameters());
