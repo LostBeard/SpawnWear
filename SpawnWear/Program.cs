@@ -163,6 +163,13 @@ namespace SpawnWear
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps
                 // straight to Sleep on the first iteration.
                 _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+                // Paint the active (boot) screen once before the event loop starts.
+                // ScreenNavigator's Tick path only calls Tick() on active screens,
+                // not Invalidate(); without this initial paint the launcher's
+                // status bar shows but the tile grid stays unpainted until the
+                // user navigates away and back.
+                try { _nav.Current.OnResume(); }
+                catch (Exception ex) { Debug.WriteLine("[Boot] initial OnResume EX " + ex.Message); }
                 _eventLoop = new EventLoop(OnTick);
                 Debug.WriteLine("[SpawnWear] M1 - Entering EventLoop");
                 _eventLoop.Run();

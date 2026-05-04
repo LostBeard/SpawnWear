@@ -173,22 +173,50 @@ namespace SpawnWear.UI
         {
             bool placeholder = tile.TargetScreenIndex < 0;
 
-            // Filled tile background. Solid tint for V1; future polish pass swaps
-            // for a vertical gradient (FillGradientRectangle exists in the
-            // managed framework) and rounds the corners.
-            Color bg = placeholder ? Color.FromArgb(60, 60, 60) : tile.Background;
-            if (bg != Color.Black)
+            // Vertical gradient background drawn as horizontal slices. ~16 bands
+            // is enough to look smooth at 100-px tile size. We don't use
+            // FillGradientRectangle because the native ESP32 graphics driver in
+            // this nf-interpreter build doesn't implement that primitive.
+            int bands = 16;
+            int bandH = _tileSize / bands;
+            int topR = placeholder ? 70 : tile.Background.R;
+            int topG = placeholder ? 70 : tile.Background.G;
+            int topB = placeholder ? 70 : tile.Background.B;
+            int botR = placeholder ? 35 : (topR * 45) / 100;
+            int botG = placeholder ? 35 : (topG * 45) / 100;
+            int botB = placeholder ? 35 : (topB * 45) / 100;
+            for (int b = 0; b < bands; b++)
             {
-                _fb.FillRectangle(x, y, _tileSize, _tileSize, bg);
+                int rC = topR + ((botR - topR) * b) / (bands - 1);
+                int gC = topG + ((botG - topG) * b) / (bands - 1);
+                int bC = topB + ((botB - topB) * b) / (bands - 1);
+                Color bandColor = Color.FromArgb(rC, gC, bC);
+                int by = y + b * bandH;
+                int bh = (b == bands - 1) ? (_tileSize - b * bandH) : bandH;
+                _fb.FillRectangle(x, by, _tileSize, bh, bandColor);
             }
 
-            // Outline.
-            int t = placeholder ? 1 : 2;
-            Color outline = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
-            _fb.FillRectangle(x, y, _tileSize, t, outline);
-            _fb.FillRectangle(x, y + _tileSize - t, _tileSize, t, outline);
-            _fb.FillRectangle(x, y, t, _tileSize, outline);
-            _fb.FillRectangle(x + _tileSize - t, y, t, _tileSize, outline);
+            // Stepped quarter-circle corner mask (8-px radius). For each corner,
+            // we paint black scanlines whose length tapers as we move away from
+            // the panel edge — visually approximates a rounded corner without
+            // needing polygon primitives. Pattern (top-left):
+            //   row 0: 8 px wide
+            //   row 1: 6 px
+            //   row 2: 4 px
+            //   row 3: 3 px
+            //   row 4: 2 px
+            //   row 5: 1 px
+            int[] cornerLens = new int[] { 8, 6, 4, 3, 2, 1 };
+            for (int i = 0; i < cornerLens.Length; i++)
+            {
+                int len = cornerLens[i];
+                // Top edge
+                _fb.FillRectangle(x, y + i, len, 1, Color.Black);
+                _fb.FillRectangle(x + _tileSize - len, y + i, len, 1, Color.Black);
+                // Bottom edge
+                _fb.FillRectangle(x, y + _tileSize - 1 - i, len, 1, Color.Black);
+                _fb.FillRectangle(x + _tileSize - len, y + _tileSize - 1 - i, len, 1, Color.Black);
+            }
 
             // Layout INSIDE the tile: icon in the top ~65%, label in the bottom ~25%
             // with a small gap between them. This matches the Android launcher
