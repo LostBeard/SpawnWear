@@ -89,11 +89,26 @@ Total boot from PWR-click to launcher-painted: ~3-4 seconds with current configu
 
 ## BLE GATT layout
 
-When BLE is active (currently disabled to fit under the deploy ceiling, see `Research/nf-interpreter-deploy-ceiling.md`), the watch advertises a single `GattServiceProvider` with one primary service. nanoFramework on ESP32 advertises one service at a time reliably.
+When BLE is active, the watch advertises a single `GattServiceProvider` with one primary service. nanoFramework on ESP32 advertises one service at a time reliably.
 
 Custom UUIDs use the base `a0e4f2c1-SSSS-CCCC-8000-00805f9b34fb`. Note the `c1` (not `c0` as in NanoFrameTest1) so a phone with both PWAs installed doesn't get device contracts confused.
 
 Apps don't talk to GATT directly; they talk to the BLE system service. Advertising is user-toggleable via Settings → BLE; not always-on the way the demo scaffold has it.
+
+### Companion side: SpawnWear.Bridge + SpawnWear.Companion
+
+The PWA half of the architecture mirrors every BLE channel the watch emits. Two .NET projects in this repo:
+
+- **`SpawnWear.Bridge/`** - Razor Class Library (net10.0, browser platform). Holds the watch-interaction code: `ITransport` abstraction, `BleTransport` (Web Bluetooth via SpawnDev.BlazorJS), `WebRtcTransport` (SpawnDev.RTC peer, Phase 7), `BridgeClient` with strongly-typed events (`BatteryChanged` / `ImuSampleReceived` / `RtcTimeReceived` / `ButtonEventReceived` / `WifiStatusChanged` / `WifiScanResultsReceived` / `DebugLogReceived`), `BleUuids` mirror, `ChannelIds` constants.
+- **`SpawnWear.Companion/`** - Blazor WebAssembly PWA (net10.0). References Bridge. Six pages: `Home`, `Stats` (telemetry dashboard), `WiFi` (setup + scan), `Mirror` (HTTP screenshot canvas), `Apps` (drop `.pe` to `/loadapp`), `Console` (live debug log + command bar). Persistent `StatusBar` across all pages.
+
+Drift between firmware-side BLE schemas and Bridge-side decoders is locked by `SpawnWear.Bridge.Tests`:
+- 24 wire-format regression tests for every channel decoder (Battery, IMU, RTC, Button, WifiStatus, WifiScan, DebugLog).
+- `BleUuidsParityTest` reads `SpawnWear/BleUuids.cs` (firmware) and `SpawnWear.Bridge/BleUuids.cs` (bridge) at test time and asserts byte-for-byte parity. If either file changes a UUID without mirroring it, the test fails immediately.
+
+A future `SpawnWear.Bridge.Desktop` crate (Phase 7+) targets `net10.0` (no browser) and exposes the same `ITransport` surface for non-browser .NET consumers using SpawnDev.RTC for WebRTC + a desktop BLE adapter.
+
+Full plan: [`Plans/companion-pwa.md`](../Plans/companion-pwa.md).
 
 ## Power model
 
