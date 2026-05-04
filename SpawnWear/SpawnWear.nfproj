@@ -29,6 +29,7 @@
     <Compile Include="Config\WifiCredentials.cs" />
     <Compile Include="DebugConsoleService.cs" />
     <Compile Include="DeviceInfoService.cs" />
+    <Compile Include="PairingService.cs" />
     <Compile Include="WatchProfileService.cs" />
     <Compile Include="WifiConfigService.cs" />
     <Compile Include="Drivers\BoardPins.cs" />

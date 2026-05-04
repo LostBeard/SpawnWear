@@ -37,6 +37,7 @@ namespace SpawnWear
 
         readonly DebugConsoleService _debug;
         readonly WatchProfileService _profile;
+        readonly PairingService _pairing;
 
         public GattServiceProvider ServiceProvider { get; private set; }
 
@@ -49,10 +50,11 @@ namespace SpawnWear
         byte _currentStatus = StatusDisconnected;
         string _currentIp = "";
 
-        public WifiConfigService(DebugConsoleService debug, WatchProfileService profile)
+        public WifiConfigService(DebugConsoleService debug, WatchProfileService profile, PairingService pairing)
         {
             _debug = debug;
             _profile = profile;
+            _pairing = pairing;
         }
 
         /// <summary>
@@ -129,8 +131,9 @@ namespace SpawnWear
             _commandChar = cmdResult.Characteristic;
             _commandChar.WriteRequested += OnCommandWriteRequested;
 
-            // Attach watch profile + debug characteristics only when caller asked for them
-            // AND the helper instances were supplied. Both are skipped under InitializeWifiOnly().
+            // Attach watch profile + debug + pairing characteristics only when caller asked
+            // for them AND the helper instances were supplied. All three are skipped under
+            // InitializeWifiOnly().
             if (attachHelpers)
             {
                 if (_profile != null && !_profile.Initialize(service))
@@ -138,6 +141,10 @@ namespace SpawnWear
                     return false;
                 }
                 if (_debug != null && !_debug.Initialize(service))
+                {
+                    return false;
+                }
+                if (_pairing != null && !_pairing.Initialize(service))
                 {
                     return false;
                 }
