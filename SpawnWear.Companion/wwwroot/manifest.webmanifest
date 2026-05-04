@@ -1,11 +1,12 @@
 {
-  "name": "SpawnWear.Companion",
-  "short_name": "SpawnWear.Companion",
+  "name": "SpawnWear Companion",
+  "short_name": "SpawnWear",
+  "description": "Pair, mirror, and control your SpawnWear watch from the browser.",
   "id": "./",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#03173d",
+  "background_color": "#0e1117",
+  "theme_color": "#5b8def",
   "prefer_related_applications": false,
   "icons": [
     {
