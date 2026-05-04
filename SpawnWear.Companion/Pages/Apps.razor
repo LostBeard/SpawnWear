@@ -4,8 +4,8 @@
 @using SpawnWear.Bridge
 @using SpawnWear.Companion.Services
 @inject BlazorJSRuntime JS
-@inject HttpClient Http
 @inject BridgeClient Bridge
+@inject WatchHttp WatchHttp
 @inject WatchPrefs Prefs
 @implements IDisposable
 
@@ -122,13 +122,17 @@
                 return;
             }
 
-            var url = _watchUrl.TrimEnd('/') + "/loadapp";
-            using var content = new ByteArrayContent(bytes);
-            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-            using var resp = await Http.PostAsync(url, content);
-            var body = await resp.Content.ReadAsStringAsync();
-            _lastResult = $"{preflight.Summary}\n{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}";
-            _isError = !resp.IsSuccessStatusCode;
+            try
+            {
+                var reply = await WatchHttp.PostAppAsync(_watchUrl, bytes);
+                _lastResult = $"{preflight.Summary}\n{reply}";
+                _isError = false;
+            }
+            catch (HttpRequestException ex)
+            {
+                _lastResult = $"{preflight.Summary}\n{ex.Message}";
+                _isError = true;
+            }
         }
         catch (Exception ex) { _lastResult = ex.Message; _isError = true; }
         finally

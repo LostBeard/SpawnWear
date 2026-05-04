@@ -28,6 +28,7 @@ public static class BridgeServiceCollectionExtensions
             _ = client.UseTransportAsync(ble);
             return client;
         });
+        services.AddScoped<WatchHttp>();
         return services;
     }
 }

@@ -71,6 +71,22 @@ The first `ConnectAsync` triggers the browser's Web Bluetooth picker. The Bridge
 | `WifiScanResultsReceived` | `WifiScanResult[]` | `WifiScan` | Array of `(Ssid, RssiDbm)`. |
 | `DebugLogReceived` | `string` | `DebugLog` | UTF-8 decoded line from the watch's `Debug.WriteLine`. |
 
+## HTTP-side (when WiFi is up)
+
+`WatchHttp` is registered in the same DI container; inject and call:
+
+```csharp
+@inject WatchHttp WatchHttp
+
+// Live framebuffer as RGBA8 (already decoded from RGB565 BE)
+var shot = await WatchHttp.GetScreenshotAsync("http://192.168.1.171");
+// shot.Width, shot.Height, shot.Rgba ready for canvas ImageData
+
+// Drop a SpawnWear app .pe onto the watch
+var reply = await WatchHttp.PostAppAsync("http://192.168.1.171", peBytes);
+// "OK: COUNTER" or HttpRequestException with the watch's error text
+```
+
 ## Sending commands
 
 ```csharp
