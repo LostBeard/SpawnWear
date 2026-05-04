@@ -14,7 +14,7 @@ Captured live over WiFi from the watch (`http://<watch-ip>:8080/`). Left: 3x3 la
 
 Think Android, but watch-sized and ESP32-shaped: a kernel/HAL layer of C# drivers for the watch hardware, system services for radios / audio / power, a UI framework for drawing and input, a launcher home screen, and a small set of built-in apps that talk to the system services. No single C++ binary, no fixed UI - apps come and go, services run in the background.
 
-A complementary **Blazor WebAssembly PWA** mirrors the watch UI over BLE + WiFi for headless setup, debugging, and remote control. Same C# language on both sides.
+A complementary **Blazor WebAssembly PWA** ([`SpawnWear.Companion`](SpawnWear.Companion/)) mirrors the watch UI over BLE + WiFi for headless setup, debugging, and remote control. The watch-talking guts live in a separate Razor Class Library ([`SpawnWear.Bridge`](SpawnWear.Bridge/)) that any Blazor app can `<ProjectReference>` to pair with the watch in two lines of `Program.cs`. Same C# language on both sides.
 
 Constrained by the silicon: ESP32-S3R8 with 8 MB PSRAM and 32 MB flash. Everything - kernel, drivers, services, framework, apps, user data - fits in that envelope.
 
@@ -39,6 +39,7 @@ Constrained by the silicon: ESP32-S3R8 with 8 MB PSRAM and 32 MB flash. Everythi
 
 ## Recent highlights (full history in [`Docs/milestones.md`](Docs/milestones.md))
 
+- **2026-05-05** **`SpawnWear.Bridge` RCL + `SpawnWear.Companion` PWA shipped.** Five-page Blazor WebAssembly companion (Home / WiFi / Mirror / Apps / Console) on top of a reusable Razor Class Library that pairs over Web Bluetooth, decodes every BLE notify the firmware emits (battery / IMU / RTC / button events / WiFi status / WiFi scan / debug log), and posts back through the existing HTTP endpoints (`/loadapp`, `/screenshot.bin`). 23 wire-format regression tests in `SpawnWear.Bridge.Tests` lock the byte layouts. CORS headers + OPTIONS preflight added to the watch's HttpServer so the PWA can fetch from a different origin. All interop runs through SpawnDev.BlazorJS typed wrappers - no raw JS, no `IJSRuntime`. WebRTC transport stubbed for Phase 7 (SpawnDev.RTC, browser + desktop).
 - **2026-05-05** **First dynamically-loaded SpawnWear app rendered on the watch.** Phase 3 service host + AppContracts (`IServiceHost`, `ISpawnApp`, `IDisplayBuffer`) shipped with About + WiFi screens consuming services through the contract. CounterApp demo (separate `.nfproj`, references `SpawnWear.AppContracts`) compiles to a 1.2 KB `.pe`, POSTs to `/loadapp` over HTTP, runs on the watch through `LoadedAppScreen` reflection wrapper. Phase 8 architecture (SD-card-loadable apps) verified end-to-end.
 - **2026-05-04** Android-quality launcher shipped (gradient tiles + rounded corners + WiFi status icon + pill page indicator), watchface date label added, WiFi + HTTP screenshot pipeline live, FT3168 touch burst-read layout fixed, nf-interpreter deploy ceiling discovered + guarded, three new doc folders (Docs/ Plans/ Research/) with nf-interpreter source-grounded Phase 8 design
 - **2026-05-03** First-pixel root cause + fix, watchface V1 with 7-segment digits, idle state machine + battery indicator + multi-screen navigation, CO5300 alignment quirk baked into firmware, PCF85063 RTC driver, `-spawnwear.2` local NuGet packages
