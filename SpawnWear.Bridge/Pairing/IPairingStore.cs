@@ -41,7 +41,7 @@ public readonly record struct PairingRecord(
     byte[] WatchPubKey,        // 32 bytes
     byte[] OurPubKey,          // 32 bytes
     byte[] OurPrivKey,         // 32 bytes (Companion-side; on watch side this is unused — the watch's privkey is stored separately)
-    byte[] RoomId,             // 16 bytes
+    byte[] RoomKey,            // 20 bytes (matches SpawnDev.RTC RoomKey)
     DateTimeOffset PairedAt,
     string? FriendlyName       // optional human label, e.g. "Aubs's watch"
 );

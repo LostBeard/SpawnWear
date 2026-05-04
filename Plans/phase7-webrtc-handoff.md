@@ -48,17 +48,19 @@ The wire format for `PairingHandshake` is purposely small to fit in a single ATT
 
 ```
 Companion → Watch (write):
-  [companion.pubkey:32][proposed_room_id:16][signature_of(prev 48 bytes):64]
-  = 112 bytes
-  signature is over the previous 48 bytes, signed with companion.privkey
+  [companion.pubkey:32][proposed_room_key:20][signature_of(prev 52 bytes):64]
+  = 116 bytes
+  signature is over the previous 52 bytes, signed with companion.privkey
+  proposed_room_key matches SpawnDev.RTC's RoomKey (20 bytes, WebTorrent
+  info_hash compatible).
 
 Watch → Companion (notify in response):
-  [watch.signature_of(companion.pubkey || room_id || watch.pubkey):64]
+  [watch.signature_of(companion.pubkey || room_key || watch.pubkey):64]
   = 64 bytes
 
 Both sides verify the other's signature. If valid, both persist:
   - the OTHER's Ed25519 public key
-  - the agreed room id
+  - the agreed room key (20-byte RoomKey)
   - the date paired (for forensics if a key is later compromised)
 ```
 
@@ -66,34 +68,49 @@ A user can re-pair to revoke an old key — the watch overwrites the stored comp
 
 ## WebRTC connection flow (Phase 7 implementation)
 
-```
-1. Both peers connect to hub.spawndev.com via SignalR / WebSocket.
-   Authenticate to the hub with a "I want to join room <agreed_room_id>"
-   message signed by their respective private keys. Hub verifies the
-   signature against the previously-paired public keys (which it learned
-   when the room was first claimed). Hub doesn't know the application
-   semantics; it just gates room joins on signature validity.
+SpawnDev.RTC already ships every primitive we need:
+- `ISignalingClient` / `TrackerSignalingClient` (WebTorrent-tracker-compatible signaling)
+- `RoomKey` (20-byte room identifier, info_hash-shaped)
+- `SpawnDev.RTC.Server` (STUN/TURN/tracker bundled as `IHostedService`; runs at `wss://hub.spawndev.com` per TJ)
+- Tracker-gated ephemeral TURN creds (only currently-announced peers in a room get TURN allocations)
+- `RtcPeerConnectionRoomHandler` (peer-connection lifecycle wired to the signaling layer)
+- `IRTCPeerConnection` / `IRTCDataChannel` cross-platform abstraction
 
-2. Once both peers are in the room, the hub relays SDP offer/answer +
-   ICE candidates between them. Standard WebRTC dance via SpawnDev.RTC.
+```
+1. Both peers construct an ISignalingClient bound to wss://hub.spawndev.com.
+   They Subscribe(ourRoomKey, handler) and AnnounceAsync(ourRoomKey, ...).
+   Hub-side, the SpawnDev.RTC.Server tracker matches them up.
+
+2. RtcPeerConnectionRoomHandler runs the SDP offer/answer + ICE dance.
+   STUN works for ~80% of LAN→LAN; TurnServer supplies relay candidates
+   when needed, gated by ephemeral creds the tracker hands out only to
+   announced peers in our room.
 
 3. When the WebRTC data channel opens, BOTH peers immediately send a
    challenge:
        [random_nonce:32]
-   The other peer signs it and returns:
+   The other peer signs it with its Ed25519 privkey and returns:
        [random_nonce:32][signature:64]
-   Each side verifies with the OTHER's stored public key. If verification
-   fails on either side, both peers tear the connection down.
+   Each side verifies with the OTHER's stored pubkey via
+   SpawnDev.BlazorJS.Cryptography (same crypto API works on browser
+   AND desktop). If verification fails on either side, both peers tear
+   the connection down before any app payload flows.
 
 4. After mutual verification, the data channel transports the same
    TransportMessage stream the BLE transport carries today. Channel-id
    plus payload bytes — same channel ids, same wire formats, no app-layer
-   changes on either side.
+   changes on either side. WebRtcTransport just becomes another
+   ITransport implementation.
 
 5. Optional WebRTC media tracks for audio (microphone capture for AI
-   Assistant flagship app) and video (screen mirror replacing
-   /screenshot.bin pulling).
+   Assistant flagship app) and video (screen mirror replacing the
+   HTTP-pulled /screenshot.bin path entirely).
 ```
+
+The Ed25519 verification is layered ON TOP of WebRTC's DTLS-SRTP. DTLS
+handles wire encryption; Ed25519 handles peer identity. A compromised
+hub can drop / delay traffic but can never impersonate either side or
+read what flows.
 
 ## Bridge surface (today vs tomorrow)
 
@@ -143,10 +160,11 @@ Phase 7 is a multi-week build, not a single-session push. Today's 2026-05-05 shi
 
 ## Open questions (for design review before any code lands)
 
-1. **MTU bump strategy.** Default ATT MTU is 23 bytes; we need ~112 for the pairing handshake. Web Bluetooth doesn't expose MTU control. Either (a) chunk the handshake into multiple writes on a single characteristic, or (b) split the handshake into two sequential writes.
-2. **Room id derivation.** Random UUID (simple) vs hash of both pubkeys (deterministic; simpler reconnect logic; lower collision risk).
-3. **Hub schema.** REST? SignalR? Custom WebSocket? SpawnDev.RTC's existing client probably has an opinion.
-4. **WebRTC video track for screen mirror.** Replace today's HTTP-pulled `/screenshot.bin` once WebRTC is up, or keep both for fallback?
-5. **What runs on the hub.** A SpawnDev.Hub project? Captain might already have a deployment pattern in mind.
+1. **MTU bump strategy.** Default ATT MTU is 23 bytes; we need ~116 for the pairing handshake. Web Bluetooth doesn't expose MTU control. Either (a) chunk the handshake into multiple writes on a single characteristic, or (b) split the handshake across two sequential writes.
+2. **Room key derivation.** `RoomKey.Random()` (simple) vs `RoomKey.FromString(SHA256(companionPub || watchPub))` (deterministic; lets a re-pairing client recover the room key from just the pubkeys; lower coordination risk).
+3. **Watch-side Ed25519 implementation.** `SpawnDev.BlazorJS.Cryptography` is the cross-platform answer on .NET/Blazor — does it run on nanoFramework? If not, options: (a) port a managed Ed25519 to nanoFramework, (b) use BouncyCastle if it'll fit on the watch's deploy ceiling, (c) bake an Ed25519 native intrinsic into the LostBeard nf-interpreter fork.
+4. **Hub URL discovery.** Hard-code `wss://hub.spawndev.com`, or let the Companion configure it (multi-hub failover for redundancy)? Watch-side: same question - configurable via BLE before pairing, or hard-coded?
+5. **WebRTC video track for screen mirror.** Replace today's HTTP-pulled `/screenshot.bin` once WebRTC is up, or keep both for fallback when WebRTC is unreachable?
+6. **TurnServer credentials.** The `SpawnDev.RTC.Server` model is "ephemeral creds gated by who's announced in the room." That means the hub's tracker needs to know our pubkey BEFORE we announce, so it can verify our room-claim signature. Bootstrap order matters: pubkey-registration ↔ first-announce.
 
 These get answered in the next dedicated Phase 7 session, not in autonomous Editor's-choice work.

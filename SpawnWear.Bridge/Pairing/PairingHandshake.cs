@@ -21,15 +21,16 @@ public static class PairingHandshake
     /// <summary>Ed25519 signature length.</summary>
     public const int SignatureLength = 64;
 
-    /// <summary>Length of the room id agreed on during pairing.
-    /// 16 bytes = 128-bit identifier; collision-safe for billions of
-    /// rooms on the hub.</summary>
-    public const int RoomIdLength = 16;
+    /// <summary>Length of the room key agreed on during pairing.
+    /// Matches SpawnDev.RTC's <c>RoomKey</c> (20 bytes; WebTorrent
+    /// info_hash compatible so the same key shape works directly with
+    /// the SpawnDev.RTC tracker / signaling layer).</summary>
+    public const int RoomKeyLength = 20;
 
     /// <summary>Companion-to-watch handshake payload size:
-    /// <see cref="PubKeyLength"/> + <see cref="RoomIdLength"/>
-    /// + <see cref="SignatureLength"/> = 112 bytes.</summary>
-    public const int CompanionToWatchLength = PubKeyLength + RoomIdLength + SignatureLength;
+    /// <see cref="PubKeyLength"/> + <see cref="RoomKeyLength"/>
+    /// + <see cref="SignatureLength"/> = 116 bytes.</summary>
+    public const int CompanionToWatchLength = PubKeyLength + RoomKeyLength + SignatureLength;
 
     /// <summary>Watch-to-companion handshake response size:
     /// <see cref="SignatureLength"/> only - the watch signs
@@ -46,6 +47,6 @@ public static class PairingHandshake
 /// </summary>
 public readonly record struct PairingResponseDomain(
     byte[] CompanionPubKey,    // PairingHandshake.PubKeyLength
-    byte[] RoomId,             // PairingHandshake.RoomIdLength
+    byte[] RoomKey,            // PairingHandshake.RoomKeyLength
     byte[] WatchPubKey         // PairingHandshake.PubKeyLength
 );
