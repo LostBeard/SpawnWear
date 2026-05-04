@@ -29,6 +29,13 @@ public class BridgeClient : IAsyncDisposable
     /// <summary>True when an underlying transport is connected.</summary>
     public bool IsConnected => _transport?.IsConnected ?? false;
 
+    /// <summary>The active transport, or null if none is wired. Most
+    /// consumers shouldn't reach for this directly - use the typed
+    /// helper methods instead. Phase 7's <c>PairingFlow</c> needs the
+    /// raw <see cref="ITransport"/> to call its pairing-specific
+    /// methods; that's the canonical use case.</summary>
+    public ITransport? GetUnderlyingTransport() => _transport;
+
     /// <summary>Best-effort human-readable peer identifier from the
     /// active transport (e.g. "SW-OK-Tok" from BLE), or null if not
     /// connected.</summary>

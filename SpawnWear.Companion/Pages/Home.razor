@@ -1,6 +1,10 @@
 @page "/"
+@using SpawnDev.BlazorJS.Cryptography
 @using SpawnWear.Bridge
+@using SpawnWear.Bridge.Pairing
 @inject BridgeClient Bridge
+@inject IPortableCrypto Crypto
+@inject IPairingStore PairingStore
 @implements IDisposable
 
 <PageTitle>SpawnWear Companion</PageTitle>
@@ -17,13 +21,38 @@
         </span>
         @if (!Bridge.IsConnected)
         {
-            <button class="primary" @onclick="ConnectAsync">Pair watch</button>
+            <button class="primary" @onclick="ConnectAsync">Pair over BLE</button>
         }
         else
         {
             <button class="secondary" @onclick="DisconnectAsync">Disconnect</button>
         }
     </div>
+
+    @if (Bridge.IsConnected)
+    {
+        <div class="card-row" style="margin-top:0.6rem;">
+            <span class="badge @(_record is null ? "off" : "ok")">
+                @(_record is null ? "NOT TRUSTED" : "TRUSTED")
+            </span>
+            @if (_record is null)
+            {
+                <button class="primary" @onclick="DoPairAsync" disabled="@_pairing">
+                    @(_pairing ? "Pairing…" : "Establish trust (Phase 7)")
+                </button>
+            }
+            else
+            {
+                <button class="ghost" @onclick="ForgetTrust">Forget trust</button>
+            }
+        </div>
+        @if (_record is { } r)
+        {
+            <div class="muted" style="margin-top:0.4rem; font-size:0.78rem; font-family: ui-monospace, 'SF Mono', monospace;">
+                Watch pubkey: @ShortHex(r.WatchPubKey) · Room: @ShortHex(r.RoomKey) · Paired @r.PairedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+            </div>
+        }
+    }
 
     @if (_lastError is not null)
     {
@@ -85,6 +114,9 @@
     string? _lastLog;
     string? _lastError;
 
+    PairingRecord? _record;
+    bool _pairing;
+
     protected override void OnInitialized()
     {
         Bridge.ConnectionChanged   += OnConnectionChanged;
@@ -126,6 +158,39 @@
         catch (NotImplementedException ex) { _lastError = "BLE transport not yet wired (Phase 4a). " + ex.Message; }
         catch (Exception ex) { _lastError = ex.Message; }
     }
+
+    async Task DoPairAsync()
+    {
+        _lastError = null; _pairing = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            // Bridge needs an ITransport reference; the transport is
+            // wrapped inside BridgeClient. PairingFlow takes ITransport
+            // directly so a future Bridge.Desktop consumer can use it
+            // the same way - we expose it via a small accessor.
+            var transport = Bridge.GetUnderlyingTransport()
+                ?? throw new InvalidOperationException("BridgeClient has no transport configured.");
+            var flow = new PairingFlow(Crypto, PairingStore);
+            _record = await flow.PairAsync(transport, friendlyName: Bridge.PeerName);
+        }
+        catch (PairingException ex) { _lastError = "Pairing failed: " + ex.Message; }
+        catch (NotSupportedException ex) { _lastError = "Watch firmware does not yet advertise the Phase 7 pairing characteristics. " + ex.Message; }
+        catch (Exception ex) { _lastError = ex.Message; }
+        finally
+        {
+            _pairing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    void ForgetTrust()
+    {
+        if (_record is { } r) PairingStore.Remove(r.WatchPubKey);
+        _record = null;
+    }
+
+    static string ShortHex(byte[] b) => Convert.ToHexString(b)[..16].ToLowerInvariant() + "…";
 
     async Task DisconnectAsync()
     {
