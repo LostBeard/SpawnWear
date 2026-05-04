@@ -1,0 +1,187 @@
+@page "/mirror"
+@using SpawnDev.BlazorJS
+@using SpawnDev.BlazorJS.JSObjects
+@using SpawnWear.Bridge
+@inject BlazorJSRuntime JS
+@inject HttpClient Http
+@inject BridgeClient Bridge
+@implements IDisposable
+
+<PageTitle>Mirror &mdash; SpawnWear.Companion</PageTitle>
+
+<div class="page-head">
+    <h1>Screen mirror</h1>
+    <span class="badge @(_lastError is null ? "ok" : "off")">
+        @(_lastError is null ? (_lastFetchUtc is null ? "idle" : $"updated {SinceLast}") : "error")
+    </span>
+</div>
+
+<p class="muted">Fetches <code>http://&lt;watch-ip&gt;/screenshot.bin</code> over WiFi, decodes the RGB565 BE pixel stream, and renders it to a canvas. Set the watch URL once, hit Refresh, or flip auto-refresh on for a live mirror.</p>
+
+<div class="card controls">
+    <label>
+        <span>Watch URL</span>
+        <input type="text" @bind="_watchUrl" @bind:event="oninput" placeholder="http://192.168.1.171" />
+    </label>
+
+    <div class="actions">
+        <button class="primary" @onclick="FetchOnceAsync" disabled="@string.IsNullOrEmpty(_watchUrl)">Refresh</button>
+        <label class="row">
+            <input type="checkbox" @bind="_auto" @bind:after="OnAutoToggled" /> auto every 1s
+        </label>
+    </div>
+
+    @if (_lastError is not null)
+    {
+        <div class="error">@_lastError</div>
+    }
+</div>
+
+<div class="canvas-wrap">
+    <canvas id="mirror-canvas" width="410" height="502"></canvas>
+</div>
+
+<style>
+    .page-head { display: flex; align-items: center; gap: 0.8rem; }
+    .page-head h1 { margin: 0; }
+    .badge { padding: 0.18rem 0.6rem; border-radius: 999px; font-size: 0.7rem; letter-spacing: 0.07em; font-weight: 600; }
+    .badge.ok { background: rgba(70,210,140,0.18); color: #6dd9a4; }
+    .badge.off { background: rgba(220,80,90,0.18); color: #ec7986; }
+    .muted { opacity: 0.7; font-size: 0.95rem; max-width: 56rem; }
+    .controls { max-width: 32rem; }
+    .controls label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; opacity: 0.85; }
+    .controls label.row { display: flex; align-items: center; gap: 0.4rem; opacity: 0.8; margin: 0; font-size: 0.85rem; }
+    .controls input[type=text] { width: 100%; box-sizing: border-box; background: #0e1117; border: 1px solid #2c2f3a; color: #d8dae4; border-radius: 8px; padding: 0.55rem 0.75rem; font-size: 0.95rem; font-family: ui-monospace, "SF Mono", monospace; }
+    .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+    .actions button { background: linear-gradient(120deg,#5b8def,#9d6bff); color: white; border: 0; padding: 0.55rem 1.05rem; border-radius: 999px; font-weight: 600; cursor: pointer; }
+    .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .canvas-wrap { margin-top: 1rem; display: flex; justify-content: center; }
+    canvas { background: #000; border: 1px solid #2c2f3a; border-radius: 12px; image-rendering: pixelated; max-width: 90vw; height: auto; }
+    .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.4rem; margin-top: 0.6rem; }
+    .error { color: #ec7986; margin-top: 0.5rem; font-size: 0.85rem; }
+</style>
+
+@code {
+    string _watchUrl = "";
+    bool _auto;
+    string? _lastError;
+    DateTime? _lastFetchUtc;
+    System.Threading.Timer? _timer;
+
+    string SinceLast => _lastFetchUtc is null ? "" :
+        $"{(int)(DateTime.UtcNow - _lastFetchUtc.Value).TotalSeconds}s ago";
+
+    protected override void OnInitialized()
+    {
+        Bridge.WifiStatusChanged += OnWifi;
+    }
+
+    public void Dispose()
+    {
+        Bridge.WifiStatusChanged -= OnWifi;
+        _timer?.Dispose();
+    }
+
+    void OnWifi(WifiStatus s)
+    {
+        if (s.State == WifiState.Connected && !string.IsNullOrEmpty(s.IpAddress) && string.IsNullOrEmpty(_watchUrl))
+        {
+            _watchUrl = "http://" + s.IpAddress;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    void OnAutoToggled()
+    {
+        _timer?.Dispose();
+        _timer = null;
+        if (_auto)
+        {
+            _timer = new System.Threading.Timer(_ => InvokeAsync(FetchOnceAsync), null, 0, 1000);
+        }
+    }
+
+    async Task FetchOnceAsync()
+    {
+        if (string.IsNullOrEmpty(_watchUrl)) return;
+        try
+        {
+            // Cache-bust per request. Watch responds with header
+            //   "w=W h=H\n"
+            // followed by panel*panel*2 raw RGB565 BE bytes. Header lives in
+            // SpawnWear/Services/HttpServer.cs::ServeScreenshot.
+            var url = _watchUrl.TrimEnd('/') + "/screenshot.bin?t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var bytes = await Http.GetByteArrayAsync(url);
+            if (bytes.Length < 8 || bytes[0] != (byte)'w') throw new InvalidOperationException("Bad header");
+
+            int nl = System.Array.IndexOf(bytes, (byte)'\n');
+            if (nl < 4 || nl > 64) throw new InvalidOperationException("Header newline out of range");
+            var header = System.Text.Encoding.ASCII.GetString(bytes, 0, nl);
+            var (w, h) = ParseDim(header);
+
+            int pxOffset = nl + 1;
+            int pxCount = w * h;
+            if (bytes.Length < pxOffset + pxCount * 2) throw new InvalidOperationException("Truncated pixel payload");
+
+            // Convert RGB565 BE -> RGBA8 in a managed buffer, then push a single
+            // ImageData to the canvas. Could be zero-copy via TypedArray, but
+            // 200KB-class payloads are fast enough that simple wins.
+            var rgba = new byte[pxCount * 4];
+            for (int i = 0; i < pxCount; i++)
+            {
+                int v = (bytes[pxOffset + i * 2] << 8) | bytes[pxOffset + i * 2 + 1];
+                int r5 = (v >> 11) & 0x1F;
+                int g6 = (v >> 5)  & 0x3F;
+                int b5 =  v        & 0x1F;
+                rgba[i * 4    ] = (byte)((r5 << 3) | (r5 >> 2));
+                rgba[i * 4 + 1] = (byte)((g6 << 2) | (g6 >> 4));
+                rgba[i * 4 + 2] = (byte)((b5 << 3) | (b5 >> 2));
+                rgba[i * 4 + 3] = 255;
+            }
+
+            await PushToCanvas(w, h, rgba);
+            _lastError = null;
+            _lastFetchUtc = DateTime.UtcNow;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            _lastError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    static (int W, int H) ParseDim(string header)
+    {
+        // header like "w=410 h=502"
+        int w = 0, h = 0;
+        foreach (var tok in header.Split(' '))
+        {
+            var t = tok.Trim();
+            if (t.StartsWith("w=") && int.TryParse(t[2..], out var ww)) w = ww;
+            else if (t.StartsWith("h=") && int.TryParse(t[2..], out var hh)) h = hh;
+        }
+        if (w <= 0 || h <= 0) throw new InvalidOperationException("Bad header dims: " + header);
+        return (w, h);
+    }
+
+    async Task PushToCanvas(int w, int h, byte[] rgba)
+    {
+        // SpawnDev.BlazorJS typed Canvas / ImageData interop. No raw JS.
+        using var doc = JS.Get<Document>("document");
+        using var canvas = doc.GetElementById<HTMLCanvasElement>("mirror-canvas");
+        if (canvas is null) throw new InvalidOperationException("Canvas element not in DOM yet.");
+        canvas.Width = w;
+        canvas.Height = h;
+        using var ctx = canvas.GetContext<CanvasRenderingContext2D>("2d")
+            ?? throw new InvalidOperationException("Could not acquire 2d context.");
+
+        // Build an ImageData from the RGBA bytes via a Uint8ClampedArray.
+        using var clamped = new Uint8ClampedArray(rgba);
+        using var img = new ImageData(clamped, w, h);
+        ctx.PutImageData(img, 0, 0);
+
+        // Avoid a lint warning - tag the await.
+        await Task.CompletedTask;
+    }
+}

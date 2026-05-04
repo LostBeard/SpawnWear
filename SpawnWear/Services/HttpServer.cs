@@ -141,7 +141,12 @@ namespace SpawnWear.Services
             if (q >= 0) path = path.Substring(0, q);
             Debug.WriteLine("[Http] " + firstLine + " -> path=" + path);
 
-            if (path == "/" || path == "/index.html")
+            if (method == "OPTIONS")
+            {
+                // CORS preflight from SpawnWear.Companion (any origin).
+                ServeNoContent(client);
+            }
+            else if (path == "/" || path == "/index.html")
             {
                 ServeHtml(client);
             }
@@ -157,6 +162,12 @@ namespace SpawnWear.Services
             {
                 ServeNotFound(client);
             }
+        }
+
+        void ServeNoContent(Socket client)
+        {
+            string headers = "HTTP/1.1 204 No Content\r\nContent-Length: 0" + Cors + "\r\nConnection: close\r\n\r\n";
+            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
         }
 
         static int FindHeaderEnd(byte[] buf, int n)
@@ -240,10 +251,16 @@ namespace SpawnWear.Services
 
             string body = result + "\r\n";
             byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
         }
+
+        // Permissive CORS so SpawnWear.Companion (Blazor WASM running on a
+        // different origin / port) can fetch /screenshot.bin and POST /loadapp
+        // without hitting browser same-origin block. Watch is a development /
+        // LAN device — there's no auth boundary to defend.
+        const string Cors = "\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type";
 
         byte[] ReadBody(Socket client, int contentLength, byte[] firstChunk, int firstLen, int headerEnd)
         {
@@ -285,7 +302,7 @@ namespace SpawnWear.Services
         void ServeText(Socket client, string text)
         {
             byte[] body = Encoding.UTF8.GetBytes(text);
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n";
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + body.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(body, 0, body.Length, SocketFlags.None);
         }
@@ -314,7 +331,7 @@ namespace SpawnWear.Services
                 "fetchShot();" +
                 "</script></body></html>";
             byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + bodyBytes.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
         }
@@ -325,7 +342,7 @@ namespace SpawnWear.Services
             int totalPixels = _panelWidth * _panelHeight;
             byte[] hdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + "\n");
             int contentLen = hdr.Length + totalPixels * 2;
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + contentLen + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + contentLen + Cors + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(hdr, 0, hdr.Length, SocketFlags.None);
 
@@ -348,7 +365,7 @@ namespace SpawnWear.Services
         {
             string body = "404 not found\r\n";
             byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-            string headers = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + "\r\nConnection: close\r\n\r\n";
+            string headers = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
         }

@@ -82,8 +82,8 @@ The Bridge picks whichever is reachable. All three transports terminate at the s
 
 ### Phase 4c - Live screen mirror over WiFi
 
-- [ ] PWA queries `http://<watch-ip>:8080/screenshot.bin`, decodes the RGB565 BE payload, renders to a canvas
-- [ ] Refresh button + auto-refresh toggle (1 fps when WiFi is good)
+- [x] **`Mirror.razor` page** (2026-05-05) - Watch URL input (auto-fills from `WifiStatusChanged` IP), Refresh button + 1 Hz auto-refresh toggle, RGB565 BE → RGBA8 conversion in managed C#, single `ImageData` push to a `<canvas>` via SpawnDev.BlazorJS typed Canvas API. Cache-buster query string per fetch.
+- [x] **CORS headers on watch HTTP server** (2026-05-05) - `Access-Control-Allow-Origin: *` + OPTIONS preflight handler so the PWA can fetch `/screenshot.bin` from a different origin without the browser blocking.
 - [ ] Touch coordinates from the PWA → POST to a `/touch` endpoint → injected into the watch's event loop (this turns the PWA into a fully-remote launcher)
 
 ### Phase 5 onwards - Per-app mirrors
