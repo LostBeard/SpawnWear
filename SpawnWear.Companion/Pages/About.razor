@@ -1,0 +1,101 @@
+@page "/about"
+@using SpawnWear.Bridge
+@using SpawnWear.Bridge.WebRtc
+@using SpawnWear.Companion.Services
+@inject BridgeClient Bridge
+@inject WebRtcTransportFactory WebRtcFactory
+@inject BridgeWebRtcOptions WebRtcOptions
+@inject WatchPrefs Prefs
+
+<PageTitle>About &mdash; SpawnWear.Companion</PageTitle>
+
+<div class="page-head">
+    <h1>About</h1>
+</div>
+
+<p class="muted">Pair, mirror, and control your <a href="https://github.com/LostBeard/SpawnWear" target="_blank">SpawnWear</a> watch from the browser.</p>
+
+<div class="card">
+    <h3>Connection</h3>
+    <div class="kvs">
+        <div class="kv"><span>Bridge state</span><span class="@(Bridge.IsConnected ? "ok" : "muted")">@(Bridge.IsConnected ? "connected" : "not connected")</span></div>
+        <div class="kv"><span>Peer name</span><span class="mono">@(Bridge.PeerName ?? "-")</span></div>
+        <div class="kv"><span>Active transport</span><span class="mono">@TransportName()</span></div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>WebRTC hub</h3>
+    <div class="kvs">
+        <div class="kv"><span>Announce URL</span><span class="mono small">@WebRtcOptions.AnnounceUrl</span></div>
+        <div class="kv"><span>STUN servers</span><span class="mono small">@string.Join(", ", WebRtcOptions.StunUrls)</span></div>
+        <div class="kv"><span>TURN servers</span><span class="mono small">@(WebRtcOptions.TurnServers.Length == 0 ? "(none configured)" : string.Join(", ", WebRtcOptions.TurnServers.SelectMany(s => s.Urls)))</span></div>
+        <div class="kv"><span>Bundle policy</span><span class="mono small">@WebRtcOptions.BundlePolicy</span></div>
+        <div class="kv"><span>ICE transport</span><span class="mono small">@WebRtcOptions.IceTransportPolicy</span></div>
+        <div class="kv"><span>Local peer id</span><span class="mono small">@PeerIdHex()</span></div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Local prefs</h3>
+    <div class="kvs">
+        <div class="kv"><span>Watch URL</span><span class="mono small">@(Prefs.WatchUrl ?? "(not set)")</span></div>
+    </div>
+    <div style="margin-top: 0.6rem;">
+        <button class="ghost" @onclick="ClearPrefs">Clear browser-stored prefs</button>
+    </div>
+    @if (_clearedMessage is not null)
+    {
+        <div class="status ok">@_clearedMessage</div>
+    }
+</div>
+
+<div class="card">
+    <h3>Build</h3>
+    <p class="muted">SpawnWear.Bridge + SpawnWear.Companion are part of the <a href="https://github.com/LostBeard/SpawnWear" target="_blank">SpawnWear monorepo</a>. Source, milestones, and the full Phase 7 design (BLE pairing → Ed25519 trust → WebRTC always-on through hub.spawndev.com) live there. 79 wire-format + crypto-round-trip tests in <code>SpawnWear.Bridge.Tests</code> lock every byte the watch and Companion exchange.</p>
+</div>
+
+<style>
+    .page-head h1 { margin: 0; }
+    .muted { opacity: 0.7; font-size: 0.95rem; }
+    .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.2rem 1.4rem; margin-top: 0.6rem; }
+    .card h3 { margin: 0 0 0.6rem; font-size: 0.85rem; opacity: 0.55; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
+    .card a { color: #5b8def; text-decoration: none; }
+    .card a:hover { color: #9d6bff; text-decoration: underline; }
+    .kvs { display: flex; flex-direction: column; gap: 0.3rem; }
+    .kv { display: flex; justify-content: space-between; font-size: 0.88rem; gap: 0.8rem; }
+    .kv span:first-child { opacity: 0.6; flex-shrink: 0; }
+    .mono { font-family: ui-monospace, "SF Mono", monospace; }
+    .small { font-size: 0.78rem; }
+    .ok { color: #6dd9a4; }
+    .status { margin-top: 0.6rem; font-size: 0.85rem; }
+    .status.ok { color: #6dd9a4; }
+    button.ghost { background: #2c2f3a; color: #d8dae4; border: 0; padding: 0.45rem 0.95rem; border-radius: 8px; font-weight: 500; cursor: pointer; font-size: 0.85rem; }
+    button.ghost:hover { background: #3a3f4d; }
+</style>
+
+@code {
+    string? _clearedMessage;
+
+    string TransportName()
+    {
+        var t = Bridge.GetUnderlyingTransport();
+        if (t is null) return "(none)";
+        // Fully-qualified type name; trim "SpawnWear.Bridge." prefix.
+        var name = t.GetType().FullName ?? "(unknown)";
+        const string prefix = "SpawnWear.Bridge.";
+        return name.StartsWith(prefix) ? name.Substring(prefix.Length) : name;
+    }
+
+    string PeerIdHex()
+    {
+        var hex = Convert.ToHexString(WebRtcFactory.PeerId).ToLowerInvariant();
+        return hex.Length > 24 ? hex.Substring(0, 24) + "…" : hex;
+    }
+
+    void ClearPrefs()
+    {
+        Prefs.WatchUrl = null;
+        _clearedMessage = "Browser prefs cleared (paired-watch records preserved).";
+    }
+}
