@@ -1,6 +1,9 @@
 @page "/console"
+@using SpawnDev.BlazorJS
+@using SpawnDev.BlazorJS.JSObjects
 @using SpawnWear.Bridge
 @inject BridgeClient Bridge
+@inject BlazorJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Console &mdash; SpawnWear.Companion</PageTitle>
@@ -25,6 +28,7 @@
     <input type="text" placeholder="@(Bridge.IsConnected ? "type a command, then Enter" : "connect on Home first")"
            @bind="_cmd" @bind:event="oninput" disabled="@(!Bridge.IsConnected)" />
     <button type="submit" disabled="@(!Bridge.IsConnected || string.IsNullOrEmpty(_cmd))">Send</button>
+    <button type="button" class="ghost" @onclick="CopyLog" disabled="@(_lines.Count == 0)" title="Copy the entire log to your clipboard">Copy</button>
     <button type="button" class="ghost" @onclick="ClearLog">Clear</button>
 </form>
 
@@ -100,5 +104,23 @@
     {
         _lines.Clear();
         _error = null;
+    }
+
+    async Task CopyLog()
+    {
+        try
+        {
+            var text = string.Join("\n", _lines);
+            using var navigator = JS.Get<Navigator>("navigator");
+            using var clipboard = navigator.Clipboard;
+            if (clipboard is null)
+            {
+                _error = "Clipboard API not available in this browser.";
+                return;
+            }
+            await clipboard.WriteText(text);
+            _error = $"Copied {_lines.Count} lines to clipboard.";
+        }
+        catch (Exception ex) { _error = "Copy failed: " + ex.Message; }
     }
 }
