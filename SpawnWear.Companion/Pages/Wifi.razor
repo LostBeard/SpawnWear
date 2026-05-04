@@ -39,6 +39,20 @@
     }
 </form>
 
+@if (_wifi is { } w)
+{
+    <div class="card status-card">
+        <div class="status-row">
+            <span class="status-label">Watch reports</span>
+            <span class="status-pill @StatePillClass(w.State)">@w.State</span>
+        </div>
+        @if (!string.IsNullOrEmpty(w.IpAddress))
+        {
+            <div class="status-row"><span class="status-label">IP</span><span class="status-ip">@w.IpAddress</span></div>
+        }
+    </div>
+}
+
 <style>
     .page-head { display: flex; align-items: center; gap: 0.8rem; }
     .page-head h1 { margin: 0; }
@@ -63,6 +77,15 @@
     .status { margin-top: 0.9rem; font-size: 0.9rem; }
     .status.ok { color: #6dd9a4; }
     .status.error { color: #ec7986; }
+    .status-card { margin-top: 0.8rem; max-width: 32rem; }
+    .status-row { display: flex; justify-content: space-between; padding: 0.25rem 0; }
+    .status-label { opacity: 0.6; font-size: 0.85rem; }
+    .status-pill { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
+    .status-pill.connected    { background: rgba(70,210,140,0.18); color: #6dd9a4; }
+    .status-pill.connecting   { background: rgba(255,200,80,0.18); color: #f3c668; }
+    .status-pill.failed       { background: rgba(220,80,90,0.18); color: #ec7986; }
+    .status-pill.disconnected { background: #2c2f3a; color: #d8dae4; }
+    .status-ip { font-family: ui-monospace, "SF Mono", monospace; font-size: 0.85rem; }
 </style>
 
 @code {
@@ -71,36 +94,45 @@
     bool _showPw;
     string? _status;
     bool _isError;
+    WifiStatus? _wifi;
 
     protected override void OnInitialized()
     {
         Bridge.ConnectionChanged += OnConn;
+        Bridge.WifiStatusChanged += OnWifi;
     }
-    public void Dispose() => Bridge.ConnectionChanged -= OnConn;
+    public void Dispose()
+    {
+        Bridge.ConnectionChanged -= OnConn;
+        Bridge.WifiStatusChanged -= OnWifi;
+    }
     void OnConn(bool _) => InvokeAsync(StateHasChanged);
+    void OnWifi(WifiStatus s) { _wifi = s; InvokeAsync(StateHasChanged); }
+
+    static string StatePillClass(WifiState s) => s switch
+    {
+        WifiState.Connected    => "connected",
+        WifiState.Connecting   => "connecting",
+        WifiState.Failed       => "failed",
+        _                      => "disconnected",
+    };
 
     async Task SaveAndConnect()
     {
         _status = null; _isError = false;
         try
         {
-            // Wire format on the watch:
-            //   WifiCredentialsUuid write payload = [ssidLen:u8][ssid bytes][passwordLen:u8][password bytes]
-            // Mirrors what the firmware's WifiConfigService expects.
-            var ssidBytes = System.Text.Encoding.UTF8.GetBytes(_ssid);
-            var pwBytes   = System.Text.Encoding.UTF8.GetBytes(_password);
-            if (ssidBytes.Length > 32) throw new InvalidOperationException("SSID too long (max 32 bytes)");
-            if (pwBytes.Length > 64)   throw new InvalidOperationException("Password too long (max 64 bytes)");
+            if (_ssid.Contains('\n')) throw new InvalidOperationException("SSID may not contain newline");
 
-            var payload = new byte[1 + ssidBytes.Length + 1 + pwBytes.Length];
-            payload[0] = (byte)ssidBytes.Length;
-            Buffer.BlockCopy(ssidBytes, 0, payload, 1, ssidBytes.Length);
-            payload[1 + ssidBytes.Length] = (byte)pwBytes.Length;
-            Buffer.BlockCopy(pwBytes, 0, payload, 2 + ssidBytes.Length, pwBytes.Length);
+            // Firmware wire format on WifiCredentialsUuid:
+            //   "SSID\nPassword" as a single UTF-8 string, no length prefix.
+            //   See SpawnWear/WifiConfigService.cs::OnCredentialsWriteRequested.
+            var combined = _ssid + "\n" + _password;
+            var payload = System.Text.Encoding.UTF8.GetBytes(combined);
 
             await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCredentials, payload));
             await Bridge.SendAsync(new TransportMessage(ChannelIds.WifiCommand, new[] { BleUuids.WifiCmdConnect }));
-            _status = "Credentials sent. Watch will attempt to join.";
+            _status = "Credentials sent. Watch is attempting to join.";
         }
         catch (Exception ex) { _status = ex.Message; _isError = true; }
     }

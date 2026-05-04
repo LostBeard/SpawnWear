@@ -33,6 +33,7 @@ public class BridgeClient : IAsyncDisposable
     public event Action<BatteryState>? BatteryChanged;
     public event Action<ImuSample>? ImuSampleReceived;
     public event Action<RtcTime>? RtcTimeReceived;
+    public event Action<WifiStatus>? WifiStatusChanged;
     public event Action<string>? DebugLogReceived;
 
     /// <summary>Use the supplied transport for the next Connect call.
@@ -104,6 +105,17 @@ public class BridgeClient : IAsyncDisposable
                 }
                 break;
 
+            case ChannelIds.WifiStatus:
+                if (msg.Payload.Length >= 1)
+                {
+                    var state = (WifiState)msg.Payload[0];
+                    var ip = msg.Payload.Length > 1
+                        ? System.Text.Encoding.UTF8.GetString(msg.Payload, 1, msg.Payload.Length - 1)
+                        : "";
+                    WifiStatusChanged?.Invoke(new WifiStatus(state, ip));
+                }
+                break;
+
             case ChannelIds.RtcTime:
                 if (msg.Payload.Length >= 8)
                 {
@@ -153,3 +165,16 @@ public static class ChannelIds
 public readonly record struct BatteryState(byte Percent, bool IsCharging, bool IsVbusPresent, bool IsLowBattery, ushort VoltageMillivolts, short CurrentMilliamps);
 public readonly record struct ImuSample(short Ax, short Ay, short Az, short Gx, short Gy, short Gz);
 public readonly record struct RtcTime(ushort Year, byte Month, byte Day, byte Hour, byte Minute, byte Second, byte Weekday);
+
+/// <summary>WiFi connection state reported by the watch on
+/// <see cref="ChannelIds.WifiStatus"/>. Mirrors the firmware-side
+/// constants in <c>WifiConfigService.cs</c>.</summary>
+public enum WifiState : byte
+{
+    Disconnected = 0,
+    Connecting   = 1,
+    Connected    = 2,
+    Failed       = 3,
+}
+
+public readonly record struct WifiStatus(WifiState State, string IpAddress);
