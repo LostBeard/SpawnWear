@@ -8,7 +8,7 @@ When you discover something non-obvious - a chip quirk, a flashing gotcha, a reg
 
 ### Setup + tooling
 - **[flashing.md](flashing.md)** - First-flash recipe + daily dev loop. Covers: (1) the F5-in-VS daily app-deploy loop on COM9 (NO bootloader dance for routine code changes), (2) when you actually need the bootloader-mode dance vs not, (3) USB re-enumeration / COM port flips between bootloader (COM10) and runtime (COM9), (4) the cosmetic E4000 errors, (5) why `--masserase` is required on factory boards, (6) the matched-runtime / matched-libraries dance for the stable 1.x library line.
-- **[build-environment.md](build-environment.md)** - Building custom nf-interpreter firmware on Windows: ESP-IDF v5.4.x setup, MSYSTEM / Python 3.11 vs 3.13 gotchas, cmake preset config files, build flow, flashing custom builds
+- **[build-environment.md](build-environment.md)** - Building custom nf-interpreter firmware on Windows: ESP-IDF v5.5.4 setup, cmake preset config files, build flow, flashing custom builds. Active build source is `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` (NOT `_vendor-nf-interpreter\` in this repo's parent folder).
 
 ### Reverse-engineered chip behavior
 - **[co5300-quirks.md](co5300-quirks.md)** - AMOLED display driver: QSPI hybrid protocol, 2-pixel minimum writes, even-aligned address windows, init sequence, command table
