@@ -161,22 +161,54 @@ Even without working signatures, we can test the BLE plumbing today:
 
 That's the order: prove the BLE wiring, then drop in real crypto. Each step independently testable, no mock test (every byte is the real wire format).
 
-## Persistence surface (CORRECTION 2026-05-05 evening)
+## Persistence surface (RESOLVED 2026-05-05 - keypair lives at I:\spawnwear-pair.bin)
 
-The earlier draft of this doc named `nanoFramework.Hardware.Esp32.NonVolatileStorage` as the canonical KV store. **That package does not exist on nuget.org** — the search came up empty 2026-05-05 and the existing `nanoFramework.Hardware.Esp32 1.6.37` package only exposes `Gpio / HighResTimer / Logging / Configuration / DeviceTypes / DeviceFunction / EspNativeError / NativeMemory / Sleep / Touch.*`. No `NonVolatileStorage` type.
+Earlier drafts of this doc named `nanoFramework.Hardware.Esp32.NonVolatileStorage` as the canonical KV store. **That package does not exist on nuget.org** — the search came up empty and the `nanoFramework.Hardware.Esp32 1.6.37` package's namespace only contains `Gpio / HighResTimer / Logging / Configuration / DeviceTypes / DeviceFunction / EspNativeError / NativeMemory / Sleep / Touch.*`. No `NonVolatileStorage` type.
 
-Real persistence options on the watch:
+What we actually shipped (commit `e59f54d`): the runtime image **auto-mounts an internal LittleFS partition at `I:\` at boot**, before any managed code runs. `target_FileSystem.cpp` for ESP32_S3 in the LostBeard nf-interpreter fork registers it via:
+```cpp
+g_FS_NumVolumes = 1;
+FileSystemVolumeList::AddVolume(&g_FS_Volumes[0], "I:", 0,
+    g_AvailableFSInterfaces[0].streamDriver,  // LITTLEFS stream
+    g_AvailableFSInterfaces[0].fsDriver,      // LITTLEFS FS
+    0, FALSE);
+```
 
-1. **File on a mounted volume via `System.IO.File`** (`nanoFramework.System.IO.FileSystem` is already referenced).
-   - `D:\` = SD card. Works once `SdCardService.Mount()` succeeds. TJ's current unit reports `SDCard mount failed: VOLUME_NOT_FOUND` — no SD inserted, so this isn't an everyday-watch path.
-   - `C:\` (or `I:\`) = internal flash partition. Whether it's mounted depends on the nf-interpreter build's partition table. Probe at runtime with `DriveInfo.GetDrives()` before depending on it.
-2. **`nanoFramework.Windows.Storage 1.0.0` (stable)** — only ships file/folder API (`StorageFile`, `StorageFolder`, `KnownFolders`), no `ApplicationData.LocalSettings` KV store. Same underlying writable-volume requirement as option 1; just a different API shape.
-3. **mbedtls NVS / KV via a nanoCLR-exposed intrinsic in the LostBeard nf-interpreter fork** (the right end-state). When 7b lands the libdatachannel + mbedtls native component, expose `mbedtls`'s NVS-shaped storage (or ESP-IDF's `nvs_flash` directly) as a managed primitive at the same time. Single integration point, native-fast, partition-table-controlled.
-4. **Park persistence in 7a** — keypair regenerates per boot via `System.Random`. Re-pair via BLE every reboot. Acceptable as a pre-7b stopgap because the keypair's value is itself stub anyway.
+Properties of `I:`:
+- DriveType = 3 (Fixed) per `DriveInfo.GetDrives()`
+- Writable via `System.IO.File.WriteAllBytes` / `ReadAllBytes`
+- Persists across watch reboot AND across redeploy
+- Persists across SD card reformat (verified 2026-05-05 - TJ formatted SD to FAT32, `[Pair] Loaded keypair from I:\spawnwear-pair.bin (paired=yes)` still fired)
+- ~1MB usable for app data (rest of the LittleFS partition is reserved for runtime config)
+- `DriveInfo.TotalSize` getter throws on this volume - nf-interpreter quirk - but the volume itself is fully functional
 
-Recommended path for now: **option 4 until 7b**, then **option 3** alongside the libdatachannel integration. That avoids a throwaway file-based implementation that would be ripped out as soon as the proper KV intrinsic exists.
+`PairingService.cs` writes a 116-byte file at `I:\spawnwear-pair.bin` containing `[ourPub:32][ourPriv:32][peerPub:32][roomKey:20]`. Reload-on-boot + re-save-on-pair both verified live.
 
-If a non-stub keypair actually needs to survive reboot before 7b ships (e.g. for multi-day field testing), fall back to option 1 with a `DriveInfo.GetDrives()` probe at boot to confirm a writable volume exists.
+## SD card status (BLOCKED on runtime fix, 2026-05-05)
+
+The Waveshare 2.06 watch has a microSD slot (FAT32 1GB inserted, MOSI=GPIO1, SCK=GPIO2, MISO=GPIO3, SDCS=GPIO17 per the vendor wiki). The vendor's Arduino `07_LVGL_SD_Test.ino` reads it via `SD_MMC.setPins` + `SD_MMC.begin` — so the hardware is sound.
+
+But every nanoFramework managed-side mount config returns `CLR_E_VOLUME_NOT_FOUND`:
+
+| Bus | Pin functions | Bus param | Card detect | Result |
+|---|---|---|---|---|
+| SPI mode A | SPI1_CLOCK/MOSI/MISO @ 2/1/3 | spiBus=1 | default + explicit `enableCardDetectPin=false` | VOLUME_NOT_FOUND |
+| SPI mode B | SPI2_CLOCK/MOSI/MISO @ 2/1/3 | spiBus=2 | default | VOLUME_NOT_FOUND |
+| MMC mode  | SDMMC1_CLOCK/COMMAND/D0 @ 2/1/3 | dataWidth=_1_bit | default | VOLUME_NOT_FOUND |
+
+Pin-map readback via `Configuration.GetFunctionPin` confirms pins ARE landing in the bank `Storage_MountSpi`/`MountMMC` reads. So the bug is downstream in the runtime image's nf-interpreter→ESP-IDF integration — but `CONFIG_LOG_DEFAULT_LEVEL_NONE=y` silences `ESP_LOGE` so we can't see the actual ESP-IDF error from managed code.
+
+**Diagnostic-build path forward (started 2026-05-05 evening, awaiting bootloader-mode flash):**
+
+Mirroring TJ's existing `Esp32FlashDriver_Diag.cpp` pattern, added `Target_System_IO_FileSystem_Diag.cpp` that wraps `CLR_Debug::PrintfV` so the C-only `Target_System_IO_FileSystem.c` can write to the wire-protocol Debug.WriteLine channel. `LogMountResult` now logs the actual `errCode` + `esp_err_to_name` string. `Storage_MountSpi`/`MountMMC` log entry parameters too.
+
+Build artifacts ready:
+- `D:\users\tj\Projects\nf-interpreter\nf-interpreter\build\nanoCLR.bin` (1,640,560 bytes, 4% partition headroom)
+- Commit on `feature/qspi-display-driver` branch: `6da2485f [diag] SDCard MountSpi/MountMMC error path -> wire-protocol channel`
+
+Next: TJ does bootloader-mode dance, runs `tools/nf-flash-full.bat COM10`, PMIC power-cycles, then `dotnet run tools/nf-deploy.cs SpawnWear/bin/Debug COM9 25` surfaces the actual ESP-IDF error. Real fix follows from there.
+
+Until that lands, `I:\` remains the working storage path for keypair + small persistent state. SD-card-sized features (app loading >1MB, screenshot archives) are blocked on this fix.
 
 ## WebRTC peer integration (Stack B)
 
