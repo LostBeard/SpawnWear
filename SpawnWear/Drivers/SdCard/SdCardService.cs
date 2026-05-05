@@ -80,27 +80,54 @@ namespace SpawnWear.Drivers.SdCard
                 // pin routing as the closest match to what the vendor demo does
                 // - so once the runtime fix lands, nothing in this file should
                 // need to change.
-                // Match rt4k_esp32 SdManager.cs canonical pattern - SPI1_* +
-                // spiBus=1 + CardDetect explicitly disabled. CardDetectParameters
-                // default constructor leaves enableCardDetectPin=false in nf-interpreter
-                // managed-side defaults, but setting it explicitly removes a variable.
-                Configuration.SetPinFunction(2, DeviceFunction.SPI1_CLOCK);
-                Configuration.SetPinFunction(1, DeviceFunction.SPI1_MOSI);
-                Configuration.SetPinFunction(3, DeviceFunction.SPI1_MISO);
+                // Switching to MMC 1-bit mode now that we know the SPI path
+                // gets ESP_ERR_TIMEOUT during sdmmc_card_init (card not
+                // responding to CMD0/CMD8/ACMD41 within the SPI timeout).
+                // Vendor's Arduino 07_LVGL_SD_Test.ino uses SD_MMC at the
+                // same pins (CLK=2 CMD=1 D0=3) and works - MMC has different
+                // init timing + uses the dedicated SDMMC peripheral, so it
+                // bypasses whatever SPI-mode quirk this card has.
+                // Vendor pin_config.h defines SDMMC_CS=17 even for the MMC-mode
+                // demo - some Waveshare boards have a level-shifter / mux on the
+                // SD slot that needs GPIO 17 driven HIGH before the SDMMC
+                // peripheral can talk to the card. Explicitly drive it high
+                // before any pin-function assignment.
+                try
+                {
+                    var cs = BoardSetup.GpioController.OpenPin(17);
+                    cs.SetPinMode(System.Device.Gpio.PinMode.Output);
+                    cs.Write(System.Device.Gpio.PinValue.High);
+                    Debug.WriteLine("[SdCard] GPIO17 driven HIGH (SDCS / level-shifter enable)");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("[SdCard] GPIO17 setup EX: " + ex.Message);
+                }
 
-                int rbClk  = Configuration.GetFunctionPin(DeviceFunction.SPI1_CLOCK);
-                int rbMosi = Configuration.GetFunctionPin(DeviceFunction.SPI1_MOSI);
-                int rbMiso = Configuration.GetFunctionPin(DeviceFunction.SPI1_MISO);
-                Debug.WriteLine("[SdCard] pin map readback SPI1_*: clk=" + rbClk + " mosi=" + rbMosi + " miso=" + rbMiso);
+                Configuration.SetPinFunction(2, DeviceFunction.SDMMC1_CLOCK);
+                Configuration.SetPinFunction(1, DeviceFunction.SDMMC1_COMMAND);
+                Configuration.SetPinFunction(3, DeviceFunction.SDMMC1_D0);
 
-                var parameters = new SDCardSpiParameters
+                int rbClk = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_CLOCK);
+                int rbCmd = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_COMMAND);
+                int rbD0  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_D0);
+                Debug.WriteLine("[SdCard] pin map readback SDMMC1_*: clk=" + rbClk + " cmd=" + rbCmd + " d0=" + rbD0);
+
+                var parameters = new SDCardMmcParameters
                 {
                     slotIndex = 0,
-                    spiBus = 1,
-                    chipSelectPin = 17,
+                    dataWidth = SDCard.SDDataWidth._1_bit,
                 };
 
                 _card = new SDCard(parameters, new CardDetectParameters { enableCardDetectPin = false });
+
+                // SD cards need ~250-500ms after power-up before they reliably
+                // respond to CMD0 / CMD8. The watch's main 3.3V rail is on
+                // continuously so the card has been powered for as long as the
+                // watch has been on - but in case the SDMMC peripheral itself
+                // needs settling time after pin routing, sleep briefly before
+                // the first mount attempt.
+                System.Threading.Thread.Sleep(500);
                 return TryMount();
             }
             catch (Exception ex)

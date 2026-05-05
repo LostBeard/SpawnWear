@@ -138,6 +138,112 @@ public class PairingFlowTests
             await flow.PairAsync(smartTransport));
     }
 
+    [Fact]
+    public async Task PairAsync_throws_if_watch_handshake_response_is_wrong_length()
+    {
+        // Guards the check in PairingFlow.cs that "watchSignature.Length must
+        // be exactly PairingHandshake.SignatureLength (64)". A misbehaving
+        // watch firmware that returns a too-short signature shouldn't make it
+        // past the length gate to the verify step.
+        var crypto = new DotNetCrypto();
+        var store = new InMemoryPairingStore();
+
+        using var watchKey = await crypto.GenerateEd25519Key();
+        byte[] watchPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchKey));
+
+        // Return a too-short response (32 bytes instead of 64).
+        var smartTransport = new HookedFakeTransport(watchPubRaw, _ => Task.FromResult(new byte[32]));
+
+        var flow = new PairingFlow(crypto, store);
+        var ex = await Assert.ThrowsAsync<PairingException>(async () =>
+            await flow.PairAsync(smartTransport));
+        Assert.Contains("32 bytes", ex.Message);
+        Assert.Contains("64", ex.Message);
+        Assert.Empty(store.List());
+    }
+
+    [Fact]
+    public async Task PairAsync_re_pair_overwrites_prior_record_for_same_watch()
+    {
+        // Re-pairing the same watch (same watchPubKey) should replace the
+        // prior record - this is how "revoke the old companion" works in
+        // practice. The InMemoryPairingStore here keys by watchPubKey hex
+        // so Save() with the same key overwrites; assert that's actually
+        // what the flow drives, not just what the store would tolerate.
+        var crypto = new DotNetCrypto();
+        var store = new InMemoryPairingStore();
+
+        // Watch is the same identity across both pair attempts.
+        using var watchKey = await crypto.GenerateEd25519Key();
+        byte[] watchPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchKey));
+
+        Func<HookedFakeTransport> makeTransport = () =>
+            new HookedFakeTransport(watchPubRaw, async sentPayload =>
+            {
+                var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
+                var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+                return await crypto.Sign(watchKey, dom);
+            });
+
+        var flow = new PairingFlow(crypto, store);
+
+        // First pair.
+        var firstRecord = await flow.PairAsync(makeTransport(), friendlyName: "first companion");
+        Assert.Single(store.List());
+        Assert.Equal("first companion", store.Find(watchPubRaw)!.Value.FriendlyName);
+
+        // Second pair (same watch, fresh companion-side keypair generated
+        // internally by PairingFlow). Should overwrite, not add a second
+        // entry.
+        var secondRecord = await flow.PairAsync(makeTransport(), friendlyName: "second companion");
+        Assert.Single(store.List());
+        Assert.Equal("second companion", store.Find(watchPubRaw)!.Value.FriendlyName);
+
+        // Companion keypair changed (PairingFlow generates fresh per call).
+        Assert.NotEqual(firstRecord.OurPubKey, secondRecord.OurPubKey);
+
+        // Watch pubkey unchanged (same physical watch).
+        Assert.Equal(firstRecord.WatchPubKey, secondRecord.WatchPubKey);
+
+        // Room keys differ (each pair generates a fresh 20-byte random).
+        Assert.NotEqual(firstRecord.RoomKey, secondRecord.RoomKey);
+    }
+
+    [Fact]
+    public async Task PairAsync_two_different_watches_persist_as_separate_records()
+    {
+        // Multi-watch scenario: pair watch A, then pair watch B (different
+        // pubkey). Both records should be stored side by side, no overwrite.
+        var crypto = new DotNetCrypto();
+        var store = new InMemoryPairingStore();
+
+        using var watchAKey = await crypto.GenerateEd25519Key();
+        using var watchBKey = await crypto.GenerateEd25519Key();
+        byte[] watchAPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchAKey));
+        byte[] watchBPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchBKey));
+
+        // Watch A and watch B sign with their respective keys.
+        Func<byte[], SpawnDev.BlazorJS.Cryptography.PortableEd25519Key, HookedFakeTransport> makeTransport =
+            (watchPubRaw, watchKey) =>
+                new HookedFakeTransport(watchPubRaw, async sentPayload =>
+                {
+                    var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
+                    var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+                    return await crypto.Sign(watchKey, dom);
+                });
+
+        var flow = new PairingFlow(crypto, store);
+
+        await flow.PairAsync(makeTransport(watchAPubRaw, watchAKey), friendlyName: "Watch A");
+        Assert.Single(store.List());
+
+        await flow.PairAsync(makeTransport(watchBPubRaw, watchBKey), friendlyName: "Watch B");
+        Assert.Equal(2, store.List().Count);
+
+        Assert.Equal("Watch A", store.Find(watchAPubRaw)!.Value.FriendlyName);
+        Assert.Equal("Watch B", store.Find(watchBPubRaw)!.Value.FriendlyName);
+    }
+
     /// <summary>FakeTransport variant that lets a test plug in a callback
     /// to dynamically build the handshake response based on the captured
     /// companion write.</summary>
