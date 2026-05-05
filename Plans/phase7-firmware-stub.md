@@ -252,7 +252,7 @@ Until that lands, `I:\` remains the working storage path for keypair + small per
 3. **Phase 7c — WatchWebRtcTransport.** Firmware-side ITransport-equivalent that mirrors the Companion's `WebRtcTransport`. Implements the `WebRtcChallenge` mutual-verify flow (byte layouts already locked) + `WebRtcDataFraming` (already locked) over libdatachannel's data channel.
 4. **Phase 7d — production hub.** TJ's `hub.spawndev.com:44365` already runs the tracker + STUN. The TURN cred-minting flow (open question #6 in [`phase7-webrfc-handoff.md`](phase7-webrtc-handoff.md)) gets settled here; the watch's `WatchWebRtcTransport` mints TURN creds via whichever pattern wins (probably tracker-gated ephemeral with a per-pair derived secret).
 
-Each phase independently verifiable; each builds on what's locked before. The Bridge-side wire formats (BLE pairing handshake, WebRTC challenge, WebRTC data framing) are already locked by 26 tests in `SpawnWear.Bridge.Tests` — when phases 7b/7c land, they hit the same byte layouts the Companion already speaks fluently.
+Each phase independently verifiable; each builds on what's locked before. The Bridge-side wire formats (BLE pairing handshake, WebRTC challenge, WebRTC data framing) AND the **Phase 7a → 7b interlock** (paired `WatchPubKey` is the trust anchor for verifying that watch's WebRTC challenge response, paired `OurPrivKey` round-trips PKCS8 and re-imports as a sign-capable key) are now locked by 113 tests in `SpawnWear.Bridge.Tests` (as of 2026-05-04 — 31 added in `BridgeClientLogBufferTests.cs` / `BridgeClientSendPathTests.cs` / `PairingWebRtcIntegrationTests.cs`). When phases 7b/7c land, they hit the same byte layouts AND the same key-storage contract the Companion already speaks fluently.
 
 ## Pairing UI
 

@@ -4,6 +4,16 @@ All notable changes to `SpawnWear.Bridge` are recorded here. Format follows [Kee
 
 ## [Unreleased]
 
+### Tests (2026-05-04 — Riker)
+
+Three new unit-test files in `SpawnWear.Bridge.Tests` driving real production code paths via real `TransportMessage` bytes through `FakeTransport` / `HookedFakeTransport`. No mocks beyond the wire-stub transports. Bridge.Tests grew 82 → 113 tests (31 new).
+
+- `BridgeClientLogBufferTests.cs` (8 tests) — pins the `_recentLogLines` ring buffer that backs `Console.razor`'s late-mount backfill: capture path, live event coexistence, FIFO ordering, 500-line cap with oldest-evicted, clear semantics, channel-id isolation (battery/button/rtc don't pollute), multi-line frame preservation, snapshot independence.
+- `BridgeClientSendPathTests.cs` (13 tests) — pins the exact wire bytes for every outbound BLE write the Companion makes: `SetWifiAsync` order + UTF-8 + null-password normalization + newline-in-SSID rejection, `DisconnectWifiAsync` 0x02, `ForgetWifiAsync` 0x03, `ScanWifiAsync` 0x01, `SendDebugCommandAsync` UTF-8 + empty-rejection, `SendAsync` without transport throws.
+- `PairingWebRtcIntegrationTests.cs` (10 tests) — END-TO-END Phase 7a → Phase 7b interlock. Each test runs `PairingFlow.PairAsync` to produce a real `PairingRecord`, then runs `WebRtcChallenge` primitives against that record's stored keys. Covers: companion verifies watch-signed challenge under stored `WatchPubKey`; companion's stored `OurPrivKey` (PKCS8) re-imports + signs verifiable under stored `OurPubKey`; imposter watch with separate keypair fails; tampered nonce + tampered signature both rejected; multi-watch trust-anchor isolation; re-pair invalidates old companion privkey; replay-detection via echoed-nonce mismatch; 1000-call nonce uniqueness; record round-trips with sign-capable fidelity.
+
+Mutation-tested: 4 production-code mutations break specific tests as predicted (capacity 500→100, AddLast→AddFirst, WifiCmdConnect→WifiCmdDisconnect, SSID-newline validation removed); 2 mutations on PairingFlow + WebRtcChallenge break 5 integration tests as predicted.
+
 ## [0.1.0] — 2026-05-05
 
 Initial public surface.
