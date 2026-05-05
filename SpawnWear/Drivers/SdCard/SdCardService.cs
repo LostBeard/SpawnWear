@@ -80,22 +80,27 @@ namespace SpawnWear.Drivers.SdCard
                 // pin routing as the closest match to what the vendor demo does
                 // - so once the runtime fix lands, nothing in this file should
                 // need to change.
-                Configuration.SetPinFunction(2, DeviceFunction.SDMMC1_CLOCK);
-                Configuration.SetPinFunction(1, DeviceFunction.SDMMC1_COMMAND);
-                Configuration.SetPinFunction(3, DeviceFunction.SDMMC1_D0);
+                // Match rt4k_esp32 SdManager.cs canonical pattern - SPI1_* +
+                // spiBus=1 + CardDetect explicitly disabled. CardDetectParameters
+                // default constructor leaves enableCardDetectPin=false in nf-interpreter
+                // managed-side defaults, but setting it explicitly removes a variable.
+                Configuration.SetPinFunction(2, DeviceFunction.SPI1_CLOCK);
+                Configuration.SetPinFunction(1, DeviceFunction.SPI1_MOSI);
+                Configuration.SetPinFunction(3, DeviceFunction.SPI1_MISO);
 
-                int rbClk  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_CLOCK);
-                int rbCmd  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_COMMAND);
-                int rbD0   = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_D0);
-                Debug.WriteLine("[SdCard] pin map readback SDMMC1_*: clk=" + rbClk + " cmd=" + rbCmd + " d0=" + rbD0);
+                int rbClk  = Configuration.GetFunctionPin(DeviceFunction.SPI1_CLOCK);
+                int rbMosi = Configuration.GetFunctionPin(DeviceFunction.SPI1_MOSI);
+                int rbMiso = Configuration.GetFunctionPin(DeviceFunction.SPI1_MISO);
+                Debug.WriteLine("[SdCard] pin map readback SPI1_*: clk=" + rbClk + " mosi=" + rbMosi + " miso=" + rbMiso);
 
-                var parameters = new SDCardMmcParameters
+                var parameters = new SDCardSpiParameters
                 {
                     slotIndex = 0,
-                    dataWidth = SDCard.SDDataWidth._1_bit,
+                    spiBus = 1,
+                    chipSelectPin = 17,
                 };
 
-                _card = new SDCard(parameters, new CardDetectParameters());
+                _card = new SDCard(parameters, new CardDetectParameters { enableCardDetectPin = false });
                 return TryMount();
             }
             catch (Exception ex)
