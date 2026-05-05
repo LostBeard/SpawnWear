@@ -40,15 +40,59 @@ namespace SpawnWear.Drivers.SdCard
         {
             try
             {
-                Configuration.SetPinFunction(2, DeviceFunction.SPI2_CLOCK);
-                Configuration.SetPinFunction(1, DeviceFunction.SPI2_MOSI);
-                Configuration.SetPinFunction(3, DeviceFunction.SPI2_MISO);
+                // 2026-05-04: SD card mount FAILS at runtime image level on
+                // ESP32_S3_BLE-1.16.0.563 - independent of:
+                //   - bus mode tried (SPI mode AND 1-bit MMC mode both fail)
+                //   - SPI bus selection (SPI2_HOST and SPI3_HOST both fail)
+                //   - card filesystem format (FAT16 and FAT32 both fail)
+                //   - pin map correctness (verified via Configuration.GetFunctionPin
+                //     readback - confirmed pins are routed correctly)
+                //
+                // All attempts return CLR_E_VOLUME_NOT_FOUND from MountNative,
+                // which means Storage_MountSpi/MountMMC's underlying call to
+                // esp_vfs_fat_sdspi_mount/esp_vfs_fat_sdmmc_mount returned an
+                // ESP-IDF error (logged via ESP_LOGE in
+                // Target_System_IO_FileSystem.c::LogMountResult).
+                //
+                // ESP_LOGE output goes to USB-CDC raw text stream, not the
+                // wire-protocol-multiplexed Debug.WriteLine channel that
+                // nf-deploy.cs / VS Output captures. The `Logging` class in
+                // nanoFramework.Hardware.Esp32 1.6.37 is `internal` so we
+                // can't reach the ESP_LOG channel from managed code either.
+                //
+                // Path forward: rebuild the nanoCLR runtime image from the
+                // LostBeard nf-interpreter fork with explicit Debug.WriteLine
+                // calls added to Storage_MountSpi/MountMMC error paths so the
+                // actual ESP-IDF error code (ESP_FAIL / ESP_ERR_*) surfaces in
+                // the wire-protocol log. Then we know whether the failure is
+                // bus init, card init, or FATFS mount, and we can target a fix.
+                //
+                // Until that rebuild lands, SD card is not usable from managed
+                // code on this watch. Internal flash at I:\ remains the
+                // working storage path (~1MB LittleFS partition). PairingService
+                // already uses it for keypair persistence.
+                //
+                // Vendor Arduino demo (07_LVGL_SD_Test.ino) does work via
+                // SD_MMC.setPins + SD_MMC.begin - so the hardware is fine,
+                // the issue is purely in the nanoFramework runtime stack.
+                //
+                // Currently configured for 1-bit MMC mode with verified-correct
+                // pin routing as the closest match to what the vendor demo does
+                // - so once the runtime fix lands, nothing in this file should
+                // need to change.
+                Configuration.SetPinFunction(2, DeviceFunction.SDMMC1_CLOCK);
+                Configuration.SetPinFunction(1, DeviceFunction.SDMMC1_COMMAND);
+                Configuration.SetPinFunction(3, DeviceFunction.SDMMC1_D0);
 
-                var parameters = new SDCardSpiParameters
+                int rbClk  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_CLOCK);
+                int rbCmd  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_COMMAND);
+                int rbD0   = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_D0);
+                Debug.WriteLine("[SdCard] pin map readback SDMMC1_*: clk=" + rbClk + " cmd=" + rbCmd + " d0=" + rbD0);
+
+                var parameters = new SDCardMmcParameters
                 {
                     slotIndex = 0,
-                    spiBus = 2,
-                    chipSelectPin = 17,
+                    dataWidth = SDCard.SDDataWidth._1_bit,
                 };
 
                 _card = new SDCard(parameters, new CardDetectParameters());
