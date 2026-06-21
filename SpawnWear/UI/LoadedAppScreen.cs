@@ -101,39 +101,67 @@ namespace SpawnWear.UI
         static string Instantiate(byte[] peBytes, out ISpawnApp app)
         {
             app = null;
-            if (peBytes == null || peBytes.Length == 0) return "ERROR: empty payload";
+            if (peBytes == null || peBytes.Length == 0)
+                return "ERROR: app payload was empty (0 bytes).";
+
+            // Each failure mode gets its OWN actionable message. nanoFramework's
+            // default for an unloadable/incompatible .pe is an opaque
+            // "Exception was thrown: System.Exception" - useless to a user staring
+            // at the Companion. The most common real cause is a reference
+            // mismatch: an app built against a different SpawnWear.AppContracts
+            // version (or against the firmware before a change) - so say that.
+            System.Reflection.Assembly asm;
             try
             {
-                var asm = System.Reflection.Assembly.Load(peBytes);
-                if (asm == null) return "ERROR: Assembly.Load returned null";
-
-                System.Type[] types;
-                try { types = asm.GetTypes(); } catch { types = new System.Type[0]; }
-                System.Type appType = null;
-                foreach (var t in types)
-                {
-                    if (t == null || !t.IsClass || t.IsAbstract) continue;
-                    var ifaces = t.GetInterfaces();
-                    foreach (var i in ifaces)
-                    {
-                        if (i == typeof(ISpawnApp)) { appType = t; break; }
-                    }
-                    if (appType != null) break;
-                }
-                if (appType == null) return "ERROR: no ISpawnApp implementer in assembly";
-
-                var ctor = appType.GetConstructor(new System.Type[0]);
-                if (ctor == null) return "ERROR: app type has no parameterless constructor";
-
-                app = (ISpawnApp)ctor.Invoke(null);
-                return "OK";
+                asm = System.Reflection.Assembly.Load(peBytes);
             }
             catch (Exception ex)
             {
-                string result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
-                Debug.WriteLine("[LoadedApp] Instantiate " + result);
-                return result;
+                Debug.WriteLine("[LoadedApp] Assembly.Load failed: " + ex.GetType().Name + ": " + ex.Message);
+                return "ERROR: could not load the app - it is corrupt, or built against a different firmware / SpawnWear.AppContracts version. Rebuild the app against the current firmware and reinstall it.";
             }
+            if (asm == null)
+                return "ERROR: could not load the app (Assembly.Load returned null) - the .pe is corrupt or incompatible with this firmware.";
+
+            System.Type[] types;
+            try
+            {
+                types = asm.GetTypes();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[LoadedApp] GetTypes failed: " + ex.GetType().Name + ": " + ex.Message);
+                return "ERROR: the app loaded but its types could not be read - it likely references something this firmware doesn't have. Rebuild against the current firmware and reinstall.";
+            }
+
+            System.Type appType = null;
+            foreach (var t in types)
+            {
+                if (t == null || !t.IsClass || t.IsAbstract) continue;
+                var ifaces = t.GetInterfaces();
+                foreach (var i in ifaces)
+                {
+                    if (i == typeof(ISpawnApp)) { appType = t; break; }
+                }
+                if (appType != null) break;
+            }
+            if (appType == null)
+                return "ERROR: no class implementing ISpawnApp was found - is this actually a SpawnWear app? (It must reference SpawnWear.AppContracts and implement ISpawnApp.)";
+
+            var ctor = appType.GetConstructor(new System.Type[0]);
+            if (ctor == null)
+                return "ERROR: app '" + appType.Name + "' has no parameterless constructor - add a public constructor that takes no arguments.";
+
+            try
+            {
+                app = (ISpawnApp)ctor.Invoke(null);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[LoadedApp] ctor.Invoke failed: " + ex.GetType().Name + ": " + ex.Message);
+                return "ERROR: app '" + appType.Name + "' threw " + ex.GetType().Name + " in its constructor. Keep the constructor cheap - do setup work in OnCreate instead.";
+            }
+            return "OK";
         }
 
         public void Invalidate() { _needsRepaint = true; }
