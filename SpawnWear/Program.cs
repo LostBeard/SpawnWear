@@ -92,7 +92,7 @@ namespace SpawnWear
             // re-arms the loop. Power note: AMOLED black background = ~0 mA per
             // off pixel; partial Flush of just the digits region pushes ~25 KB/s
             // instead of 411 KB for the full panel.
-            Debug.WriteLine("[SpawnWear] M0 - Main reached");
+            Debug.WriteLine("[SpawnWear] M0 - Main reached (AppContracts assembly split)");
 
             // Phase 3 Logger system service - created first so every subsystem can log
             // through it; its BLE sink is wired once the debug-log characteristic exists.

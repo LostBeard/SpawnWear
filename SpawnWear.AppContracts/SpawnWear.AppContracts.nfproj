@@ -8,28 +8,31 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectTypeGuids>{11A8DD76-328B-46DF-9F39-F559912D0360};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <ProjectGuid>e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0</ProjectGuid>
+    <ProjectGuid>b2c3d4e5-f6a7-4901-b2c3-d4e5f6a78901</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <FileAlignment>512</FileAlignment>
-    <RootNamespace>PaintApp</RootNamespace>
-    <AssemblyName>PaintApp</AssemblyName>
+    <RootNamespace>SpawnWear.AppContracts</RootNamespace>
+    <AssemblyName>SpawnWear.AppContracts</AssemblyName>
     <TargetFrameworkVersion>v1.0</TargetFrameworkVersion>
   </PropertyGroup>
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
-    <Compile Include="PaintApp.cs" />
+    <Compile Include="IDisplayBuffer.cs" />
+    <Compile Include="ILogger.cs" />
+    <Compile Include="IPowerService.cs" />
+    <Compile Include="IRtcService.cs" />
+    <Compile Include="IServiceHost.cs" />
+    <Compile Include="ISpawnApp.cs" />
+    <Compile Include="IWifiService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
-      <HintPath>..\..\packages\nanoFramework.CoreLibrary.1.17.11\lib\mscorlib.dll</HintPath>
+      <HintPath>..\packages\nanoFramework.CoreLibrary.1.17.11\lib\mscorlib.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics.Core">
-      <HintPath>..\..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Core.dll</HintPath>
-    </Reference>
-    <Reference Include="SpawnWear">
-      <HintPath>..\..\SpawnWear\bin\Debug\SpawnWear.exe</HintPath>
+      <HintPath>..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Core.dll</HintPath>
     </Reference>
   </ItemGroup>
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets')" />

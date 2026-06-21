@@ -23,14 +23,19 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
-      <HintPath>..\..\packages\nanoFramework.CoreLibrary.1.17.11\lib\mscorlib.dll</HintPath>
+      <HintPath>..\..\..\packages\nanoFramework.CoreLibrary.1.17.11\lib\mscorlib.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics.Core">
-      <HintPath>..\..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Core.dll</HintPath>
+      <HintPath>..\..\..\packages\nanoFramework.Graphics.Core.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.Core.dll</HintPath>
     </Reference>
-    <Reference Include="SpawnWear">
-      <HintPath>..\..\SpawnWear\bin\Debug\SpawnWear.exe</HintPath>
-    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Loadable apps bind to the shared contract assembly, NOT the firmware
+         exe, so they survive firmware updates without a rebuild. -->
+    <ProjectReference Include="..\..\..\SpawnWear.AppContracts\SpawnWear.AppContracts.nfproj">
+      <Project>{b2c3d4e5-f6a7-4901-b2c3-d4e5f6a78901}</Project>
+      <Name>SpawnWear.AppContracts</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets')" />
   <ProjectExtensions>
