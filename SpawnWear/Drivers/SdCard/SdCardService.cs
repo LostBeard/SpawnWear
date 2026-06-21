@@ -6,29 +6,25 @@ using nanoFramework.System.IO.FileSystem;
 namespace SpawnWear.Drivers.SdCard
 {
     /// <summary>
-    /// Mounts the watch's microSD slot. The Waveshare 2.06 watch wiki documents
-    /// the slot as SPI-mode (interface table on
-    /// https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.06):
+    /// Mounts the watch's microSD slot via SDSPI (SD card in SPI mode). The volume
+    /// surfaces at `D:\`.
     ///
-    ///   CS   (SS)   = GPIO 17  -> chipSelectPin
-    ///   DI   (MOSI) = GPIO 1   -> SPI2_MOSI
-    ///   DO   (MISO) = GPIO 3   -> SPI2_MISO
-    ///   SCK  (SCLK) = GPIO 2   -> SPI2_CLOCK
+    /// WHY SPI, not SDMMC: this watch's dedicated SDMMC controller is dead under the
+    /// nanoFramework runtime - proven exhaustively 2026-06-20: the controller accepts a
+    /// command (start_cmd clears) but never clocks it out (no command-done, no
+    /// response-timeout), with every SDMMC/clock register byte-identical to a bare
+    /// ESP-IDF app that mounts the same card. Root cause unlocated; SDSPI bypasses it.
+    /// SD-over-SPI on the SPI peripheral (which works in nf - it drives the display)
+    /// initializes the card and reads real data. Same lesson as the QSPI display: on
+    /// this board, reach for the SPI bus when a dedicated controller fights.
+    /// See SpawnWear/sd-card-nanoframework-dead-clock-investigation.md.
     ///
-    /// (The vendor's `07_LVGL_SD_Test` Arduino demo uses SD_MMC because the
-    /// ESP32-S3 SDMMC peripheral can address the same pins, but the wiki's
-    /// SPI mapping is the documented contract.)
+    /// Bus map: the CO5300 display owns SPI2_HOST (QSPI), so the SD uses SPI bus 2 ->
+    /// native SPI3_HOST (busIndex 1). Pins SCLK=2 / MOSI(CMD)=1 / MISO(D0)=3, CS=GPIO17.
+    /// AXP2101 DC1 + ALDO1 (Axp2101Driver) still powers the card rail.
     ///
-    /// On successful mount the volume surfaces at `D:\` per nanoFramework's
-    /// SDCardSpiParameters.slotIndex doc.
-    ///
-    /// Note 2026-05-05: small (1GB) cards typically ship pre-formatted FAT16,
-    /// which the runtime's FATFS rejects with CLR_E_VOLUME_NOT_FOUND. Reformat
-    /// to FAT32 (Windows: `format X: /FS:FAT32 /Q`) before expecting Mount()
-    /// to succeed. In-watch reformat via DriveInfo.Format isn't viable on this
-    /// runtime - the SD slot's mount failure prevents drive registration, so
-    /// there's no DriveInfo for the format to operate on. The /sdformat HTTP
-    /// endpoint is wired but currently 500s for the same reason.
+    /// Note: small (1GB) cards often ship FAT16/FAT12; the runtime FATFS rejects those
+    /// with CLR_E_VOLUME_NOT_FOUND - reformat to FAT32 (or enable exFAT).
     /// </summary>
     public class SdCardService
     {
@@ -36,99 +32,44 @@ namespace SpawnWear.Drivers.SdCard
         public bool IsMounted { get; private set; }
         public string MountPath => "D:\\";
 
+        // A few managed mount retries on top of the runtime's own retry loop, to ride
+        // out a transient marginal contact at boot. A persistently bad contact won't
+        // recover here (it needs the card reseated).
+        const int MountRetries = 3;
+
         public bool Initialize()
         {
             try
             {
-                // 2026-05-04: SD card mount FAILS at runtime image level on
-                // ESP32_S3_BLE-1.16.0.563 - independent of:
-                //   - bus mode tried (SPI mode AND 1-bit MMC mode both fail)
-                //   - SPI bus selection (SPI2_HOST and SPI3_HOST both fail)
-                //   - card filesystem format (FAT16 and FAT32 both fail)
-                //   - pin map correctness (verified via Configuration.GetFunctionPin
-                //     readback - confirmed pins are routed correctly)
-                //
-                // All attempts return CLR_E_VOLUME_NOT_FOUND from MountNative,
-                // which means Storage_MountSpi/MountMMC's underlying call to
-                // esp_vfs_fat_sdspi_mount/esp_vfs_fat_sdmmc_mount returned an
-                // ESP-IDF error (logged via ESP_LOGE in
-                // Target_System_IO_FileSystem.c::LogMountResult).
-                //
-                // ESP_LOGE output goes to USB-CDC raw text stream, not the
-                // wire-protocol-multiplexed Debug.WriteLine channel that
-                // nf-deploy.cs / VS Output captures. The `Logging` class in
-                // nanoFramework.Hardware.Esp32 1.6.37 is `internal` so we
-                // can't reach the ESP_LOG channel from managed code either.
-                //
-                // Path forward: rebuild the nanoCLR runtime image from the
-                // LostBeard nf-interpreter fork with explicit Debug.WriteLine
-                // calls added to Storage_MountSpi/MountMMC error paths so the
-                // actual ESP-IDF error code (ESP_FAIL / ESP_ERR_*) surfaces in
-                // the wire-protocol log. Then we know whether the failure is
-                // bus init, card init, or FATFS mount, and we can target a fix.
-                //
-                // Until that rebuild lands, SD card is not usable from managed
-                // code on this watch. Internal flash at I:\ remains the
-                // working storage path (~1MB LittleFS partition). PairingService
-                // already uses it for keypair persistence.
-                //
-                // Vendor Arduino demo (07_LVGL_SD_Test.ino) does work via
-                // SD_MMC.setPins + SD_MMC.begin - so the hardware is fine,
-                // the issue is purely in the nanoFramework runtime stack.
-                //
-                // Currently configured for 1-bit MMC mode with verified-correct
-                // pin routing as the closest match to what the vendor demo does
-                // - so once the runtime fix lands, nothing in this file should
-                // need to change.
-                // Switching to MMC 1-bit mode now that we know the SPI path
-                // gets ESP_ERR_TIMEOUT during sdmmc_card_init (card not
-                // responding to CMD0/CMD8/ACMD41 within the SPI timeout).
-                // Vendor's Arduino 07_LVGL_SD_Test.ino uses SD_MMC at the
-                // same pins (CLK=2 CMD=1 D0=3) and works - MMC has different
-                // init timing + uses the dedicated SDMMC peripheral, so it
-                // bypasses whatever SPI-mode quirk this card has.
-                // Vendor pin_config.h defines SDMMC_CS=17 even for the MMC-mode
-                // demo - some Waveshare boards have a level-shifter / mux on the
-                // SD slot that needs GPIO 17 driven HIGH before the SDMMC
-                // peripheral can talk to the card. Explicitly drive it high
-                // before any pin-function assignment.
-                try
-                {
-                    var cs = BoardSetup.GpioController.OpenPin(17);
-                    cs.SetPinMode(System.Device.Gpio.PinMode.Output);
-                    cs.Write(System.Device.Gpio.PinValue.High);
-                    Debug.WriteLine("[SdCard] GPIO17 driven HIGH (SDCS / level-shifter enable)");
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("[SdCard] GPIO17 setup EX: " + ex.Message);
-                }
+                // SDSPI (SD card in SPI mode). The watch's dedicated SDMMC controller is dead
+                // under nanoFramework (it accepts a command but never clocks it out; proven
+                // 2026-06-20). SD-over-SPI on the SPI peripheral works (card_init=0x0, real
+                // reads). The display owns SPI2_HOST (QSPI), so the SD uses SPI bus 2 ->
+                // native SPI3_HOST. Pins: SCLK=2, MOSI=CMD=1, MISO=D0=3, CS=17.
+                Configuration.SetPinFunction(BoardPins.SdClk, DeviceFunction.SPI2_CLOCK);
+                Configuration.SetPinFunction(BoardPins.SdCmd, DeviceFunction.SPI2_MOSI);
+                Configuration.SetPinFunction(BoardPins.SdData, DeviceFunction.SPI2_MISO);
 
-                Configuration.SetPinFunction(2, DeviceFunction.SDMMC1_CLOCK);
-                Configuration.SetPinFunction(1, DeviceFunction.SDMMC1_COMMAND);
-                Configuration.SetPinFunction(3, DeviceFunction.SDMMC1_D0);
-
-                int rbClk = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_CLOCK);
-                int rbCmd = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_COMMAND);
-                int rbD0  = Configuration.GetFunctionPin(DeviceFunction.SDMMC1_D0);
-                Debug.WriteLine("[SdCard] pin map readback SDMMC1_*: clk=" + rbClk + " cmd=" + rbCmd + " d0=" + rbD0);
-
-                var parameters = new SDCardMmcParameters
+                var parameters = new SDCardSpiParameters
                 {
-                    slotIndex = 0,
-                    dataWidth = SDCard.SDDataWidth._1_bit,
+                    spiBus = 2,                     // managed bus 2 -> busIndex 1 -> SPI3_HOST
+                    chipSelectPin = BoardPins.SdCs, // GPIO17
                 };
 
                 _card = new SDCard(parameters, new CardDetectParameters { enableCardDetectPin = false });
 
-                // SD cards need ~250-500ms after power-up before they reliably
-                // respond to CMD0 / CMD8. The watch's main 3.3V rail is on
-                // continuously so the card has been powered for as long as the
-                // watch has been on - but in case the SDMMC peripheral itself
-                // needs settling time after pin routing, sleep briefly before
-                // the first mount attempt.
-                System.Threading.Thread.Sleep(500);
-                return TryMount();
+                System.Threading.Thread.Sleep(200); // let the card power rail settle
+                for (int attempt = 1; attempt <= MountRetries; attempt++)
+                {
+                    if (TryMount())
+                    {
+                        Debug.WriteLine("[SdCard] mounted on attempt " + attempt);
+                        return true;
+                    }
+                    System.Threading.Thread.Sleep(150);
+                }
+                Debug.WriteLine("[SdCard] mount failed after " + MountRetries + " attempts (check card seating)");
+                return false;
             }
             catch (Exception ex)
             {

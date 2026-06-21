@@ -32,6 +32,7 @@ namespace SpawnWear
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
         static SdCardService _sd;
+        static bool _sdIsolationTest = false;
         static HttpServer _http;
         static Bitmap _fb; // shared framebuffer reference for screenshots
         static int _bootButtonClickPending; // set by ISR, drained by main loop
@@ -88,11 +89,24 @@ namespace SpawnWear
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
             EnablePowerRails();
+            // 2026-06-19 SD isolation test: boot ONLY power + SD (no RTC/touch/WiFi/
+            // display/BLE) to check if another subsystem disrupts SDMMC. Set false to restore.
+            if (_sdIsolationTest)
+            {
+                StartSdCard();
+                Debug.WriteLine("[SD-TEST] isolation complete (power + SD only)");
+                return;
+            }
+            // 2026-06-20: mount the SD card BEFORE any radio init. Actively starting WiFi
+            // (PHY/modem power-up) before the SDMMC mount disrupts SD card init on this
+            // watch (ESP_ERR_TIMEOUT) - the bare-ESP-IDF test mounts fine with the radio
+            // LINKED but not STARTED, and nf fails only once StartWifi has run. Mount SD
+            // first (rails are already up from EnablePowerRails), then bring up radios.
+            StartSdCard();
             StartRtc();
             StartTouchProbe();
             StartBootButton();
             StartWifi();
-            StartSdCard();
             // BLE stripped - see using comment above.
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
@@ -420,8 +434,9 @@ namespace SpawnWear
                 Debug.WriteLine("[Power] P1 - Opening AXP2101 I2C device @ 0x" + BoardPins.AxpI2cAddress.ToString("X2"));
                 var axpI2c = BoardSetup.OpenI2cDevice(BoardPins.AxpI2cAddress);
                 _axp = new Axp2101Driver(axpI2c);
-                Debug.WriteLine("[Power] P2 - Defensive rail enable (DC1 + ALDO1/2/3)");
+                Debug.WriteLine("[Power] P2 - Rail enable (DC1 + ALDO1+2+3 for the AMOLED panel)");
                 _axp.EnableDisplayRails();
+                Debug.WriteLine("[Power] P2b - AXP LDO 0x90 readback = 0x" + _axp.ReadReg(0x90).ToString("X2") + " (expect 0x07)");
                 Debug.WriteLine("[Power] P3 - Enabling ADC channels");
                 _axp.EnableAdc();
                 int batPct = _axp.ReadBatteryPercent();

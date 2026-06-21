@@ -50,23 +50,26 @@ namespace SpawnWear.Drivers.Power
         /// </summary>
         public void EnableDisplayRails()
         {
-            // Empirically (verified 2026-05-03 by reading AXP2101 register state),
-            // every rail (DC1-4, ALDO1-4, BLDO1-2, CPUSLDO, DLDO1-2) is already
-            // enabled at AXP2101 POR / bootloader handoff on this watch. The
-            // panel does not need any explicit rail toggling. We re-write the
-            // 3.3V voltages defensively (in case a future power-save state has
-            // dropped them) and bit-OR the existing enable register so we
-            // never accidentally turn off a rail another driver depends on.
+            // 2026-06-20: RESTORED the AMOLED panel rails ALDO1+ALDO2+ALDO3 @ 3.3V.
+            // The "First pixel" commit (6e3a765) proved the panel renders ONLY with
+            // ALDO1+2+3 on. The 2026-06-19 SD change overwrote this with ALDO1-only
+            // (0x90=0x01) on the theory that ALDO2/3 back-feed the microSD bus - but
+            // that was an SDMMC dead-end (the SDMMC controller is dead in nf for an
+            // unrelated reason; see sd-card-nanoframework-dead-clock-investigation.md).
+            // The SD now runs over SDSPI (the SPI peripheral), so the ALDO2/3-off
+            // workaround is both unnecessary AND it blanked the display. Restore the
+            // proven panel rails; if SDSPI later proves sensitive to one specific rail
+            // we narrow it then, rather than killing the whole panel.
             byte dcCtrl = ReadReg(REG_DC_ONOFF);
             byte ldoCtrl = ReadReg(REG_LDO_ONOFF0);
 
-            WriteReg(REG_DC_VOL0, (byte)((3300 - 1500) / 100)); // DC1 = 3.3V
+            WriteReg(REG_DC_VOL0, (byte)((3300 - 1500) / 100));  // DC1 = 3.3V
             WriteReg(REG_ALDO1_VOL, (byte)((3300 - 500) / 100)); // ALDO1 = 3.3V
             WriteReg(REG_ALDO2_VOL, (byte)((3300 - 500) / 100)); // ALDO2 = 3.3V
             WriteReg(REG_ALDO3_VOL, (byte)((3300 - 500) / 100)); // ALDO3 = 3.3V
 
-            WriteReg(REG_DC_ONOFF, (byte)(dcCtrl | 0x01));        // DC1 on
-            WriteReg(REG_LDO_ONOFF0, (byte)(ldoCtrl | 0x07));    // ALDO1+2+3 on
+            WriteReg(REG_DC_ONOFF, (byte)(dcCtrl | 0x01));        // DC1 on (preserve core DC2-5)
+            WriteReg(REG_LDO_ONOFF0, (byte)(ldoCtrl | 0x07));     // ALDO1+2+3 on (panel rails)
         }
 
         /// <summary>
