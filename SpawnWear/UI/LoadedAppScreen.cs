@@ -76,6 +76,66 @@ namespace SpawnWear.UI
             return true;
         }
 
+        /// <summary>
+        /// Loads a SpawnWear app from a raw .pe assembly: Assembly.Load the
+        /// bytes, find the type implementing ISpawnApp, instantiate it via its
+        /// parameterless constructor (nanoFramework's mscorlib has no Activator),
+        /// and activate it via SetApp. Returns true if an app is now active;
+        /// <paramref name="status"/> carries a human-readable result
+        /// ("OK: &lt;name&gt;" on success, or the ERROR / EXCEPTION reason).
+        ///
+        /// Shared by the HTTP /loadapp + /apps/launch routes and the boot-time
+        /// "re-activate last app" path, so the reflection lives in exactly one
+        /// place: the app host.
+        /// </summary>
+        public bool LoadPe(byte[] peBytes, out string status)
+        {
+            ISpawnApp app;
+            status = Instantiate(peBytes, out app);
+            if (app == null) return false;
+            if (!SetApp(app)) { status = "ERROR: app refused activation"; return false; }
+            status = "OK: " + app.Name;
+            return true;
+        }
+
+        static string Instantiate(byte[] peBytes, out ISpawnApp app)
+        {
+            app = null;
+            if (peBytes == null || peBytes.Length == 0) return "ERROR: empty payload";
+            try
+            {
+                var asm = System.Reflection.Assembly.Load(peBytes);
+                if (asm == null) return "ERROR: Assembly.Load returned null";
+
+                System.Type[] types;
+                try { types = asm.GetTypes(); } catch { types = new System.Type[0]; }
+                System.Type appType = null;
+                foreach (var t in types)
+                {
+                    if (t == null || !t.IsClass || t.IsAbstract) continue;
+                    var ifaces = t.GetInterfaces();
+                    foreach (var i in ifaces)
+                    {
+                        if (i == typeof(ISpawnApp)) { appType = t; break; }
+                    }
+                    if (appType != null) break;
+                }
+                if (appType == null) return "ERROR: no ISpawnApp implementer in assembly";
+
+                var ctor = appType.GetConstructor(new System.Type[0]);
+                if (ctor == null) return "ERROR: app type has no parameterless constructor";
+
+                app = (ISpawnApp)ctor.Invoke(null);
+                return "OK";
+            }
+            catch (Exception ex)
+            {
+                string result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
+                Debug.WriteLine("[LoadedApp] Instantiate " + result);
+                return result;
+            }
+        }
+
         public void Invalidate() { _needsRepaint = true; }
 
         public void OnResume()

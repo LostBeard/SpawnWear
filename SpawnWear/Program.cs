@@ -33,6 +33,7 @@ namespace SpawnWear
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
         static SdCardService _sd;
+        static AppRepositoryService _appRepo;
         static Qmi8658Driver _imu;
         static LoggerService _logger;
         static WifiConfigService _bleConfig;   // BLE provider handle, so Settings can toggle advertising
@@ -168,6 +169,13 @@ namespace SpawnWear
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
 
+                // SD-backed app library (D:\apps). Apps installed via the Companion
+                // app-manager (/apps/install) persist here and survive a reboot;
+                // /apps/launch reads them back. Not-ready (no SD) just means "no
+                // installed apps" - the watch's built-in screens are unaffected.
+                _appRepo = new AppRepositoryService(_sd);
+                _appRepo.Initialize();
+
                 // Launcher tiles map directly to the per-app screen indices in the
                 // navigator below. Phase 2.5 will let SD-card-loaded apps register
                 // their own tiles dynamically; for now the three built-in apps are
@@ -191,7 +199,12 @@ namespace SpawnWear
                     targetIndex => { _nav.GoTo(targetIndex); });
 
                 _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
-                _http?.AttachAppLoader(loadedApp);
+                // loadedApp is the last entry in the navigator array (index 6).
+                const int AppSlotIndex = 6;
+                // Full app-manager wiring: loaded-app slot + navigator + slot index
+                // (so /apps/launch can switch to the app) + the SD app library.
+                // Also gives the navigator to /touch so the Mirror remote works.
+                _http?.AttachAppLoader(loadedApp, _nav, AppSlotIndex, _appRepo);
                 // Wire page-dot indices + the shared status bar into each screen.
                 launcher.SetPageDots(0, 7);
                 watchface.SetPageDots(1, 7);
@@ -207,6 +220,29 @@ namespace SpawnWear
                 about.SetStatusBar(statusBar);
                 wifiScreen.SetStatusBar(statusBar);
                 loadedApp.SetStatusBar(statusBar);
+                // Re-activate the app the user last launched (persisted on the SD
+                // card across reboots). We load it into the slot but DON'T navigate
+                // to it - the user still boots to the watchface; the app is waiting
+                // on its launcher tile / navigator slot.
+                if (_appRepo != null && _appRepo.IsReady)
+                {
+                    string lastApp = _appRepo.LastApp;
+                    if (lastApp != null)
+                    {
+                        byte[] peBytes = _appRepo.Read(lastApp);
+                        if (peBytes != null)
+                        {
+                            string status;
+                            bool ok = loadedApp.LoadPe(peBytes, out status);
+                            Debug.WriteLine("[Boot] reload last app '" + lastApp + "': " + status);
+                        }
+                        else
+                        {
+                            Debug.WriteLine("[Boot] last app '" + lastApp + "' no longer on card");
+                        }
+                    }
+                }
+
                 // Seed last-touch with boot time so the idle countdown to Dim / Sleep
                 // starts NOW. Without this, the first OnTick computes idle as
                 // "nowTicks since DateTime epoch" (huge), and the state machine snaps

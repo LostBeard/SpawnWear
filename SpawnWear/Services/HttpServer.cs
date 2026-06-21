@@ -47,6 +47,7 @@ namespace SpawnWear.Services
         ScreenNavigator _navigator;
         int _appLoaderScreenIndex = -1;
         SdCardService _sdCard;
+        AppRepositoryService _appRepo;
 
         /// <summary>Wire the SD card service so /sdformat can in-place reformat
         /// the inserted card without pulling it for Windows. Optional - the
@@ -69,6 +70,18 @@ namespace SpawnWear.Services
         public void AttachAppLoader(LoadedAppScreen loader)
         {
             _appLoader = loader;
+        }
+
+        /// <summary>Full wiring for the app manager: the loaded-app slot, the
+        /// navigator + the slot's screen index (so /apps/launch can switch the
+        /// watch to the app), and the SD-backed app library (so /apps can
+        /// list / install / uninstall). Called once from Program.Main.</summary>
+        public void AttachAppLoader(LoadedAppScreen loader, ScreenNavigator nav, int loaderScreenIndex, AppRepositoryService repo)
+        {
+            _appLoader = loader;
+            _navigator = nav;
+            _appLoaderScreenIndex = loaderScreenIndex;
+            _appRepo = repo;
         }
 
         public HttpServer(Bitmap fb, int panelWidth, int panelHeight, int port = 80)
@@ -149,7 +162,9 @@ namespace SpawnWear.Services
                 int sp = firstLine.IndexOf(' ', firstSpace + 1);
                 if (sp > firstSpace) path = firstLine.Substring(firstSpace + 1, sp - firstSpace - 1);
             }
-            // Strip the query string (?t=cache-buster, etc.) before route match.
+            // Keep the raw path (with ?query) for routes that read query params,
+            // and a stripped copy for route matching.
+            string rawPath = path;
             int q = path.IndexOf('?');
             if (q >= 0) path = path.Substring(0, q);
             Debug.WriteLine("[Http] " + firstLine + " -> path=" + path);
@@ -166,6 +181,22 @@ namespace SpawnWear.Services
             else if (path == "/screenshot.bin")
             {
                 ServeScreenshot(client);
+            }
+            else if (path == "/apps" && method == "GET")
+            {
+                ServeAppsList(client);
+            }
+            else if (path == "/apps/install" && method == "POST")
+            {
+                ServeAppInstall(client, rawPath, reqHeader, buf, n, headerEnd);
+            }
+            else if (path == "/apps/launch" && method == "POST")
+            {
+                ServeAppLaunch(client, rawPath);
+            }
+            else if (path.StartsWith("/apps/") && method == "DELETE")
+            {
+                ServeAppUninstall(client, path);
             }
             else if (path == "/loadapp" && method == "POST")
             {
@@ -294,60 +325,201 @@ namespace SpawnWear.Services
             }
             byte[] payload = ReadBody(client, contentLength, firstChunk, firstLen, headerEnd);
 
-            string result;
-            try
+            // Transient load: activate the app but do NOT persist it to SD. The
+            // /apps/install + /apps/launch routes are the durable path.
+            string status;
+            _appLoader.LoadPe(payload, out status);
+            Debug.WriteLine("[LoadApp] " + status);
+            ServeText(client, status);
+        }
+
+        // GET /apps - JSON list of installed apps from the SD-backed repository:
+        // [{"name":"HelloWorld","size":1234}, ...]. Names are sanitized to a
+        // safe character set on install, so no JSON escaping is needed here.
+        void ServeAppsList(Socket client)
+        {
+            if (_appRepo == null || !_appRepo.IsReady)
             {
-                var asm = System.Reflection.Assembly.Load(payload);
-                if (asm == null) { result = "ERROR: Assembly.Load returned null"; }
-                else
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp library not available (SD card not mounted)");
+                return;
+            }
+            var apps = _appRepo.ListInfo();
+            var sb = new StringBuilder();
+            sb.Append("[");
+            for (int i = 0; i < apps.Length; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append("{\"name\":\"");
+                sb.Append(apps[i].Name);
+                sb.Append("\",\"size\":");
+                sb.Append(apps[i].Size);
+                sb.Append("}");
+            }
+            sb.Append("]");
+            ServeJson(client, sb.ToString());
+        }
+
+        // POST /apps/install?name=<name> - body is a SpawnWear .pe assembly,
+        // saved to D:\apps\<name>.pe so it survives a reboot. Does NOT launch it.
+        void ServeAppInstall(Socket client, string rawPath, string reqHeader, byte[] buf, int n, int headerEnd)
+        {
+            if (_appRepo == null || !_appRepo.IsReady)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp library not available (SD card not mounted)");
+                return;
+            }
+            string name = AppRepositoryService.SanitizeName(GetQueryParam(rawPath, "name"));
+            if (name == null)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nMissing or invalid ?name= (letters, digits, _ - and spaces only)");
+                return;
+            }
+            int contentLength = ParseContentLength(reqHeader);
+            if (contentLength <= 0)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nMissing Content-Length");
+                return;
+            }
+            byte[] payload = ReadBody(client, contentLength, buf, n, headerEnd);
+            if (_appRepo.Install(name, payload))
+            {
+                ServeText(client, "OK installed " + name + " (" + payload.Length + " bytes)");
+            }
+            else
+            {
+                ServeText(client, "500 Internal Server Error\r\n\r\nInstall(" + name + ") failed - check Debug output");
+            }
+        }
+
+        // POST /apps/launch?name=<name> - reads an installed app off the SD card,
+        // activates it in the LoadedAppScreen slot, records it as the last app
+        // (so the next boot re-activates it), and switches the watch to it.
+        void ServeAppLaunch(Socket client, string rawPath)
+        {
+            if (_appRepo == null || !_appRepo.IsReady)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp library not available (SD card not mounted)");
+                return;
+            }
+            if (_appLoader == null)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp loader not attached");
+                return;
+            }
+            string name = AppRepositoryService.SanitizeName(GetQueryParam(rawPath, "name"));
+            if (name == null)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nMissing or invalid ?name=");
+                return;
+            }
+            byte[] bytes = _appRepo.Read(name);
+            if (bytes == null)
+            {
+                ServeText(client, "404 Not Found\r\n\r\nNo installed app named '" + name + "'");
+                return;
+            }
+            string status;
+            if (!_appLoader.LoadPe(bytes, out status))
+            {
+                ServeText(client, status);
+                return;
+            }
+            _appRepo.LastApp = name;
+            // Switch the watch to the app screen so the launch is visible.
+            if (_navigator != null && _appLoaderScreenIndex >= 0)
+            {
+                try { _navigator.GoTo(_appLoaderScreenIndex); }
+                catch (System.Exception ex) { Debug.WriteLine("[LaunchApp] GoTo EX " + ex.Message); }
+            }
+            Debug.WriteLine("[LaunchApp] launched: " + status + " (" + name + ")");
+            ServeText(client, status);
+        }
+
+        // DELETE /apps/<name> - removes an installed app from the SD card.
+        void ServeAppUninstall(Socket client, string path)
+        {
+            if (_appRepo == null || !_appRepo.IsReady)
+            {
+                ServeText(client, "503 Service Unavailable\r\n\r\nApp library not available (SD card not mounted)");
+                return;
+            }
+            // path is "/apps/<name>"; take everything after the last '/'.
+            string raw = path.Substring("/apps/".Length);
+            string name = AppRepositoryService.SanitizeName(UrlDecode(raw));
+            if (name == null)
+            {
+                ServeText(client, "400 Bad Request\r\n\r\nInvalid app name in path");
+                return;
+            }
+            if (_appRepo.Uninstall(name))
+            {
+                ServeText(client, "OK uninstalled " + name);
+            }
+            else
+            {
+                ServeText(client, "500 Internal Server Error\r\n\r\nUninstall(" + name + ") failed - check Debug output");
+            }
+        }
+
+        // Extracts a query-string parameter value (URL-decoded) from a raw
+        // request path like "/apps/launch?name=Hello%20World". Returns null if
+        // the key is absent.
+        static string GetQueryParam(string rawPath, string key)
+        {
+            int q = rawPath.IndexOf('?');
+            if (q < 0) return null;
+            string query = rawPath.Substring(q + 1);
+            string[] pairs = query.Split('&');
+            for (int i = 0; i < pairs.Length; i++)
+            {
+                string pair = pairs[i];
+                int eq = pair.IndexOf('=');
+                string k = eq >= 0 ? pair.Substring(0, eq) : pair;
+                if (k == key)
                 {
-                    System.Type[] types;
-                    try { types = asm.GetTypes(); } catch { types = new System.Type[0]; }
-                    System.Type appType = null;
-                    foreach (var t in types)
-                    {
-                        if (t == null || !t.IsClass || t.IsAbstract) continue;
-                        var ifaces = t.GetInterfaces();
-                        foreach (var i in ifaces)
-                        {
-                            if (i == typeof(ISpawnApp)) { appType = t; break; }
-                        }
-                        if (appType != null) break;
-                    }
-                    if (appType == null) { result = "ERROR: no ISpawnApp implementer in assembly"; }
-                    else
-                    {
-                        // nanoFramework's mscorlib doesn't ship Activator;
-                        // use the parameterless constructor directly.
-                        var ctor = appType.GetConstructor(new System.Type[0]);
-                        if (ctor == null) { result = "ERROR: app type has no parameterless constructor"; }
-                        else
-                        {
-                            var instance = (ISpawnApp)ctor.Invoke(null);
-                            if (_appLoader.SetApp(instance))
-                            {
-                                result = "OK: " + instance.Name;
-                                Debug.WriteLine("[LoadApp] activated: " + instance.Name);
-                            }
-                            else
-                            {
-                                result = "ERROR: app refused activation";
-                            }
-                        }
-                    }
+                    string v = eq >= 0 ? pair.Substring(eq + 1) : "";
+                    return UrlDecode(v);
                 }
             }
-            catch (System.Exception ex)
-            {
-                result = "EXCEPTION: " + ex.GetType().Name + ": " + ex.Message;
-                Debug.WriteLine("[LoadApp] " + result);
-            }
+            return null;
+        }
 
-            string body = result + "\r\n";
-            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + Cors + "\r\nConnection: close\r\n\r\n";
+        // Minimal percent-decoder: '+' -> space and %XX -> byte. Enough for the
+        // app-name query/path segment; the value is sanitized again downstream.
+        static string UrlDecode(string s)
+        {
+            if (s == null || s.IndexOf('%') < 0 && s.IndexOf('+') < 0) return s;
+            var sb = new StringBuilder();
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == '+') { sb.Append(' '); }
+                else if (c == '%' && i + 2 < s.Length)
+                {
+                    int hi = HexVal(s[i + 1]);
+                    int lo = HexVal(s[i + 2]);
+                    if (hi >= 0 && lo >= 0) { sb.Append((char)((hi << 4) | lo)); i += 2; }
+                    else sb.Append(c);
+                }
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        static int HexVal(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        }
+
+        void ServeJson(Socket client, string json)
+        {
+            byte[] body = Encoding.UTF8.GetBytes(json);
+            string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + body.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
-            client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
+            client.Send(body, 0, body.Length, SocketFlags.None);
         }
 
         // Permissive CORS so SpawnWear.Companion (Blazor WASM running on a
