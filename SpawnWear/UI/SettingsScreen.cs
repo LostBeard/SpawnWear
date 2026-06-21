@@ -1,4 +1,5 @@
 using nanoFramework.UI;
+using SpawnWear.Drivers.Imu;
 using SpawnWear.Drivers.Power;
 using System.Drawing;
 
@@ -30,6 +31,9 @@ namespace SpawnWear.UI
         private readonly RequestSleep _requestSleep;
         private readonly ListView _list;
         private readonly ListView.Row _brightnessRow;
+        private readonly ListView.Row _motionRow;
+        private readonly Qmi8658Driver _imu;
+        private int _motionThrottle;
         private int _pageDotIndex = -1;
         private int _pageDotCount = 0;
         public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
@@ -38,15 +42,16 @@ namespace SpawnWear.UI
 
         private static byte _currentBrightness = 0xFF;
 
-        public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep)
+        public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu)
         {
             _fb = fb;
             _panelWidth = panelWidth;
             _panelHeight = panelHeight;
             _requestSleep = requestSleep;
+            _imu = imu;
 
             int rowHeight = 60;
-            int rows = 3;
+            int rows = 4;
             int listHeight = rows * rowHeight;
             int listWidth = panelWidth - 40;
             int listX = (panelWidth - listWidth) / 2;
@@ -58,9 +63,16 @@ namespace SpawnWear.UI
                 Value = BrightnessLabel(_currentBrightness),
                 OnTap = ToggleBrightness,
             };
+            _motionRow = new ListView.Row
+            {
+                Label = "MOTION",
+                Value = _imu != null ? "----" : "N/A",
+                OnTap = null, // informational - live orientation from the QMI8658 IMU
+            };
             var rowDefs = new ListView.Row[]
             {
                 _brightnessRow,
+                _motionRow,
                 new ListView.Row
                 {
                     Label = "SLEEP",
@@ -70,7 +82,7 @@ namespace SpawnWear.UI
                 new ListView.Row
                 {
                     Label = "BUILD",
-                    Value = "20260503",
+                    Value = "20260620",
                     OnTap = null,
                 },
             };
@@ -80,6 +92,18 @@ namespace SpawnWear.UI
         public void Tick()
         {
             _statusBar?.Render(force: false);
+
+            // Live orientation from the IMU, throttled to ~1/8 ticks so we are not
+            // hammering the I2C bus. ListView only repaints the row when the derived
+            // label actually changes, so a stationary watch does not flicker.
+            if (_imu != null && (++_motionThrottle & 0x07) == 0)
+            {
+                if (_imu.TryRead(out var s))
+                {
+                    _motionRow.Value = OrientationLabel(s);
+                }
+            }
+
             _list.Tick();
         }
 
@@ -150,6 +174,18 @@ namespace SpawnWear.UI
             if (level == 0xFF) return "HIGH";
             if (level == 0x80) return "MID";
             return "LOW";
+        }
+
+        // Dominant-axis orientation from the gravity vector: ~1 g on one axis tells us
+        // which way the watch is facing; the largest-magnitude axis wins.
+        private static string OrientationLabel(Qmi8658Driver.ImuSample s)
+        {
+            float ax = s.AccelX < 0 ? -s.AccelX : s.AccelX;
+            float ay = s.AccelY < 0 ? -s.AccelY : s.AccelY;
+            float az = s.AccelZ < 0 ? -s.AccelZ : s.AccelZ;
+            if (az >= ax && az >= ay) return s.AccelZ >= 0 ? "FACE UP" : "FACE DN";
+            if (ay >= ax) return s.AccelY >= 0 ? "TOP UP" : "TOP DN";
+            return s.AccelX >= 0 ? "TILT R" : "TILT L";
         }
     }
 }
