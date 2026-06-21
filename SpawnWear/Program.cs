@@ -35,6 +35,8 @@ namespace SpawnWear
         static SdCardService _sd;
         static Qmi8658Driver _imu;
         static LoggerService _logger;
+        static WifiConfigService _bleConfig;   // BLE provider handle, so Settings can toggle advertising
+        static bool _bleAdvertising = true;
         static bool _sdIsolationTest = false;
         static HttpServer _http;
         static Bitmap _fb; // shared framebuffer reference for screenshots
@@ -161,7 +163,8 @@ namespace SpawnWear
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
-                var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu);
+                var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
+                    ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
 
@@ -295,6 +298,67 @@ namespace SpawnWear
             if (_eventLoop != null) _eventLoop.Wake();
         }
 
+        // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.
+        static bool ToggleBleFromUi(bool desiredOn)
+        {
+            try
+            {
+                if (_bleConfig != null && _bleConfig.ServiceProvider != null)
+                {
+                    if (desiredOn)
+                    {
+                        var w = new DataWriter();
+                        w.WriteByte(0x01);
+                        _bleConfig.ServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
+                        {
+                            IsConnectable = true,
+                            IsDiscoverable = true,
+                            ServiceData = w.DetachBuffer()
+                        });
+                    }
+                    else
+                    {
+                        _bleConfig.ServiceProvider.StopAdvertising();
+                    }
+                    _bleAdvertising = desiredOn;
+                    if (_logger != null) _logger.Info("[Settings] BLE advertising " + (desiredOn ? "ON" : "OFF"));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Settings] BLE toggle EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return _bleAdvertising;
+        }
+
+        // Settings WiFi toggle: connect/disconnect the station + start/stop the HTTP server.
+        // The HTTP server binds IPAddress.Any so a clean Stop/Start rides over the IP change.
+        // Returns the resulting connected state.
+        static bool ToggleWifiFromUi(bool desiredOn)
+        {
+            try
+            {
+                if (desiredOn)
+                {
+                    // Reconnect (not Connect/ConnectDhcp - that one-shot fails on a 2nd call).
+                    bool ok = _wifi != null && _wifi.Reconnect();
+                    if (ok) { try { _http?.Start(); } catch { } }
+                    if (_logger != null) _logger.Info("[Settings] WiFi ON connected=" + ok);
+                }
+                else
+                {
+                    try { _http?.Stop(); } catch { }
+                    if (_wifi != null) _wifi.Disconnect();
+                    if (_logger != null) _logger.Info("[Settings] WiFi OFF");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Settings] WiFi toggle EX " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return _wifi != null && _wifi.IsConnected;
+        }
+
         static void TransitionTo(ScreenState desired)
         {
             ScreenState prev = _screenState;
@@ -409,6 +473,7 @@ namespace SpawnWear
                 var profile = new WatchProfileService();
                 var pairing = new PairingService(debugSvc);
                 var wifi = new WifiConfigService(debugSvc, profile, pairing);
+                _bleConfig = wifi; // handle for the Settings BLE-advertising toggle
                 Debug.WriteLine("[SpawnWear] BLE-5 - Helper services constructed");
 
                 Debug.WriteLine("[SpawnWear] BLE-6 - Calling wifi.Initialize()");
