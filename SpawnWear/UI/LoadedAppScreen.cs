@@ -27,6 +27,9 @@ namespace SpawnWear.UI
         readonly int _panelHeight;
         ISpawnApp _app;
         bool _needsRepaint = true;
+        // Non-null shows an on-screen notice in place of an app (e.g. a launch
+        // failure). Cleared when a real app activates.
+        string _message;
 
         int _pageDotIndex = -1;
         int _pageDotCount = 0;
@@ -56,6 +59,7 @@ namespace SpawnWear.UI
                 try { _app.OnDestroy(); } catch (Exception ex) { Debug.WriteLine("[LoadedApp] prev OnDestroy EX " + ex.Message); }
             }
             _app = app;
+            _message = null; // a real app supersedes any prior notice
             if (_app == null) return true;
             try
             {
@@ -166,6 +170,49 @@ namespace SpawnWear.UI
 
         public void Invalidate() { _needsRepaint = true; }
 
+        /// <summary>Show an on-screen notice instead of an app - used when a
+        /// launch fails so the failure is visible on the watch, not just in the
+        /// Companion. Replaced as soon as a real app activates.</summary>
+        public void ShowMessage(string message)
+        {
+            _message = message;
+            _app = null;
+            _needsRepaint = true;
+        }
+
+        // Word-wraps a notice across the panel so a launch-failure reason is
+        // readable on the watch. Uses the display buffer's own MeasureString so
+        // it stays correct whatever font the buffer renders with.
+        void DrawWrappedNotice(IDisplayBuffer fb, string msg)
+        {
+            fb.DrawString("APP WON'T LOAD", 36, 70, 3, System.Drawing.Color.FromArgb(240, 130, 130));
+            int marginX = 24;
+            int maxW = _panelWidth - 2 * marginX;
+            const int Scale = 2;
+            const int LineH = 28;
+            int y = 130;
+            string[] words = msg.Split(' ', '\n', '\r', '\t');
+            string line = "";
+            for (int i = 0; i < words.Length; i++)
+            {
+                string w = words[i];
+                if (w.Length == 0) continue;
+                string trial = line.Length == 0 ? w : line + " " + w;
+                if (fb.MeasureString(trial, Scale) > maxW && line.Length > 0)
+                {
+                    fb.DrawString(line, marginX, y, Scale, System.Drawing.Color.FromArgb(220, 220, 220));
+                    y += LineH;
+                    line = w;
+                }
+                else
+                {
+                    line = trial;
+                }
+            }
+            if (line.Length > 0)
+                fb.DrawString(line, marginX, y, Scale, System.Drawing.Color.FromArgb(220, 220, 220));
+        }
+
         public void OnResume()
         {
             _needsRepaint = true;
@@ -200,8 +247,16 @@ namespace SpawnWear.UI
                 if (_needsRepaint)
                 {
                     fb.Clear(System.Drawing.Color.Black);
-                    fb.DrawString("NO APP LOADED", 60, 200, 3, System.Drawing.Color.FromArgb(150, 150, 150));
-                    fb.DrawString("POST .pe TO /LOADAPP", 50, 240, 2, System.Drawing.Color.FromArgb(120, 120, 120));
+                    if (_message != null)
+                    {
+                        DrawWrappedNotice(fb, _message);
+                    }
+                    else
+                    {
+                        fb.DrawString("NO APP LOADED", 60, 200, 3, System.Drawing.Color.FromArgb(150, 150, 150));
+                        fb.DrawString("INSTALL FROM COMPANION", 40, 240, 2, System.Drawing.Color.FromArgb(120, 120, 120));
+                        fb.DrawString("OR TAP AN APP TILE", 60, 270, 2, System.Drawing.Color.FromArgb(120, 120, 120));
+                    }
                     if (_pageDotCount > 1) PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
                     fb.Flush();
                     _statusBar?.Render(force: true);

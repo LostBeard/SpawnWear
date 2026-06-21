@@ -34,6 +34,9 @@ namespace SpawnWear
         static WifiService _wifi;
         static SdCardService _sd;
         static AppRepositoryService _appRepo;
+        static LoadedAppScreen _loadedApp;
+        // loadedApp is the last entry in the navigator's screens array.
+        const int AppSlotIndex = 6;
         static Qmi8658Driver _imu;
         static LoggerService _logger;
         static WifiConfigService _bleConfig;   // BLE provider handle, so Settings can toggle advertising
@@ -167,6 +170,7 @@ namespace SpawnWear
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
                     ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
 
                 // SD-backed app library (D:\apps). Apps installed via the Companion
@@ -176,31 +180,16 @@ namespace SpawnWear
                 _appRepo = new AppRepositoryService(_sd);
                 _appRepo.Initialize();
 
-                // Launcher tiles map directly to the per-app screen indices in the
-                // navigator below. Phase 2.5 will let SD-card-loaded apps register
-                // their own tiles dynamically; for now the three built-in apps are
-                // hard-wired.
-                var launcherTiles = new LauncherScreen.Tile[]
-                {
-                    // Row 1: built-in core surfaces.
-                    new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
-                    new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40), BadgeCount = 3 },
-                    new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20), BadgeCount = 1 },
-                    // Row 2: app surfaces.
-                    new LauncherScreen.Tile { Label = "ABOUT",    TargetScreenIndex = 4, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(50, 30, 60) },
-                    new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
-                    new LauncherScreen.Tile { Label = "APP",      TargetScreenIndex = 6, Icon = LauncherScreen.IconKind.Empty,    Background = Color.FromArgb(60, 30, 70) },
-                    // Row 3: planned apps.
-                    new LauncherScreen.Tile { Label = "MUSIC",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
-                    new LauncherScreen.Tile { Label = "VIDEO",    TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Music },
-                    new LauncherScreen.Tile { Label = "GALLERY",  TargetScreenIndex = -1, Icon = LauncherScreen.IconKind.Gallery },
-                };
-                var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, launcherTiles,
-                    targetIndex => { _nav.GoTo(targetIndex); });
+                // The launcher renders built-in system tiles PLUS a live tile per
+                // installed app (BuildLauncherTiles), refreshed every time it comes
+                // to the foreground - so installing an app from the Companion makes
+                // it appear on the watch home screen with no reboot. Tapping a tile
+                // either navigates (built-in) or loads + launches the app
+                // (ActivateLauncherTile).
+                var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight,
+                    BuildLauncherTiles, ActivateLauncherTile);
 
                 _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
-                // loadedApp is the last entry in the navigator array (index 6).
-                const int AppSlotIndex = 6;
                 // Full app-manager wiring: loaded-app slot + navigator + slot index
                 // (so /apps/launch can switch to the app) + the SD app library.
                 // Also gives the navigator to /touch so the Mirror remote works.
@@ -320,6 +309,78 @@ namespace SpawnWear
                 case ScreenState.Sleep: return 30000;
                 default: return 1000;
             }
+        }
+
+        /// <summary>Builds the launcher tile set: built-in system shortcuts plus
+        /// one tile per app installed in the SD library. The launcher calls this
+        /// at boot and on every resume, so installs / uninstalls appear live.</summary>
+        static LauncherScreen.Tile[] BuildLauncherTiles()
+        {
+            var builtins = new LauncherScreen.Tile[]
+            {
+                new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
+                new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40) },
+                new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20) },
+                new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
+            };
+
+            AppInfo[] apps = _appRepo != null ? _appRepo.ListInfo() : new AppInfo[0];
+            var tiles = new LauncherScreen.Tile[builtins.Length + apps.Length];
+            for (int i = 0; i < builtins.Length; i++) tiles[i] = builtins[i];
+            for (int i = 0; i < apps.Length; i++)
+            {
+                string name = apps[i].Name;
+                tiles[builtins.Length + i] = new LauncherScreen.Tile
+                {
+                    Label = name,
+                    AppName = name,                 // marks this as an app tile
+                    TargetScreenIndex = -1,
+                    Icon = LauncherScreen.IconKind.App,
+                    Background = AppTileColor(name),
+                };
+            }
+            return tiles;
+        }
+
+        /// <summary>Launcher tile tap handler: built-in tiles navigate; app tiles
+        /// load + launch the installed app.</summary>
+        static void ActivateLauncherTile(LauncherScreen.Tile tile)
+        {
+            if (tile.AppName != null) LaunchInstalledApp(tile.AppName);
+            else if (tile.TargetScreenIndex >= 0 && _nav != null) _nav.GoTo(tile.TargetScreenIndex);
+        }
+
+        // Loads an installed app off the SD library into the app slot, records it
+        // as the last app (so it re-activates next boot), and switches to it. A
+        // load failure shows the actionable reason on the slot screen instead.
+        static void LaunchInstalledApp(string name)
+        {
+            if (_appRepo == null || _loadedApp == null || _nav == null) return;
+            byte[] bytes = _appRepo.Read(name);
+            if (bytes == null)
+            {
+                _loadedApp.ShowMessage("App not found on SD card: " + name);
+                _nav.GoTo(AppSlotIndex);
+                return;
+            }
+            string status;
+            bool ok = _loadedApp.LoadPe(bytes, out status);
+            if (ok) _appRepo.LastApp = name;
+            else _loadedApp.ShowMessage(status);
+            _nav.GoTo(AppSlotIndex);
+            Debug.WriteLine("[Launcher] launch '" + name + "': " + status);
+        }
+
+        // Stable dark tint derived from the app name, so each app tile has its
+        // own colour without per-app config.
+        static Color AppTileColor(string name)
+        {
+            int h = 17;
+            for (int i = 0; i < name.Length; i++) h = (h * 31 + name[i]) & 0x7FFFFFFF;
+            int r = 25 + (h % 45);
+            int g = 25 + ((h / 45) % 45);
+            int b = 35 + ((h / 2025) % 45);
+            return Color.FromArgb(r, g, b);
         }
 
         /// <summary>

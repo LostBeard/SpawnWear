@@ -17,12 +17,25 @@ namespace SpawnWear.UI
     /// </summary>
     public class LauncherScreen : IScreen
     {
-        public delegate void LaunchApp(int navigatorIndex);
+        /// <summary>Invoked when a non-placeholder tile is tapped. The handler
+        /// decides what to do based on the tile: a built-in tile navigates to
+        /// its <see cref="Tile.TargetScreenIndex"/>; an app tile (non-null
+        /// <see cref="Tile.AppName"/>) loads + launches that installed app.</summary>
+        public delegate void ActivateTile(Tile tile);
+
+        /// <summary>Supplies the current tile set. Called at construction and on
+        /// every <see cref="OnResume"/> so the launcher reflects apps installed
+        /// (or removed) since it was last shown - no restart needed.</summary>
+        public delegate Tile[] TileProvider();
 
         public class Tile
         {
             public string Label;
             public int TargetScreenIndex;
+            // Non-null for an installed-app tile: the logical app name to load
+            // from the SD library. Built-in/system tiles leave this null and use
+            // TargetScreenIndex instead.
+            public string AppName;
             public IconKind Icon;
             // Notification badge count. 0 = no badge. >99 displays as ">9" since
             // the small red bubble can't fit three digits at this tile size.
@@ -37,13 +50,14 @@ namespace SpawnWear.UI
             // yet implemented - they render dimmed and ignore taps.
         }
 
-        public enum IconKind { Clock, Stats, Settings, Music, Gallery, Wifi, Empty }
+        public enum IconKind { Clock, Stats, Settings, Music, Gallery, Wifi, Empty, App }
 
         readonly Bitmap _fb;
         readonly int _panelWidth;
         readonly int _panelHeight;
-        readonly Tile[] _tiles;
-        readonly LaunchApp _launch;
+        Tile[] _tiles;
+        readonly TileProvider _tileProvider;
+        readonly ActivateTile _activate;
         StatusBar _statusBar;
         int _pageDotIndex = -1;
         int _pageDotCount;
@@ -57,13 +71,24 @@ namespace SpawnWear.UI
         int _gridTopY;
         int _gridLeftX;
 
-        public LauncherScreen(Bitmap fb, int panelWidth, int panelHeight, Tile[] tiles, LaunchApp launch)
+        public LauncherScreen(Bitmap fb, int panelWidth, int panelHeight, TileProvider tileProvider, ActivateTile activate)
         {
             _fb = fb;
             _panelWidth = panelWidth;
             _panelHeight = panelHeight;
-            _tiles = tiles;
-            _launch = launch;
+            _tileProvider = tileProvider;
+            _activate = activate;
+            _tiles = tileProvider != null ? tileProvider() : new Tile[0];
+        }
+
+        // Re-pull the tile set (built-ins + currently-installed apps). Called
+        // whenever the launcher comes to the foreground so a freshly-installed
+        // app shows up without a reboot.
+        void RefreshTiles()
+        {
+            if (_tileProvider == null) return;
+            var t = _tileProvider();
+            if (t != null) _tiles = t;
         }
 
         public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
@@ -104,7 +129,7 @@ namespace SpawnWear.UI
             _statusBar?.Render(force: true);
         }
 
-        public void OnResume() => Invalidate();
+        public void OnResume() { RefreshTiles(); Invalidate(); }
         public void OnPause() { }
 
         public bool OnTap(int x, int y)
@@ -129,13 +154,15 @@ namespace SpawnWear.UI
             if (idx >= _tiles.Length) return false;
 
             var tile = _tiles[idx];
-            if (tile.TargetScreenIndex < 0)
+            // A placeholder is a system tile with no destination AND no app.
+            if (tile.TargetScreenIndex < 0 && tile.AppName == null)
             {
                 System.Diagnostics.Debug.WriteLine("[Launcher] tile " + tile.Label + " is a placeholder, ignored");
                 return true; // consume so navigator doesn't cycle
             }
-            System.Diagnostics.Debug.WriteLine("[Launcher] launching " + tile.Label + " -> screen " + tile.TargetScreenIndex);
-            _launch?.Invoke(tile.TargetScreenIndex);
+            System.Diagnostics.Debug.WriteLine("[Launcher] activate " + tile.Label +
+                (tile.AppName != null ? " (app)" : " -> screen " + tile.TargetScreenIndex));
+            _activate?.Invoke(tile);
             return true;
         }
 
@@ -171,7 +198,7 @@ namespace SpawnWear.UI
 
         void DrawTile(int x, int y, Tile tile)
         {
-            bool placeholder = tile.TargetScreenIndex < 0;
+            bool placeholder = tile.TargetScreenIndex < 0 && tile.AppName == null;
 
             // Vertical gradient background drawn as horizontal slices. ~16 bands
             // is enough to look smooth at 100-px tile size. We don't use
@@ -238,6 +265,7 @@ namespace SpawnWear.UI
                 case IconKind.Music: DrawMusicIcon(iconX, iconY, iconBoxSize, iconColor); break;
                 case IconKind.Gallery: DrawGalleryIcon(iconX, iconY, iconBoxSize, iconColor); break;
                 case IconKind.Wifi: DrawWifiIcon(iconX, iconY, iconBoxSize, iconColor); break;
+                case IconKind.App: DrawAppLetterIcon(iconX, iconY, iconBoxSize, iconColor, tile.Label); break;
                 case IconKind.Empty: break;
             }
 
@@ -289,6 +317,26 @@ namespace SpawnWear.UI
         }
 
         // ----- Icon primitives (rectangles only) -----
+
+        // Generic app icon: the app's first letter, big and centered. Gives each
+        // installed app a distinct, recognizable tile without per-app bitmap art.
+        void DrawAppLetterIcon(int x, int y, int size, Color color, string label)
+        {
+            string s = "?";
+            if (label != null && label.Length > 0)
+            {
+                char c = label[0];
+                if (c >= 'a' && c <= 'z') c = (char)(c - 32); // upper-case the glyph
+                s = c.ToString();
+            }
+            int scale = size / SmallFont.GlyphHeight;
+            if (scale < 2) scale = 2;
+            int w = SmallFont.MeasureString(s, scale);
+            // Shrink if the glyph would overflow the icon box.
+            while (w > size && scale > 2) { scale--; w = SmallFont.MeasureString(s, scale); }
+            int h = SmallFont.GlyphHeight * scale;
+            SmallFont.DrawString(_fb, s, x + (size - w) / 2, y + (size - h) / 2, scale, color);
+        }
 
         void DrawClockIcon(int x, int y, int size, Color color)
         {
