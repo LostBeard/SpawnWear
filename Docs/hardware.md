@@ -54,7 +54,7 @@ Source-of-truth references:
 | **ES7210** | Echo-cancel ADC, drives dual PDM microphone array | I²C, addr **0x40** |
 | Speaker | Onboard, driven through ES8311 + class-D amp (PA_EN on **GPIO46**) | - |
 | Microphones | **Dual PDM array**, fed into ES7210 | - |
-| TF / microSD | Slot, 4-bit SDMMC | dedicated GPIO (see pin map) |
+| TF / microSD | Slot. Runs in **SPI mode (SDSPI, SPI3_HOST)** under nanoFramework - the SDMMC controller is dead in nf (never clocks commands out) | dedicated GPIO (see pin map) |
 | Buttons | **BOOT** (direct GPIO) + **PWR** (via AXP2101) | see pin map |
 | Vibration | Not present on this SKU | - |
 
@@ -97,14 +97,16 @@ Authoritative source: vendor `pin_config.h` and the schematic PDF above.
 | PCF85063 INT (alarm)              | **GPIO39** |
 | AXP2101 IRQ output (PWR button + charge events, falls when AXP raises any IRQ) | **GPIO10** |
 
-### TF / microSD card (SDMMC)
+### TF / microSD card (SDSPI - SD in SPI mode)
 
-| Signal | GPIO |
-|---|---|
-| CLK   | **GPIO2**  |
-| CMD   | **GPIO1**  |
-| DATA  | **GPIO3**  |
-| CS    | **GPIO17** |
+The card runs in **SPI mode (SDSPI)** under nanoFramework: the board's SDMMC controller never clocks commands out in nf (root cause unlocated after an exhaustive register-level investigation), so the SD is driven over the SPI peripheral instead. Managed `SDCardSpiParameters` with `spiBus = 2` maps to native **SPI3_HOST** - the CO5300 display owns `SPI2_HOST` (QSPI), so the two buses never collide. Clock is clamped to a conservative 400 kHz (SD "SPI mode" is optional/finicky on this SDMMC-wired slot); exFAT + FAT32 both mount. The slot's physical signals map onto SPI as below. See [`Research/sd-card-deep-dive-2026-06-19.md`](../Research/sd-card-deep-dive-2026-06-19.md).
+
+| Slot signal | GPIO | SPI-mode role |
+|---|---|---|
+| CLK       | **GPIO2**  | SCLK |
+| CMD       | **GPIO1**  | MOSI (DI) |
+| DATA / D0 | **GPIO3**  | MISO (DO) |
+| CS        | **GPIO17** | CS |
 
 ### Audio I²S (ES8311 playback / ES7210 record)
 
