@@ -2,14 +2,27 @@
   <Project Path="SpawnWear/SpawnWear.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360">
     <Deploy />
   </Project>
+  <Project Path="SpawnWear.AppContracts/SpawnWear.AppContracts.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="b2c3d4e5-f6a7-4901-b2c3-d4e5f6a78901" />
   <Project Path="SpawnWear.Bridge/SpawnWear.Bridge.csproj" />
   <Project Path="SpawnWear.Bridge.Tests/SpawnWear.Bridge.Tests.csproj" />
   <Project Path="SpawnWear.Bridge.Desktop/SpawnWear.Bridge.Desktop.csproj" />
   <Project Path="SpawnWear.Companion/SpawnWear.Companion.csproj" />
   <Project Path="SpawnWear.Companion.Tests/SpawnWear.Companion.Tests.csproj" />
-  <Project Path="AppTemplate/AppTemplate/AppTemplate.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" />
-  <Project Path="HelloWorldApp/HelloWorldApp/HelloWorldApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" />
-  <Project Path="CounterApp/CounterApp/CounterApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" />
-  <Project Path="DiceApp/DiceApp/DiceApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" />
-  <Project Path="PaintApp/PaintApp/PaintApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" />
+  <Folder Name="/Apps/">
+    <Project Path="Apps/AppTemplate/AppTemplate/AppTemplate.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d">
+      <Deploy />
+    </Project>
+    <Project Path="Apps/CounterApp/CounterApp/CounterApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="c0a1b2c3-d4e5-f6a7-8b9c-0d1e2f3a4b5c">
+      <Deploy />
+    </Project>
+    <Project Path="Apps/DiceApp/DiceApp/DiceApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="d4e5f6a7-b8c9-d0e1-f2a3-b4c5d6e7f8a9">
+      <Deploy />
+    </Project>
+    <Project Path="Apps/HelloWorldApp/HelloWorldApp/HelloWorldApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="e1f2a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b">
+      <Deploy />
+    </Project>
+    <Project Path="Apps/PaintApp/PaintApp/PaintApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0">
+      <Deploy />
+    </Project>
+  </Folder>
 </Solution>

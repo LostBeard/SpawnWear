@@ -35,7 +35,7 @@ public class NavigationTests : TestBase
 
     [Test, Category("Smoke")]
     public async Task Apps_Renders()
-        => await AssertPageRendersAsync("/apps", "Drop apps");
+        => await AssertPageRendersAsync("/apps", "Apps");
 
     [Test, Category("Smoke")]
     public async Task Console_Renders()
@@ -58,7 +58,7 @@ public class NavigationTests : TestBase
             ("Stats",   "Telemetry"),
             ("WiFi",    "WiFi setup"),
             ("Mirror",  "Screen mirror"),
-            ("Apps",    "Drop apps"),
+            ("Apps",    "Apps"),
             ("Console", "Debug console"),
             ("About",   "About"),
             ("Home",    "SpawnWear Companion"),

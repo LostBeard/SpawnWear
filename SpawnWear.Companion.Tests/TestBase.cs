@@ -35,7 +35,10 @@ public abstract class TestBase
 
         await s_fixture.EnsureStartedAsync();
         _pw = await Playwright.CreateAsync();
-        _browser = await _pw.Chromium.LaunchAsync(new() { Headless = !RequiresHeaded });
+        // Headed when a test demands it, or when COMPANION_HEADED=1 so a human
+        // can watch the run progress (debugging a hang, demoing, etc.).
+        bool headed = RequiresHeaded || Environment.GetEnvironmentVariable("COMPANION_HEADED") == "1";
+        _browser = await _pw.Chromium.LaunchAsync(new() { Headless = !headed });
     }
 
     [SetUp]

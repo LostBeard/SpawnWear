@@ -97,6 +97,93 @@ public class WatchHttp
         return body.Trim();
     }
 
+    /// <summary>One installed app on the watch's SD-backed library, as
+    /// returned by <c>GET /apps</c>.</summary>
+    public readonly record struct AppEntry(string Name, long Size);
+
+    static readonly System.Text.Json.JsonSerializerOptions JsonOpts =
+        new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>List the apps installed on the watch's SD card
+    /// (<c>GET /apps</c>). Returns name + size for each. Empty list if
+    /// none are installed; throws if the watch is unreachable or the
+    /// SD card isn't mounted (the route returns 503).</summary>
+    public async Task<IReadOnlyList<AppEntry>> ListAppsAsync(string watchUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(watchUrl))
+            throw new InvalidOperationException("watchUrl is empty.");
+        var url = watchUrl.TrimEnd('/') + "/apps?t=" +
+                  DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var resp = await _http.GetAsync(url, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}");
+        var apps = System.Text.Json.JsonSerializer.Deserialize<AppEntry[]>(body, JsonOpts);
+        return apps ?? System.Array.Empty<AppEntry>();
+    }
+
+    /// <summary>Install a SpawnWear app <c>.pe</c> to the watch's SD card
+    /// under the given logical name (<c>POST /apps/install?name=</c>). The
+    /// app persists across reboots but is NOT launched. Returns the watch's
+    /// text reply (e.g. <c>"OK installed Dice (2144 bytes)"</c>).</summary>
+    public async Task<string> InstallAppAsync(string watchUrl, string name, byte[] peBytes, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(watchUrl))
+            throw new InvalidOperationException("watchUrl is empty.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("name is empty.");
+        if (peBytes is null || peBytes.Length == 0)
+            throw new InvalidOperationException("peBytes is empty.");
+
+        var url = watchUrl.TrimEnd('/') + "/apps/install?name=" + Uri.EscapeDataString(name);
+        using var content = new ByteArrayContent(peBytes);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var resp = await _http.PostAsync(url, content, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}");
+        return body.Trim();
+    }
+
+    /// <summary>Launch an installed app by name (<c>POST /apps/launch?name=</c>).
+    /// The watch loads it from SD, activates it, records it as the last app
+    /// (so it re-activates on next boot), and switches the screen to it.
+    /// Returns the watch's text reply (e.g. <c>"OK: DICE"</c>).</summary>
+    public async Task<string> LaunchAppAsync(string watchUrl, string name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(watchUrl))
+            throw new InvalidOperationException("watchUrl is empty.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("name is empty.");
+
+        var url = watchUrl.TrimEnd('/') + "/apps/launch?name=" + Uri.EscapeDataString(name);
+        using var content = new ByteArrayContent(System.Array.Empty<byte>());
+        using var resp = await _http.PostAsync(url, content, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}");
+        return body.Trim();
+    }
+
+    /// <summary>Uninstall an app by name (<c>DELETE /apps/&lt;name&gt;</c>),
+    /// removing its <c>.pe</c> from the SD card. Returns the watch's text
+    /// reply (e.g. <c>"OK uninstalled Dice"</c>).</summary>
+    public async Task<string> UninstallAppAsync(string watchUrl, string name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(watchUrl))
+            throw new InvalidOperationException("watchUrl is empty.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("name is empty.");
+
+        var url = watchUrl.TrimEnd('/') + "/apps/" + Uri.EscapeDataString(name);
+        using var req = new HttpRequestMessage(HttpMethod.Delete, url);
+        using var resp = await _http.SendAsync(req, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {body.Trim()}");
+        return body.Trim();
+    }
+
     static (int W, int H) ParseDim(string header)
     {
         int w = 0, h = 0;

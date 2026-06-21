@@ -12,23 +12,64 @@
 <PageTitle>Apps &mdash; SpawnWear.Companion</PageTitle>
 
 <div class="page-head">
-    <h1>Drop apps</h1>
-    <span class="badge @(_uploading ? "busy" : "ok")">
-        @(_uploading ? "uploading" : "ready")
+    <h1>Apps</h1>
+    <span class="badge @(_busy ? "busy" : "ok")">
+        @(_busy ? "working" : "ready")
     </span>
 </div>
 
-<p class="muted">Send a SpawnWear app <code>.pe</code> file to the watch over WiFi. The firmware reads the byte stream, finds the type implementing <code>ISpawnApp</code> via reflection, instantiates it, and pushes it onto the screen stack as the foreground app. See <code>SpawnWear/Services/HttpServer.cs::ServeLoadApp</code> for the exact path.</p>
+<p class="muted">Manage the apps installed on the watch's SD card (<code>D:\apps</code>). Install a <code>.pe</code> to persist it across reboots, launch it onto the screen, or remove it. The firmware serves these over WiFi via <code>/apps</code>; see <code>SpawnWear/Services/HttpServer.cs</code>.</p>
 
 <div class="card controls">
     <label>
         <span>Watch URL</span>
-        <input type="text" @bind="_watchUrl" @bind:event="oninput" @bind:after="OnUrlChanged" placeholder="http://192.168.1.171" />
+        <input type="text" @bind="_watchUrl" @bind:event="oninput" @bind:after="OnUrlChanged" placeholder="http://192.168.1.170:8080" />
     </label>
+</div>
 
+<div class="card">
+    <div class="list-head">
+        <h2>Installed</h2>
+        <button class="ghost" @onclick="RefreshAsync" disabled="@_busy">Refresh</button>
+    </div>
+
+    @if (_listError is not null)
+    {
+        <div class="result error"><code>@_listError</code></div>
+    }
+    else if (_apps is null)
+    {
+        <p class="small muted">Loading&hellip;</p>
+    }
+    else if (_apps.Count == 0)
+    {
+        <p class="small muted">No apps installed. Drop a <code>.pe</code> below to install one.</p>
+    }
+    else
+    {
+        <ul class="applist">
+            @foreach (var app in _apps)
+            {
+                <li>
+                    <div class="app-meta">
+                        <span class="app-name">@app.Name</span>
+                        <span class="app-size">@FormatSize(app.Size)</span>
+                    </div>
+                    <div class="app-actions">
+                        <button class="primary" @onclick="() => LaunchAsync(app.Name)" disabled="@_busy">Launch</button>
+                        <button class="danger" @onclick="() => UninstallAsync(app.Name)" disabled="@_busy">Uninstall</button>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<div class="card controls">
+    <h2>Install</h2>
     <label class="dropzone">
-        <p class="big">Drop a <code>.pe</code> file here</p>
-        <p class="small">or click to pick one</p>
+        <p class="big">Drop a SpawnWear app <code>.pe</code> here</p>
+        <p class="small">or click to pick one &mdash; installs to the watch's SD card</p>
         <InputFile OnChange="OnFilePicked" accept=".pe" class="hidden-input" />
     </label>
 
@@ -47,45 +88,106 @@
     .badge.ok { background: rgba(70,210,140,0.18); color: #6dd9a4; }
     .badge.busy { background: rgba(255,200,80,0.18); color: #f3c668; }
     .muted { opacity: 0.7; font-size: 0.95rem; max-width: 56rem; }
-    .controls { max-width: 32rem; }
+    .controls { max-width: 36rem; }
     .controls label { display: block; margin-bottom: 0.8rem; font-size: 0.85rem; opacity: 0.85; }
     .controls input[type=text] { width: 100%; box-sizing: border-box; background: #0e1117; border: 1px solid #2c2f3a; color: #d8dae4; border-radius: 8px; padding: 0.55rem 0.75rem; font-size: 0.95rem; font-family: ui-monospace, "SF Mono", monospace; }
-    .dropzone { border: 2px dashed #2c2f3a; border-radius: 14px; padding: 2.4rem 1rem; text-align: center; transition: all 0.15s ease; cursor: pointer; user-select: none; }
+    .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.4rem; margin-top: 0.6rem; max-width: 36rem; }
+    .card h2 { margin: 0 0 0.6rem; font-size: 1.05rem; }
+    .list-head { display: flex; align-items: center; justify-content: space-between; }
+    .list-head h2 { margin: 0; }
+    .applist { list-style: none; margin: 0.6rem 0 0; padding: 0; }
+    .applist li { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.6rem 0.2rem; border-bottom: 1px solid #2c2f3a; }
+    .applist li:last-child { border-bottom: none; }
+    .app-meta { display: flex; flex-direction: column; gap: 0.15rem; }
+    .app-name { font-weight: 600; font-size: 0.98rem; }
+    .app-size { opacity: 0.55; font-size: 0.78rem; font-family: ui-monospace, "SF Mono", monospace; }
+    .app-actions { display: flex; gap: 0.5rem; }
+    button { padding: 0.4rem 0.8rem; font-size: 0.82rem; border-radius: 7px; border: 1px solid #2c2f3a; cursor: pointer; font-weight: 600; background: #2a2f3d; color: #d8dae4; }
+    button:hover:not(:disabled) { border-color: #5b8def; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button.primary { background: rgba(91,141,239,0.18); color: #9cc0ff; border-color: rgba(91,141,239,0.35); }
+    button.danger { background: rgba(220,80,90,0.12); color: #ec7986; border-color: rgba(220,80,90,0.3); }
+    button.ghost { background: transparent; }
+    .dropzone { border: 2px dashed #2c2f3a; border-radius: 14px; padding: 2rem 1rem; text-align: center; transition: all 0.15s ease; cursor: pointer; user-select: none; display: block; }
     .dropzone:hover, .dropzone.over { border-color: #5b8def; background: rgba(91,141,239,0.06); }
     .dropzone .big { margin: 0; font-size: 1.05rem; font-weight: 600; }
     .dropzone .small { margin: 0.3rem 0 0; opacity: 0.6; font-size: 0.85rem; }
     .dropzone .hidden-input { display: none; }
-    .dropzone:focus-within { border-color: #5b8def; }
-    .result { margin-top: 0.8rem; padding: 0.6rem 0.85rem; border-radius: 8px; font-size: 0.88rem; word-break: break-word; }
+    .small { font-size: 0.85rem; }
+    .result { margin-top: 0.8rem; padding: 0.6rem 0.85rem; border-radius: 8px; font-size: 0.88rem; word-break: break-word; white-space: pre-wrap; }
     .result.ok { background: rgba(70,210,140,0.12); color: #6dd9a4; }
     .result.error { background: rgba(220,80,90,0.12); color: #ec7986; }
-    .card { background: #1f2330; border: 1px solid #2c2f3a; border-radius: 14px; padding: 1.4rem; margin-top: 0.6rem; }
 </style>
 
 @code {
     string _watchUrl = "";
-    bool _uploading;
+    bool _busy;
+    List<WatchHttp.AppEntry>? _apps;
+    string? _listError;
     string? _lastResult;
     bool _isError;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Bridge.WifiStatusChanged += OnWifi;
         var saved = Prefs.WatchUrl;
         if (!string.IsNullOrEmpty(saved)) _watchUrl = saved;
+        if (!string.IsNullOrEmpty(_watchUrl)) await RefreshAsync();
     }
     public void Dispose() => Bridge.WifiStatusChanged -= OnWifi;
 
-    void OnUrlChanged() { Prefs.WatchUrl = _watchUrl; }
+    async Task OnUrlChanged()
+    {
+        Prefs.WatchUrl = _watchUrl;
+        await RefreshAsync();
+    }
 
     void OnWifi(WifiStatus s)
     {
         if (s.State == WifiState.Connected && !string.IsNullOrEmpty(s.IpAddress) && string.IsNullOrEmpty(_watchUrl))
         {
-            _watchUrl = "http://" + s.IpAddress;
+            _watchUrl = "http://" + s.IpAddress + ":8080";
             Prefs.WatchUrl = _watchUrl;
-            InvokeAsync(StateHasChanged);
+            InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
         }
+    }
+
+    async Task RefreshAsync()
+    {
+        if (string.IsNullOrEmpty(_watchUrl)) { _apps = null; return; }
+        _listError = null;
+        try
+        {
+            var apps = await WatchHttp.ListAppsAsync(_watchUrl);
+            _apps = new List<WatchHttp.AppEntry>(apps);
+        }
+        catch (Exception ex)
+        {
+            _apps = null;
+            _listError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task LaunchAsync(string name)
+    {
+        await RunAsync(async () =>
+        {
+            var reply = await WatchHttp.LaunchAppAsync(_watchUrl, name);
+            _isError = !reply.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+            _lastResult = reply;
+        });
+    }
+
+    async Task UninstallAsync(string name)
+    {
+        await RunAsync(async () =>
+        {
+            var reply = await WatchHttp.UninstallAppAsync(_watchUrl, name);
+            _isError = !reply.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+            _lastResult = reply;
+            await RefreshAsync();
+        });
     }
 
     async Task OnFilePicked(InputFileChangeEventArgs e)
@@ -99,47 +201,60 @@
             return;
         }
 
-        _uploading = true; _lastResult = null; _isError = false;
-        await InvokeAsync(StateHasChanged);
-
-        try
+        await RunAsync(async () =>
         {
             using var stream = file.OpenReadStream(maxAllowedSize: 512 * 1024);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             var bytes = ms.ToArray();
 
-            // Pre-flight parse the .pe header so we can warn before
-            // POSTing if the assembly will fail to load (e.g. native
-            // interop sets c_Flags_NeedReboot which makes Assembly.Load
-            // return CLR_E_BUSY on the watch). Layout matches
-            // tools/check-pe-header.cs / nanoCLR_Types.h CLR_RECORD_ASSEMBLY.
+            // Pre-flight parse the .pe header so we warn before installing if
+            // the assembly will fail to load (native interop sets
+            // c_Flags_NeedReboot -> Assembly.Load returns CLR_E_BUSY on the
+            // watch). Layout matches nanoCLR_Types.h CLR_RECORD_ASSEMBLY.
             var preflight = InspectPe(bytes, file.Name);
             if (preflight.NeedsReboot)
             {
-                _lastResult = $"{preflight.Summary}  Refusing to upload: this .pe references native interop (c_Flags_NeedReboot is SET). Assembly.Load(byte[]) on the watch would return CLR_E_BUSY. Strip the native reference and rebuild.";
+                _lastResult = $"{preflight.Summary}  Refusing to install: this .pe references native interop (c_Flags_NeedReboot is SET). Assembly.Load on the watch would return CLR_E_BUSY. Strip the native reference and rebuild.";
                 _isError = true;
                 return;
             }
 
-            try
-            {
-                var reply = await WatchHttp.PostAppAsync(_watchUrl, bytes);
-                _lastResult = $"{preflight.Summary}\n{reply}";
-                _isError = false;
-            }
-            catch (HttpRequestException ex)
-            {
-                _lastResult = $"{preflight.Summary}\n{ex.Message}";
-                _isError = true;
-            }
+            // Logical name = filename without the .pe extension. The watch
+            // sanitizes it again server-side.
+            var name = file.Name.Substring(0, file.Name.Length - 3);
+            var reply = await WatchHttp.InstallAppAsync(_watchUrl, name, bytes);
+            _isError = !reply.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+            _lastResult = $"{preflight.Summary}\n{reply}";
+            await RefreshAsync();
+        });
+    }
+
+    // Runs an action with the busy flag set + UI refreshed, funnelling
+    // exceptions into the result banner so one failed call can't wedge the page.
+    async Task RunAsync(Func<Task> action)
+    {
+        if (string.IsNullOrEmpty(_watchUrl))
+        {
+            _lastResult = "Set the watch URL first.";
+            _isError = true;
+            return;
         }
+        _busy = true;
+        await InvokeAsync(StateHasChanged);
+        try { await action(); }
         catch (Exception ex) { _lastResult = ex.Message; _isError = true; }
         finally
         {
-            _uploading = false;
+            _busy = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return bytes + " B";
+        return (bytes / 1024.0).ToString("0.0") + " KB";
     }
 
     record PeHeader(string Summary, bool NeedsReboot);
