@@ -101,6 +101,10 @@ namespace SpawnWear
             // through it; its BLE sink is wired once the debug-log characteristic exists.
             _logger = new LoggerService();
 
+            // Phase 7 crypto foundation: prove the native Ed25519/X25519 (Monocypher)
+            // interop assembly works on the watch before building pairing on it.
+            CryptoSelfTest();
+
             EnablePowerRails();
             // 2026-06-19 SD isolation test: boot ONLY power + SD (no RTC/touch/WiFi/
             // display/BLE) to check if another subsystem disrupts SDMMC. Set false to restore.
@@ -308,6 +312,47 @@ namespace SpawnWear
             {
                 case ScreenState.Sleep: return 30000;
                 default: return 1000;
+            }
+        }
+
+        // Native Ed25519 + X25519 (Monocypher) interop self-test. Proves the binding
+        // works end-to-end before pairing is built on it: an Ed25519 sign/verify
+        // roundtrip (with tamper rejection) + an X25519 ECDH agreement (both sides
+        // derive the same shared secret). Logs PASS/FAIL via the wire-protocol debug.
+        static void CryptoSelfTest()
+        {
+            try
+            {
+                // Ed25519: keypair -> sign -> verify (true) -> tamper -> verify (false).
+                byte[] pub = new byte[32];
+                byte[] priv = new byte[64];
+                SpawnDev.Crypto.Ed25519.GenerateKeyPair(pub, priv);
+                byte[] msg = new byte[] { 0x53, 0x70, 0x61, 0x77, 0x6E, 0x57, 0x65, 0x61, 0x72 }; // "SpawnWear"
+                byte[] sig = new byte[64];
+                SpawnDev.Crypto.Ed25519.Sign(sig, priv, msg);
+                bool verified = SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
+                msg[0] ^= 0xFF; // tamper the message
+                bool tamperRejected = !SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
+                Debug.WriteLine("[Crypto] Ed25519 verify=" + verified + " tamperRejected=" + tamperRejected +
+                    " => " + ((verified && tamperRejected) ? "PASS" : "FAIL"));
+
+                // X25519: two parties derive the same shared secret (ECDH agreement).
+                byte[] aPriv = new byte[32], aPub = new byte[32];
+                byte[] bPriv = new byte[32], bPub = new byte[32];
+                SpawnDev.Crypto.X25519.GeneratePrivateKey(aPriv);
+                SpawnDev.Crypto.X25519.GetPublicKey(aPub, aPriv);
+                SpawnDev.Crypto.X25519.GeneratePrivateKey(bPriv);
+                SpawnDev.Crypto.X25519.GetPublicKey(bPub, bPriv);
+                byte[] sa = new byte[32], sb = new byte[32];
+                SpawnDev.Crypto.X25519.SharedSecret(sa, aPriv, bPub);
+                SpawnDev.Crypto.X25519.SharedSecret(sb, bPriv, aPub);
+                bool agree = true;
+                for (int i = 0; i < 32; i++) if (sa[i] != sb[i]) agree = false;
+                Debug.WriteLine("[Crypto] X25519 ECDH agree=" + agree + " => " + (agree ? "PASS" : "FAIL"));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Crypto] self-test EX: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 

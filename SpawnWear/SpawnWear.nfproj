@@ -62,6 +62,9 @@
     <Reference Include="nanoFramework.Device.Bluetooth">
       <HintPath>..\packages\nanoFramework.Device.Bluetooth.1.1.115\lib\nanoFramework.Device.Bluetooth.dll</HintPath>
     </Reference>
+    <Reference Include="SpawnDev.Crypto">
+      <HintPath>..\SpawnDev.Crypto\bin\Debug\SpawnDev.Crypto.dll</HintPath>
+    </Reference>
     <Reference Include="nanoFramework.Graphics">
       <HintPath>..\packages\nanoFramework.Graphics.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.dll</HintPath>
     </Reference>

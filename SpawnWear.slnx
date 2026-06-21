@@ -3,6 +3,7 @@
     <Deploy />
   </Project>
   <Project Path="SpawnWear.AppContracts/SpawnWear.AppContracts.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="b2c3d4e5-f6a7-4901-b2c3-d4e5f6a78901" />
+  <Project Path="SpawnDev.Crypto/SpawnDev.Crypto.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="c3d4e5f6-a7b8-4012-c3d4-e5f6a7b89012" />
   <Project Path="SpawnWear.Bridge/SpawnWear.Bridge.csproj" />
   <Project Path="SpawnWear.Bridge.Tests/SpawnWear.Bridge.Tests.csproj" />
   <Project Path="SpawnWear.Bridge.Desktop/SpawnWear.Bridge.Desktop.csproj" />

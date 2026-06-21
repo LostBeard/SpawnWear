@@ -374,3 +374,7 @@ SpawnWear/Config/WifiCredentials.cs
 # Tools output - screenshots/diagnostic dumps from tools/*.cs scripts.
 # The scripts themselves are tracked; their captured artifacts aren't.
 tools/companion-readability-screenshots/
+
+# nanoFramework interop generated stubs (regenerated on build; native impl lives
+# in the nf-interpreter InteropAssemblies tree)
+**/Stubs/
