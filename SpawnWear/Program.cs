@@ -34,6 +34,7 @@ namespace SpawnWear
         // pairing service exists). See OpenCompanionPage.
         static PairingService _pairing;
         static CompanionScreen _companionScreen;
+        static UiKitDemoScreen _uiDemoScreen;
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
@@ -106,10 +107,6 @@ namespace SpawnWear
             // through it; its BLE sink is wired once the debug-log characteristic exists.
             _logger = new LoggerService();
 
-            // Phase 7 crypto foundation: prove the native Ed25519/X25519 (Monocypher)
-            // interop assembly works on the watch before building pairing on it.
-            CryptoSelfTest();
-
             EnablePowerRails();
             // 2026-06-19 SD isolation test: boot ONLY power + SD (no RTC/touch/WiFi/
             // display/BLE) to check if another subsystem disrupts SDMMC. Set false to restore.
@@ -177,7 +174,8 @@ namespace SpawnWear
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
-                    ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage);
+                    ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage,
+                    OpenUiKitPage);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
@@ -320,47 +318,6 @@ namespace SpawnWear
             }
         }
 
-        // Native Ed25519 + X25519 (Monocypher) interop self-test. Proves the binding
-        // works end-to-end before pairing is built on it: an Ed25519 sign/verify
-        // roundtrip (with tamper rejection) + an X25519 ECDH agreement (both sides
-        // derive the same shared secret). Logs PASS/FAIL via the wire-protocol debug.
-        static void CryptoSelfTest()
-        {
-            try
-            {
-                // Ed25519: keypair -> sign -> verify (true) -> tamper -> verify (false).
-                byte[] pub = new byte[32];
-                byte[] priv = new byte[64];
-                SpawnDev.Crypto.Ed25519.GenerateKeyPair(pub, priv);
-                byte[] msg = new byte[] { 0x53, 0x70, 0x61, 0x77, 0x6E, 0x57, 0x65, 0x61, 0x72 }; // "SpawnWear"
-                byte[] sig = new byte[64];
-                SpawnDev.Crypto.Ed25519.Sign(sig, priv, msg);
-                bool verified = SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
-                msg[0] ^= 0xFF; // tamper the message
-                bool tamperRejected = !SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
-                Debug.WriteLine("[Crypto] Ed25519 verify=" + verified + " tamperRejected=" + tamperRejected +
-                    " => " + ((verified && tamperRejected) ? "PASS" : "FAIL"));
-
-                // X25519: two parties derive the same shared secret (ECDH agreement).
-                byte[] aPriv = new byte[32], aPub = new byte[32];
-                byte[] bPriv = new byte[32], bPub = new byte[32];
-                SpawnDev.Crypto.X25519.GeneratePrivateKey(aPriv);
-                SpawnDev.Crypto.X25519.GetPublicKey(aPub, aPriv);
-                SpawnDev.Crypto.X25519.GeneratePrivateKey(bPriv);
-                SpawnDev.Crypto.X25519.GetPublicKey(bPub, bPriv);
-                byte[] sa = new byte[32], sb = new byte[32];
-                SpawnDev.Crypto.X25519.SharedSecret(sa, aPriv, bPub);
-                SpawnDev.Crypto.X25519.SharedSecret(sb, bPriv, aPub);
-                bool agree = true;
-                for (int i = 0; i < 32; i++) if (sa[i] != sb[i]) agree = false;
-                Debug.WriteLine("[Crypto] X25519 ECDH agree=" + agree + " => " + (agree ? "PASS" : "FAIL"));
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("[Crypto] self-test EX: " + ex.GetType().Name + ": " + ex.Message);
-            }
-        }
-
         /// <summary>Builds the launcher tile set: built-in system shortcuts plus
         /// one tile per app installed in the SD library. The launcher calls this
         /// at boot and on every resume, so installs / uninstalls appear live.</summary>
@@ -459,6 +416,18 @@ namespace SpawnWear
                 _companionScreen = new CompanionScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _pairing);
             }
             _nav.Push(_companionScreen);
+        }
+
+        // Settings -> UI KIT: push the UI-library demo (proves the GameUI-mirrored
+        // widget tree renders on the watch via IUiSurface/WatchSurface).
+        static void OpenUiKitPage()
+        {
+            if (_nav == null || _fb == null) return;
+            if (_uiDemoScreen == null)
+            {
+                _uiDemoScreen = new UiKitDemoScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+            }
+            _nav.Push(_uiDemoScreen);
         }
 
         // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.

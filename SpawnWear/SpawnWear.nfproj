@@ -42,6 +42,10 @@
     <Compile Include="Services\ServiceHost.cs" />
     <Compile Include="UI\AboutScreen.cs" />
     <Compile Include="UI\CompanionScreen.cs" />
+    <Compile Include="UI\UiKitDemoScreen.cs" />
+    <Compile Include="UiKit\IUiSurface.cs" />
+    <Compile Include="UiKit\WatchSurface.cs" />
+    <Compile Include="UiKit\Elements.cs" />
     <Compile Include="UI\LoadedAppScreen.cs" />
     <Compile Include="UI\WifiScreen.cs" />
     <Compile Include="UI\IScreen.cs" />

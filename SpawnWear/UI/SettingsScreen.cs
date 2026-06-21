@@ -42,6 +42,7 @@ namespace SpawnWear.UI
         private readonly ToggleAction _bleToggle;
         private readonly ToggleAction _wifiToggle;
         private readonly OpenPage _openCompanion;
+        private readonly OpenPage _openUiKit;
         private bool _bleOn;
         private bool _wifiOn;
         private int _motionThrottle;
@@ -54,7 +55,8 @@ namespace SpawnWear.UI
         private static byte _currentBrightness = 0xFF;
 
         public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu,
-            ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion)
+            ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion,
+            OpenPage openUiKit)
         {
             _fb = fb;
             _panelWidth = panelWidth;
@@ -66,10 +68,11 @@ namespace SpawnWear.UI
             _wifiToggle = wifiToggle;
             _wifiOn = wifiOn;
             _openCompanion = openCompanion;
+            _openUiKit = openUiKit;
 
-            // 45px rows keep all 6 within the screen's safe band (below the title at
-            // ~127, bottom ~397, clear of the ~100px rounded bottom corners at y~402).
-            int rowHeight = 45;
+            // 39px rows keep all 7 within the screen's safe band (below the title at
+            // ~127, bottom ~400, clear of the ~100px rounded bottom corners at y~402).
+            int rowHeight = 39;
             int listWidth = panelWidth - 40;
             int listX = (panelWidth - listWidth) / 2;
             // Anchor the list BELOW the title (status bar 64 + title ~16+35) rather
@@ -111,6 +114,12 @@ namespace SpawnWear.UI
                     Label = "COMPANION",
                     Value = ">",
                     OnTap = OpenCompanion, // pushes the Companion sub-page (pairing)
+                },
+                new ListView.Row
+                {
+                    Label = "UI KIT",
+                    Value = ">",
+                    OnTap = OpenUiKit, // pushes the UI-library demo sub-page
                 },
                 new ListView.Row
                 {
@@ -205,6 +214,11 @@ namespace SpawnWear.UI
         private void OpenCompanion()
         {
             if (_openCompanion != null) _openCompanion();
+        }
+
+        private void OpenUiKit()
+        {
+            if (_openUiKit != null) _openUiKit();
         }
 
         private void ToggleBle()
