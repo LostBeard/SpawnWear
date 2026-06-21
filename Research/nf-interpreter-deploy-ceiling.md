@@ -74,3 +74,22 @@ A standalone `tools/check-deploy-size.cs` does the same check without going thro
 Originally we believed the ceiling was much closer to 235 KB because every "stripped" build (BLE reference commented out) was actually still shipping the BLE assembly. The cause: `tools/nf-deploy.cs` had a regex that matched `<Reference Include="...">` tags inside XML comments, so `<!-- <Reference ... > -->` STILL added the assembly to the allow-list and pulled the `.pe` from `packages/`.
 
 Fixed 2026-05-04 commit `958dd47` — the regex now strips `<!-- ... -->` blocks before matching. The "real" ceiling above (~290 KB wire) was only visible after this regex bug was closed; before the fix, it looked like even tiny changes pushed deploys over the limit.
+
+## 2026-06-21 UPDATE — ceiling hit again, cache hypothesis TESTED + REJECTED
+
+Hit this again building the SpawnWear UI library (total .pe crossed it). On the current `feature/qspi-display-driver` firmware the ceiling is **~358,648 bytes** total `.pe`. Precise symptom this time (sharper than 2026-05): the deploy is NOT a silent corruption — it **hard-fails** mid-commit:
+```
+Deploying 358648/358896 bytes.
+Deploying 358896/358896 bytes.
+Error writing 248 bytes to device @ 0x003678F8.   <- 0x310000 + 358648
+*** ERROR deploying assemblies to the device ***
+```
+The device writes EVERY chunk below offset 358,648 fine, then dies on the final 248-byte chunk **at the fixed flash address 0x3678F8** and stops replying (the partial deploy then bricks the runtime until power-cycle; the CLR ignores the uncommitted deploy and boots blank). The failing build was exactly 358,896 bytes — `358,896 − 358,648 = 248` = one wire chunk over.
+
+**The cache-invalidation hypothesis (the 2026-05 lead) was implemented and is WRONG / insufficient.** Added `esp_cache_msync(mmap_addr, n, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_UNALIGNED)` after `esp_partition_write` in `Esp32FlashDriver_Write` (forward-declared, since esp_mm/include isn't on that file's path), rebuilt, reflashed → **identical failure at the same byte 0x3678F8.** So missing DBus-cache invalidation is NOT the root cause (or esp_cache_msync is a no-op on a flash-mmap vaddr). That change is currently UNCOMMITTED in the nf-interpreter working tree — revert it or refine it (try the ROM `Cache_Invalidate_Addr`) next session.
+
+**New leading theory:** a **bad/marginal flash sector at 0x3678F8**, or a deploy-COMMIT crash tied to that exact address. It's a WRITE error at a FIXED address that only builds large enough to reach it hit — classic bad-sector signature. The 2026-05 "rebuilds shift the ceiling" (layout variance) did NOT reproduce here: my rebuild (with the cache change) landed at the SAME 358,648.
+
+**Workaround used (works):** keep total `.pe` under ~358,000. Removed the boot `CryptoSelfTest` to ship the UI-kit at 358,084 — deployed + booted clean, UI library hardware-verified.
+
+**NEXT-SESSION FIX (clean, dedicated):** confirm bad-sector via esptool write+verify at 0x3678F8 in download mode (risk-free, past the live app's data). If bad sector → **repartition** so the deploy region avoids it (enlarge `factory` past 0x3678F8 so the bad area falls in factory's never-fully-written tail, OR start `deploy` higher). That permanently removes the ceiling without trimming features. Recovery if a deploy bricks it: `tools/nf-recover-py313.bat COM6` (erase_flash + reflash).
