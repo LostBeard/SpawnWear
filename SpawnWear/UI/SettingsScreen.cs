@@ -26,6 +26,8 @@ namespace SpawnWear.UI
         public delegate void RequestSleep();
         /// <summary>Performs an on/off toggle and returns the resulting state.</summary>
         public delegate bool ToggleAction(bool desiredOn);
+        /// <summary>Opens a sub-page (pushed onto the navigator) - e.g. Companion.</summary>
+        public delegate void OpenPage();
 
         private readonly Bitmap _fb;
         private readonly int _panelWidth;
@@ -39,6 +41,7 @@ namespace SpawnWear.UI
         private readonly Qmi8658Driver _imu;
         private readonly ToggleAction _bleToggle;
         private readonly ToggleAction _wifiToggle;
+        private readonly OpenPage _openCompanion;
         private bool _bleOn;
         private bool _wifiOn;
         private int _motionThrottle;
@@ -51,7 +54,7 @@ namespace SpawnWear.UI
         private static byte _currentBrightness = 0xFF;
 
         public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu,
-            ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn)
+            ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion)
         {
             _fb = fb;
             _panelWidth = panelWidth;
@@ -62,13 +65,16 @@ namespace SpawnWear.UI
             _bleOn = bleOn;
             _wifiToggle = wifiToggle;
             _wifiOn = wifiOn;
+            _openCompanion = openCompanion;
 
-            int rowHeight = 50;
-            int rows = 6;
-            int listHeight = rows * rowHeight;
+            // 45px rows keep all 6 within the screen's safe band (below the title at
+            // ~127, bottom ~397, clear of the ~100px rounded bottom corners at y~402).
+            int rowHeight = 45;
             int listWidth = panelWidth - 40;
             int listX = (panelWidth - listWidth) / 2;
-            int listY = (panelHeight - listHeight) / 2;
+            // Anchor the list BELOW the title (status bar 64 + title ~16+35) rather
+            // than vertically centered, which used to overlap the SETTINGS header.
+            int listY = StatusBar.ReservedHeight + 16 + SmallFont.GlyphHeight * 5 + 12;
 
             _brightnessRow = new ListView.Row
             {
@@ -102,15 +108,15 @@ namespace SpawnWear.UI
                 _motionRow,
                 new ListView.Row
                 {
-                    Label = "SLEEP",
-                    Value = "NOW",
-                    OnTap = TriggerSleep,
+                    Label = "COMPANION",
+                    Value = ">",
+                    OnTap = OpenCompanion, // pushes the Companion sub-page (pairing)
                 },
                 new ListView.Row
                 {
-                    Label = "BUILD",
-                    Value = "20260620",
-                    OnTap = null,
+                    Label = "SLEEP",
+                    Value = "NOW",
+                    OnTap = TriggerSleep,
                 },
             };
             _list = new ListView(_fb, listX, listY, listWidth, rowHeight, 4, rowDefs);
@@ -194,6 +200,11 @@ namespace SpawnWear.UI
         private void TriggerSleep()
         {
             if (_requestSleep != null) _requestSleep();
+        }
+
+        private void OpenCompanion()
+        {
+            if (_openCompanion != null) _openCompanion();
         }
 
         private void ToggleBle()

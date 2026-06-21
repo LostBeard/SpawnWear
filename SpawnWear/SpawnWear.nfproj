@@ -41,6 +41,7 @@
     <Compile Include="Services\LoggerService.cs" />
     <Compile Include="Services\ServiceHost.cs" />
     <Compile Include="UI\AboutScreen.cs" />
+    <Compile Include="UI\CompanionScreen.cs" />
     <Compile Include="UI\LoadedAppScreen.cs" />
     <Compile Include="UI\WifiScreen.cs" />
     <Compile Include="UI\IScreen.cs" />

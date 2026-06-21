@@ -95,6 +95,46 @@ namespace SpawnWear
         byte[] _peerPubKey;
         byte[] _roomKey;
 
+        // ----- Phase 2: pairing window (Settings > Companion) -----
+        // Pairing is only accepted while the user is on the Companion page with the
+        // toggle ON. BeginPairingWindow shows a 6-digit code the user types into the
+        // Companion app; the code binds the key exchange to physical presence (Phase
+        // 3 uses it to authenticate the Ed25519 handshake => MITM defense). The
+        // window auto-closes when the user leaves the page (CompanionScreen.OnPause).
+        bool _windowOpen;
+        string _currentCode;
+
+        /// <summary>True while the user has pairing armed on the Companion page.</summary>
+        public bool IsPairingWindowOpen => _windowOpen;
+
+        /// <summary>The 6-digit code currently displayed, or null when closed.</summary>
+        public string CurrentCode => _currentCode;
+
+        /// <summary>Arms pairing: generates a fresh 6-digit code (hardware RNG via
+        /// the native crypto) and opens the window. Returns the code to display.</summary>
+        public string BeginPairingWindow()
+        {
+            byte[] rnd = new byte[32];
+            SpawnDev.Crypto.X25519.GeneratePrivateKey(rnd); // ESP32 HW RNG fills 32 bytes
+            uint n = ((uint)rnd[0] << 16) | ((uint)rnd[1] << 8) | rnd[2];
+            int value = (int)(n % 1000000);
+            string code = value.ToString();
+            while (code.Length < 6) code = "0" + code; // zero-pad to 6 digits
+            _currentCode = code;
+            _windowOpen = true;
+            Log("[Pair] Pairing window OPEN, code=" + _currentCode);
+            return _currentCode;
+        }
+
+        /// <summary>Disarms pairing and clears the code. Idempotent.</summary>
+        public void EndPairingWindow()
+        {
+            if (!_windowOpen) return;
+            _windowOpen = false;
+            _currentCode = null;
+            Log("[Pair] Pairing window CLOSED");
+        }
+
         public bool Initialize(GattLocalService service)
         {
             EnsureKeyPair();

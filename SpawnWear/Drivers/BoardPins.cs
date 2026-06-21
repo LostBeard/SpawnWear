@@ -54,6 +54,12 @@ namespace SpawnWear.Drivers
         public const int LcdWidth = 410;
         public const int LcdHeight = 502;
         public const int LcdColumnOffset = 22; // panel 410 lives inside a wider RAM region
+        // The AMOLED has physically ROUNDED corners (~100px radius, measured via the
+        // Companion screenshot tool). Pixels inside the four corner quarter-circles
+        // are clipped by the glass. Keep full-width content (list rows, edges) within
+        // y in [LcdCornerRadius, LcdHeight-LcdCornerRadius]; centered text (the center
+        // column never clips) is safe anywhere vertically.
+        public const int LcdCornerRadius = 100;
 
         // -----------------------------------------------------------------------
         // TF / microSD slot (4-bit SDMMC mode)

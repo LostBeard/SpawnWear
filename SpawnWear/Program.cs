@@ -29,6 +29,11 @@ namespace SpawnWear
         // pair around every read/write provides happens-before ordering anyway.
         static EventLoop _eventLoop;
         static ScreenNavigator _nav;
+        // Pairing service (built during BLE setup) + the Companion sub-page, created
+        // lazily the first time the user opens Settings > Companion (by then the
+        // pairing service exists). See OpenCompanionPage.
+        static PairingService _pairing;
+        static CompanionScreen _companionScreen;
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
@@ -172,7 +177,7 @@ namespace SpawnWear
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
-                    ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected);
+                    ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
@@ -440,6 +445,22 @@ namespace SpawnWear
             if (_eventLoop != null) _eventLoop.Wake();
         }
 
+        // Settings -> Companion: push the pairing sub-page onto the navigator. Built
+        // lazily on first open (by then the pairing service + framebuffer exist).
+        static void OpenCompanionPage()
+        {
+            if (_nav == null || _fb == null || _pairing == null)
+            {
+                Debug.WriteLine("[Companion] not ready (nav/fb/pairing null)");
+                return;
+            }
+            if (_companionScreen == null)
+            {
+                _companionScreen = new CompanionScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _pairing);
+            }
+            _nav.Push(_companionScreen);
+        }
+
         // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.
         static bool ToggleBleFromUi(bool desiredOn)
         {
@@ -614,6 +635,7 @@ namespace SpawnWear
                 if (_logger != null) _logger.Sink = debugSvc.Notify;
                 var profile = new WatchProfileService();
                 var pairing = new PairingService(debugSvc);
+                _pairing = pairing; // expose to the Companion sub-page (OpenCompanionPage)
                 var wifi = new WifiConfigService(debugSvc, profile, pairing);
                 _bleConfig = wifi; // handle for the Settings BLE-advertising toggle
                 Debug.WriteLine("[SpawnWear] BLE-5 - Helper services constructed");
