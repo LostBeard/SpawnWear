@@ -34,6 +34,7 @@
     <Compile Include="WifiConfigService.cs" />
     <Compile Include="Drivers\BoardPins.cs" />
     <Compile Include="Drivers\BoardSetup.cs" />
+    <Compile Include="Drivers\Imu\Qmi8658Driver.cs" />
     <Compile Include="Drivers\Power\Axp2101Driver.cs" />
     <Compile Include="Drivers\Rtc\Pcf85063Driver.cs" />
     <Compile Include="Drivers\SdCard\SdCardService.cs" />
@@ -43,6 +44,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\EventLoop.cs" />
     <Compile Include="Services\HttpServer.cs" />
+    <Compile Include="Services\LoggerService.cs" />
     <Compile Include="Services\ServiceHost.cs" />
     <Compile Include="UI\AboutScreen.cs" />
     <Compile Include="UI\LoadedAppScreen.cs" />

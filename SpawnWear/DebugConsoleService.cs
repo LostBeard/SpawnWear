@@ -75,6 +75,26 @@ namespace SpawnWear
             _logOutputChar.NotifyValue(writer.DetachBuffer());
         }
 
+        /// <summary>
+        /// BLE-notify only - pushes a log line to subscribers WITHOUT also writing to
+        /// Debug (unlike <see cref="Log"/>). Used as the LoggerService sink so log lines
+        /// reach the companion app without double-printing to the wire-protocol console.
+        /// No-op until the characteristic is attached and a client has subscribed.
+        /// </summary>
+        public void Notify(string message)
+        {
+            if (!_initialized || !_hasSubscribers || message == null) return;
+
+            if (message.Length > 500)
+            {
+                message = message.Substring(0, 497) + "...";
+            }
+
+            var writer = new DataWriter();
+            writer.WriteString(message);
+            _logOutputChar.NotifyValue(writer.DetachBuffer());
+        }
+
         void OnCommandWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
         {
             var request = args.GetRequest();

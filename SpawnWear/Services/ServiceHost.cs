@@ -27,12 +27,14 @@ namespace SpawnWear.Services
         readonly ILogger _logger;
         IDisplayBuffer _display;
 
-        public ServiceHost(Axp2101Driver axp, Pcf85063Driver rtc, WifiService wifi)
+        public ServiceHost(Axp2101Driver axp, Pcf85063Driver rtc, WifiService wifi, ILogger logger)
         {
             _power = new PowerServiceImpl(axp);
             _rtc = new RtcServiceImpl(rtc);
             _wifi = new WifiServiceImpl(wifi);
-            _logger = new DebugLogger();
+            // Phase 3 LoggerService is created in Program.Main and passed in; fall back to
+            // the Debug.WriteLine shim if a caller does not supply one.
+            _logger = logger != null ? logger : new DebugLogger();
         }
 
         public void AttachDisplay(Bitmap fb, int panelWidth, int panelHeight)

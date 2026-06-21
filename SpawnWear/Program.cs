@@ -6,6 +6,7 @@ using nanoFramework.Device.Bluetooth.GenericAttributeProfile;
 using nanoFramework.UI;
 using nanoFramework.UI.GraphicDrivers;
 using SpawnWear.Drivers;
+using SpawnWear.Drivers.Imu;
 using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Rtc;
 using SpawnWear.Drivers.SdCard;
@@ -32,6 +33,8 @@ namespace SpawnWear
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
         static SdCardService _sd;
+        static Qmi8658Driver _imu;
+        static LoggerService _logger;
         static bool _sdIsolationTest = false;
         static HttpServer _http;
         static Bitmap _fb; // shared framebuffer reference for screenshots
@@ -88,6 +91,10 @@ namespace SpawnWear
             // instead of 411 KB for the full panel.
             Debug.WriteLine("[SpawnWear] M0 - Main reached");
 
+            // Phase 3 Logger system service - created first so every subsystem can log
+            // through it; its BLE sink is wired once the debug-log characteristic exists.
+            _logger = new LoggerService();
+
             EnablePowerRails();
             // 2026-06-19 SD isolation test: boot ONLY power + SD (no RTC/touch/WiFi/
             // display/BLE) to check if another subsystem disrupts SDMMC. Set false to restore.
@@ -104,6 +111,7 @@ namespace SpawnWear
             // first (rails are already up from EnablePowerRails), then bring up radios.
             StartSdCard();
             StartRtc();
+            StartImu();
             StartTouchProbe();
             StartBootButton();
             StartWifi();
@@ -147,7 +155,7 @@ namespace SpawnWear
                 // Service host - the single point through which screens consume
                 // system services via the AppContracts interfaces. Phase 8
                 // SD-card-loadable apps will receive this same instance.
-                var services = new ServiceHost(_axp, _rtc, _wifi);
+                var services = new ServiceHost(_axp, _rtc, _wifi, _logger);
 
                 var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
@@ -395,6 +403,9 @@ namespace SpawnWear
 
                 Debug.WriteLine("[SpawnWear] BLE-4 - Constructing helper services");
                 var debugSvc = new DebugConsoleService();
+                // Route Logger output to the BLE debug-log channel (notify-only, so it
+                // does not double-print to the wire console which the Logger already does).
+                if (_logger != null) _logger.Sink = debugSvc.Notify;
                 var profile = new WatchProfileService();
                 var pairing = new PairingService(debugSvc);
                 var wifi = new WifiConfigService(debugSvc, profile, pairing);
@@ -635,6 +646,55 @@ namespace SpawnWear
             {
                 Debug.WriteLine("[Rtc] EX " + ex.GetType().Name + ": " + ex.Message);
                 _rtc = null;
+            }
+        }
+
+        /// <summary>
+        /// Brings up the QMI8658 6-axis IMU on the shared I2C bus (0x6B): probe WHO_AM_I,
+        /// configure accel (+/-8 g) + gyro (+/-1024 dps), and emit one sample through the
+        /// Logger so the read path is verified at boot. Phase 3 sensor item.
+        /// </summary>
+        static void StartImu()
+        {
+            try
+            {
+                Debug.WriteLine("[Imu] I1 - Opening QMI8658 I2C device @ 0x" + BoardPins.ImuI2cAddress.ToString("X2"));
+                var imuI2c = BoardSetup.OpenI2cDevice(BoardPins.ImuI2cAddress);
+                _imu = new Qmi8658Driver(imuI2c);
+
+                bool present = _imu.Probe();
+                Debug.WriteLine("[Imu] I2 - WHO_AM_I present=" + present + " (expect device id 0x05)");
+                if (!present)
+                {
+                    _imu = null;
+                    return;
+                }
+
+                _imu.Initialize();
+                System.Threading.Thread.Sleep(20); // let the first sample land at 500 Hz ODR
+
+                if (_imu.TryRead(out var s))
+                {
+                    // Integer milli-units (mg / mdps) + deci-degC: avoids float-to-string
+                    // formatting on the constrained runtime, and exercises the Logger.
+                    if (_logger != null)
+                    {
+                        _logger.Info("[Imu] accel mg(" +
+                            (int)(s.AccelX * 1000) + "," + (int)(s.AccelY * 1000) + "," + (int)(s.AccelZ * 1000) +
+                            ") gyro mdps(" +
+                            (int)(s.GyroX * 1000) + "," + (int)(s.GyroY * 1000) + "," + (int)(s.GyroZ * 1000) +
+                            ") temp dC " + (int)(s.TempC * 10));
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine("[Imu] I3 - TryRead: no data ready yet");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Imu] EX " + ex.GetType().Name + ": " + ex.Message);
+                _imu = null;
             }
         }
 
