@@ -16,30 +16,35 @@ public class PairingHandshakeWireTests
         return b;
     }
 
+    // Level 2 pairing code (6 ASCII digits) folded into the signed domains.
+    static readonly byte[] Code6 = PairingHandshake.CodeToBytes("123456");
+
     [Fact]
-    public void SignedDomainCompanionToWatch_concatenates_pub_then_room()
+    public void SignedDomainCompanionToWatch_concatenates_pub_room_code()
     {
         var pub = FillPattern(32, 0x10);
         var rk  = FillPattern(20, 0x80);
-        var dom = PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk);
+        var dom = PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk, Code6);
 
-        Assert.Equal(52, dom.Length);
-        for (int i = 0; i < 32; i++) Assert.Equal(pub[i], dom[i]);
-        for (int i = 0; i < 20; i++) Assert.Equal(rk[i],  dom[32 + i]);
+        Assert.Equal(58, dom.Length);
+        for (int i = 0; i < 32; i++) Assert.Equal(pub[i],   dom[i]);
+        for (int i = 0; i < 20; i++) Assert.Equal(rk[i],    dom[32 + i]);
+        for (int i = 0; i < 6;  i++) Assert.Equal(Code6[i], dom[52 + i]);
     }
 
     [Fact]
-    public void SignedDomainWatchToCompanion_concatenates_companion_room_watch()
+    public void SignedDomainWatchToCompanion_concatenates_companion_room_watch_code()
     {
         var compPub  = FillPattern(32, 0x10);
         var rk       = FillPattern(20, 0x80);
         var watchPub = FillPattern(32, 0x40);
-        var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(compPub, rk, watchPub);
+        var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(compPub, rk, watchPub, Code6);
 
-        Assert.Equal(84, dom.Length);
+        Assert.Equal(90, dom.Length);
         for (int i = 0; i < 32; i++) Assert.Equal(compPub[i],  dom[i]);
         for (int i = 0; i < 20; i++) Assert.Equal(rk[i],       dom[32 + i]);
         for (int i = 0; i < 32; i++) Assert.Equal(watchPub[i], dom[52 + i]);
+        for (int i = 0; i < 6;  i++) Assert.Equal(Code6[i],    dom[84 + i]);
     }
 
     [Fact]
@@ -80,7 +85,7 @@ public class PairingHandshakeWireTests
     {
         var pub = new byte[len];
         var rk  = new byte[20];
-        Assert.Throws<ArgumentException>(() => PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk));
+        Assert.Throws<ArgumentException>(() => PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk, Code6));
     }
 
     [Fact]
@@ -88,7 +93,7 @@ public class PairingHandshakeWireTests
     {
         var pub = new byte[32];
         var rk  = new byte[16]; // would be GUID length, NOT 20-byte info_hash length
-        Assert.Throws<ArgumentException>(() => PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk));
+        Assert.Throws<ArgumentException>(() => PairingHandshakeWire.SignedDomainCompanionToWatch(pub, rk, Code6));
     }
 
     [Fact]
@@ -107,5 +112,24 @@ public class PairingHandshakeWireTests
         Assert.Equal(64, PairingHandshake.SignatureLength);
         Assert.Equal(116, PairingHandshake.CompanionToWatchLength);
         Assert.Equal(64,  PairingHandshake.WatchToCompanionLength);
+        Assert.Equal(6,   PairingHandshake.CodeLength);
+    }
+
+    [Fact]
+    public void CodeToBytes_encodes_six_ascii_digits()
+    {
+        var b = PairingHandshake.CodeToBytes("042739");
+        Assert.Equal(6, b.Length);
+        Assert.Equal(new byte[] { (byte)'0', (byte)'4', (byte)'2', (byte)'7', (byte)'3', (byte)'9' }, b);
+    }
+
+    [Theory]
+    [InlineData("12345")]    // too short
+    [InlineData("1234567")]  // too long
+    [InlineData("12 456")]   // contains a space
+    [InlineData("abcdef")]   // non-digit
+    public void CodeToBytes_rejects_malformed_code(string code)
+    {
+        Assert.Throws<ArgumentException>(() => PairingHandshake.CodeToBytes(code));
     }
 }

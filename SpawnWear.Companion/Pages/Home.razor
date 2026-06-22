@@ -39,8 +39,11 @@
             </span>
             @if (_record is null)
             {
-                <button class="primary" @onclick="DoPairAsync" disabled="@_pairing">
-                    @(_pairing ? "Pairing…" : "Establish trust (Phase 7)")
+                <input class="code-input" type="text" inputmode="numeric" maxlength="6"
+                       placeholder="watch code" style="width:6.5rem; font-family: ui-monospace, monospace; letter-spacing:0.15rem;"
+                       @bind="_pairingCode" @bind:event="oninput" disabled="@_pairing" />
+                <button class="primary" @onclick="DoPairAsync" disabled="@(_pairing || _pairingCode.Length != 6)">
+                    @(_pairing ? "Pairing…" : "Establish trust")
                 </button>
             }
             else
@@ -144,6 +147,7 @@
 
     PairingRecord? _record;
     bool _pairing;
+    string _pairingCode = "";   // 6-digit code the user reads off the watch screen (Level 2 binding)
     bool _promotingToWebRtc;
     List<PairingRecord> _savedPairings = new();
 
@@ -156,6 +160,27 @@
         Bridge.DebugLogReceived    += OnLog;
 
         _savedPairings = PairingStore.List().ToList();
+        RehydrateTrustForConnectedWatch();
+    }
+
+    // The Home component is recreated whenever the user navigates away and back, so
+    // _record (set only during the live pairing action) resets to null - which would make
+    // the TRUSTED badge wrongly read NOT TRUSTED for an already-paired, still-connected
+    // watch. Re-bind _record from the persisted store: match the saved pairing by the
+    // connected watch's friendly name (recorded at pair time = Bridge.PeerName), falling
+    // back to the sole saved pairing when there's exactly one.
+    void RehydrateTrustForConnectedWatch()
+    {
+        if (_record is not null || !Bridge.IsConnected) return;
+        var name = Bridge.PeerName;
+        if (!string.IsNullOrEmpty(name))
+        {
+            foreach (var p in _savedPairings)
+            {
+                if (p.FriendlyName == name) { _record = p; return; }
+            }
+        }
+        if (_savedPairings.Count == 1) _record = _savedPairings[0];
     }
 
     public void Dispose()
@@ -167,7 +192,15 @@
         Bridge.DebugLogReceived    -= OnLog;
     }
 
-    void OnConnectionChanged(bool connected) => InvokeAsync(StateHasChanged);
+    void OnConnectionChanged(bool connected)
+    {
+        // A connection coming up after init (or a reconnect) should re-show TRUSTED for a
+        // known watch; a disconnect drops back to the session-less view (the saved-pairings
+        // list takes over when not connected).
+        if (connected) RehydrateTrustForConnectedWatch();
+        else _record = null;
+        InvokeAsync(StateHasChanged);
+    }
     void OnBattery(BatteryState b)           { _battery = b;  InvokeAsync(StateHasChanged); }
     void OnImu(ImuSample i)                  { _imu = i;      InvokeAsync(StateHasChanged); }
     void OnButton(ButtonEvent e)             { _button = e;   InvokeAsync(StateHasChanged); }
@@ -204,8 +237,9 @@
             var transport = Bridge.GetUnderlyingTransport()
                 ?? throw new InvalidOperationException("BridgeClient has no transport configured.");
             var flow = new PairingFlow(Crypto, PairingStore);
-            _record = await flow.PairAsync(transport, friendlyName: Bridge.PeerName);
+            _record = await flow.PairAsync(transport, _pairingCode, friendlyName: Bridge.PeerName);
             _savedPairings = PairingStore.List().ToList();
+            _pairingCode = "";
         }
         catch (PairingException ex) { _lastError = "Pairing failed: " + ex.Message; }
         catch (NotSupportedException ex) { _lastError = "Watch firmware does not yet advertise the Phase 7 pairing characteristics. " + ex.Message; }

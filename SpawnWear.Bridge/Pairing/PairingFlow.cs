@@ -44,8 +44,14 @@ public class PairingFlow
     /// </summary>
     /// <exception cref="PairingException">Thrown if the watch returns
     /// the wrong number of bytes, or its signature doesn't verify.</exception>
-    public async Task<PairingRecord> PairAsync(ITransport transport, string? friendlyName = null, CancellationToken ct = default)
+    public async Task<PairingRecord> PairAsync(ITransport transport, string pairingCode, string? friendlyName = null, CancellationToken ct = default)
     {
+        // Level 2 MITM defense: the 6-digit code the user read off the watch screen and
+        // typed in is folded into BOTH signed domains (never sent on the wire). The watch
+        // verifies the companion's signature against its OWN code, so a relay/attacker that
+        // could not see the screen cannot produce a signature the watch accepts.
+        byte[] code = PairingHandshake.CodeToBytes(pairingCode);
+
         // 1. Watch's public key.
         byte[] watchPubRaw = await transport.ReadWatchPublicKeyAsync(ct);
         if (watchPubRaw.Length != PairingHandshake.PubKeyLength)
@@ -67,7 +73,7 @@ public class PairingFlow
         System.Security.Cryptography.RandomNumberGenerator.Fill(roomKey);
 
         // 4. Build domain to sign + sign + pack.
-        byte[] signedDomain = PairingHandshakeWire.SignedDomainCompanionToWatch(ourPubRaw, roomKey);
+        byte[] signedDomain = PairingHandshakeWire.SignedDomainCompanionToWatch(ourPubRaw, roomKey, code);
         byte[] signature = await _crypto.Sign(ourKey, signedDomain);
         if (signature.Length != PairingHandshake.SignatureLength)
             throw new PairingException($"Companion Ed25519 signature was {signature.Length} bytes, expected {PairingHandshake.SignatureLength}.");
@@ -79,7 +85,7 @@ public class PairingFlow
             throw new PairingException($"Watch handshake response was {watchSignature.Length} bytes, expected {PairingHandshake.SignatureLength}.");
 
         // 6. Verify.
-        byte[] watchSignedDomain = PairingHandshakeWire.SignedDomainWatchToCompanion(ourPubRaw, roomKey, watchPubRaw);
+        byte[] watchSignedDomain = PairingHandshakeWire.SignedDomainWatchToCompanion(ourPubRaw, roomKey, watchPubRaw, code);
         byte[] watchPubSpki = WrapRawEd25519PubKey(watchPubRaw);
         using var watchVerifyKey = await _crypto.ImportEd25519Key(watchPubSpki);
         bool ok = await _crypto.Verify(watchVerifyKey, watchSignedDomain, watchSignature);

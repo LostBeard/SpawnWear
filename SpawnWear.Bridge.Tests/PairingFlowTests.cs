@@ -31,6 +31,11 @@ public class PairingFlowTests
 
     static readonly byte[] _ed25519SpkiPrefix = { 0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00 };
 
+    // Level 2: the 6-digit code the user reads off the watch. The companion (PairAsync) and
+    // the watch simulator must use the SAME code or verification fails - that IS the binding.
+    const string TestCode = "424242";
+    static readonly byte[] TestCodeBytes = PairingHandshake.CodeToBytes(TestCode);
+
     static byte[] RawFromSpki(byte[] spki) => spki[^32..];
 
     static byte[] SpkiFromRaw(byte[] raw)
@@ -72,12 +77,12 @@ public class PairingFlowTests
             // sign WatchToCompanion(companionPub || roomKey || watchPub) with
             // the watch's key and return that signature.
             var (companionPubRaw, roomKey, _companionSig) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
-            var watchSignedDomain = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+            var watchSignedDomain = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, TestCodeBytes);
             return await crypto.Sign(watchKey, watchSignedDomain);
         });
 
         var flow = new PairingFlow(crypto, store);
-        var record = await flow.PairAsync(smartTransport, friendlyName: "Aubs's watch");
+        var record = await flow.PairAsync(smartTransport, TestCode, friendlyName: "Aubs's watch");
 
         // Record is well-formed.
         Assert.Equal(watchPubRaw, record.WatchPubKey);
@@ -97,10 +102,37 @@ public class PairingFlowTests
         // Sanity: the companion's own signature in the write verifies under
         // its own pubkey when reconstructed.
         var (sentCompanionPub, sentRoomKey, sentCompanionSig) = PairingHandshakeWire.ParseCompanionWrite(sent);
-        var dom = PairingHandshakeWire.SignedDomainCompanionToWatch(sentCompanionPub, sentRoomKey);
+        var dom = PairingHandshakeWire.SignedDomainCompanionToWatch(sentCompanionPub, sentRoomKey, TestCodeBytes);
         using var verifyKey = await crypto.ImportEd25519Key(SpkiFromRaw(sentCompanionPub));
         Assert.True(await crypto.Verify(verifyKey, dom, sentCompanionSig),
             "Companion's own signature in the BLE write should verify.");
+    }
+
+    [Fact]
+    public async Task PairAsync_throws_if_watch_signs_a_different_code()
+    {
+        // Level 2 MITM defense: if the watch (or a relay) signs the response over a
+        // DIFFERENT code than the one the user typed into the companion, the signed
+        // domains diverge and the companion's verify MUST fail. Proves the 6-digit code
+        // is genuinely bound into the watch->companion signature, not cosmetic.
+        var crypto = new DotNetCrypto();
+        var store = new InMemoryPairingStore();
+
+        using var watchKey = await crypto.GenerateEd25519Key();
+        byte[] watchPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchKey));
+        byte[] wrongCode = PairingHandshake.CodeToBytes("000000"); // != TestCode
+
+        var smartTransport = new HookedFakeTransport(watchPubRaw, async sentPayload =>
+        {
+            var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
+            var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, wrongCode);
+            return await crypto.Sign(watchKey, dom);
+        });
+
+        var flow = new PairingFlow(crypto, store);
+        await Assert.ThrowsAsync<PairingException>(async () =>
+            await flow.PairAsync(smartTransport, TestCode));
+        Assert.Empty(store.List());
     }
 
     [Fact]
@@ -119,7 +151,7 @@ public class PairingFlowTests
 
         var flow = new PairingFlow(crypto, store);
         await Assert.ThrowsAsync<PairingException>(async () =>
-            await flow.PairAsync(smartTransport));
+            await flow.PairAsync(smartTransport, TestCode));
 
         // Nothing persisted on failure.
         Assert.Empty(store.List());
@@ -135,7 +167,7 @@ public class PairingFlowTests
 
         var flow = new PairingFlow(crypto, store);
         await Assert.ThrowsAsync<PairingException>(async () =>
-            await flow.PairAsync(smartTransport));
+            await flow.PairAsync(smartTransport, TestCode));
     }
 
     [Fact]
@@ -156,7 +188,7 @@ public class PairingFlowTests
 
         var flow = new PairingFlow(crypto, store);
         var ex = await Assert.ThrowsAsync<PairingException>(async () =>
-            await flow.PairAsync(smartTransport));
+            await flow.PairAsync(smartTransport, TestCode));
         Assert.Contains("32 bytes", ex.Message);
         Assert.Contains("64", ex.Message);
         Assert.Empty(store.List());
@@ -181,21 +213,21 @@ public class PairingFlowTests
             new HookedFakeTransport(watchPubRaw, async sentPayload =>
             {
                 var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
-                var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+                var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, TestCodeBytes);
                 return await crypto.Sign(watchKey, dom);
             });
 
         var flow = new PairingFlow(crypto, store);
 
         // First pair.
-        var firstRecord = await flow.PairAsync(makeTransport(), friendlyName: "first companion");
+        var firstRecord = await flow.PairAsync(makeTransport(), TestCode, friendlyName: "first companion");
         Assert.Single(store.List());
         Assert.Equal("first companion", store.Find(watchPubRaw)!.Value.FriendlyName);
 
         // Second pair (same watch, fresh companion-side keypair generated
         // internally by PairingFlow). Should overwrite, not add a second
         // entry.
-        var secondRecord = await flow.PairAsync(makeTransport(), friendlyName: "second companion");
+        var secondRecord = await flow.PairAsync(makeTransport(), TestCode, friendlyName: "second companion");
         Assert.Single(store.List());
         Assert.Equal("second companion", store.Find(watchPubRaw)!.Value.FriendlyName);
 
@@ -228,16 +260,16 @@ public class PairingFlowTests
                 new HookedFakeTransport(watchPubRaw, async sentPayload =>
                 {
                     var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
-                    var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+                    var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, TestCodeBytes);
                     return await crypto.Sign(watchKey, dom);
                 });
 
         var flow = new PairingFlow(crypto, store);
 
-        await flow.PairAsync(makeTransport(watchAPubRaw, watchAKey), friendlyName: "Watch A");
+        await flow.PairAsync(makeTransport(watchAPubRaw, watchAKey), TestCode, friendlyName: "Watch A");
         Assert.Single(store.List());
 
-        await flow.PairAsync(makeTransport(watchBPubRaw, watchBKey), friendlyName: "Watch B");
+        await flow.PairAsync(makeTransport(watchBPubRaw, watchBKey), TestCode, friendlyName: "Watch B");
         Assert.Equal(2, store.List().Count);
 
         Assert.Equal("Watch A", store.Find(watchAPubRaw)!.Value.FriendlyName);

@@ -32,14 +32,17 @@ public static class PairingHandshakeWire
     /// embeds in the BLE write to the watch. The watch verifies this
     /// signature against the same bytes (which it can reconstruct
     /// independently from the unsigned prefix of the write).</summary>
-    public static byte[] SignedDomainCompanionToWatch(byte[] companionPubKey, byte[] roomKey)
+    public static byte[] SignedDomainCompanionToWatch(byte[] companionPubKey, byte[] roomKey, byte[] code)
     {
         Validate(companionPubKey, PairingHandshake.PubKeyLength,  nameof(companionPubKey));
         Validate(roomKey,         PairingHandshake.RoomKeyLength, nameof(roomKey));
+        Validate(code,            PairingHandshake.CodeLength,    nameof(code));
 
-        var dom = new byte[PairingHandshake.PubKeyLength + PairingHandshake.RoomKeyLength];
-        Buffer.BlockCopy(companionPubKey, 0, dom, 0, PairingHandshake.PubKeyLength);
-        Buffer.BlockCopy(roomKey, 0, dom, PairingHandshake.PubKeyLength, PairingHandshake.RoomKeyLength);
+        var dom = new byte[PairingHandshake.PubKeyLength + PairingHandshake.RoomKeyLength + PairingHandshake.CodeLength];
+        int o = 0;
+        Buffer.BlockCopy(companionPubKey, 0, dom, o, PairingHandshake.PubKeyLength);  o += PairingHandshake.PubKeyLength;
+        Buffer.BlockCopy(roomKey,         0, dom, o, PairingHandshake.RoomKeyLength); o += PairingHandshake.RoomKeyLength;
+        Buffer.BlockCopy(code,            0, dom, o, PairingHandshake.CodeLength);
         return dom;
     }
 
@@ -47,17 +50,19 @@ public static class PairingHandshakeWire
     /// notify response. The companion verifies this signature against
     /// the same bytes (it knows companionPubKey + roomKey from its own
     /// write, and watchPubKey from the prior PairingPubKeyUuid read).</summary>
-    public static byte[] SignedDomainWatchToCompanion(byte[] companionPubKey, byte[] roomKey, byte[] watchPubKey)
+    public static byte[] SignedDomainWatchToCompanion(byte[] companionPubKey, byte[] roomKey, byte[] watchPubKey, byte[] code)
     {
         Validate(companionPubKey, PairingHandshake.PubKeyLength,  nameof(companionPubKey));
         Validate(roomKey,         PairingHandshake.RoomKeyLength, nameof(roomKey));
         Validate(watchPubKey,     PairingHandshake.PubKeyLength,  nameof(watchPubKey));
+        Validate(code,            PairingHandshake.CodeLength,    nameof(code));
 
-        var dom = new byte[PairingHandshake.PubKeyLength * 2 + PairingHandshake.RoomKeyLength];
+        var dom = new byte[PairingHandshake.PubKeyLength * 2 + PairingHandshake.RoomKeyLength + PairingHandshake.CodeLength];
         int o = 0;
         Buffer.BlockCopy(companionPubKey, 0, dom, o, PairingHandshake.PubKeyLength); o += PairingHandshake.PubKeyLength;
         Buffer.BlockCopy(roomKey,         0, dom, o, PairingHandshake.RoomKeyLength); o += PairingHandshake.RoomKeyLength;
-        Buffer.BlockCopy(watchPubKey,     0, dom, o, PairingHandshake.PubKeyLength);
+        Buffer.BlockCopy(watchPubKey,     0, dom, o, PairingHandshake.PubKeyLength); o += PairingHandshake.PubKeyLength;
+        Buffer.BlockCopy(code,            0, dom, o, PairingHandshake.CodeLength);
         return dom;
     }
 

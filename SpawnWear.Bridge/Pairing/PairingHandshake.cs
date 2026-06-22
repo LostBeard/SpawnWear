@@ -21,6 +21,30 @@ public static class PairingHandshake
     /// <summary>Ed25519 signature length.</summary>
     public const int SignatureLength = 64;
 
+    /// <summary>Number of decimal digits in the on-screen pairing code.</summary>
+    public const int CodeLength = 6;
+
+    /// <summary>Canonical byte form of the 6-digit pairing code that is folded into the
+    /// signed domains (Level 2 MITM defense). The code is NEVER transmitted on the wire -
+    /// the companion only knows it because the user read it off the watch screen and typed
+    /// it in, which is exactly what proves physical presence. Encoding = the 6 ASCII digit
+    /// bytes of the zero-padded code; the watch firmware mirrors this byte-for-byte.</summary>
+    public static byte[] CodeToBytes(string code)
+    {
+        if (code is null) throw new ArgumentNullException(nameof(code));
+        if (code.Length != CodeLength)
+            throw new ArgumentException($"Pairing code must be exactly {CodeLength} digits, got {code.Length}.", nameof(code));
+        var b = new byte[CodeLength];
+        for (int i = 0; i < CodeLength; i++)
+        {
+            char c = code[i];
+            if (c < '0' || c > '9')
+                throw new ArgumentException($"Pairing code must be {CodeLength} decimal digits.", nameof(code));
+            b[i] = (byte)c;
+        }
+        return b;
+    }
+
     /// <summary>Length of the room key agreed on during pairing.
     /// Matches SpawnDev.RTC's <c>RoomKey</c> (20 bytes; WebTorrent
     /// info_hash compatible so the same key shape works directly with

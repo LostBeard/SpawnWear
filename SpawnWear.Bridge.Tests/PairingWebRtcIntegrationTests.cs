@@ -30,6 +30,10 @@ public class PairingWebRtcIntegrationTests
 
     static byte[] RawFromSpki(byte[] spki) => spki[^32..];
 
+    // Level 2: the 6-digit code the user reads off the watch. Companion + watch-sim share it.
+    const string TestCode = "424242";
+    static readonly byte[] TestCodeBytes = PairingHandshake.CodeToBytes(TestCode);
+
     static byte[] SpkiFromRaw(byte[] raw)
     {
         var spki = new byte[_ed25519SpkiPrefix.Length + raw.Length];
@@ -101,12 +105,12 @@ public class PairingWebRtcIntegrationTests
         var transport = new HookedFakeTransport(watchPubRaw, async sentPayload =>
         {
             var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
-            var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+            var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, TestCodeBytes);
             return await crypto.Sign(watchKey, dom);
         });
 
         var flow = new PairingFlow(crypto, new InMemoryPairingStore());
-        var record = await flow.PairAsync(transport, friendlyName);
+        var record = await flow.PairAsync(transport, TestCode, friendlyName);
 
         return new PairedSession
         {
@@ -309,13 +313,13 @@ public class PairingWebRtcIntegrationTests
             new HookedFakeTransport(watchPubRaw, async sentPayload =>
             {
                 var (companionPubRaw, roomKey, _) = PairingHandshakeWire.ParseCompanionWrite(sentPayload);
-                var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw);
+                var dom = PairingHandshakeWire.SignedDomainWatchToCompanion(companionPubRaw, roomKey, watchPubRaw, TestCodeBytes);
                 return await crypto.Sign(watchKey, dom);
             });
 
         var flow = new PairingFlow(crypto, store);
-        var firstRecord = await flow.PairAsync(makeTransport(), "first companion");
-        var secondRecord = await flow.PairAsync(makeTransport(), "second companion");
+        var firstRecord = await flow.PairAsync(makeTransport(), TestCode, "first companion");
+        var secondRecord = await flow.PairAsync(makeTransport(), TestCode, "second companion");
 
         // OurPubKey + OurPrivKey changed across the re-pair.
         Assert.NotEqual(firstRecord.OurPubKey, secondRecord.OurPubKey);
