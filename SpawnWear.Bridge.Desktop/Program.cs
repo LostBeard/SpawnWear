@@ -53,6 +53,77 @@ if (Environment.GetEnvironmentVariable("SW_RTC_LOG") == "1")
     Console.WriteLine("[selftest] SipSorcery logging ENABLED");
 }
 
+// Generate a FIXED test pairing's key material (base64) to embed in the shared
+// WebRtcSelfTestPairing class. Run once: dotnet run --project SpawnWear.Bridge.Desktop -- genpair
+if (args.Length > 0 && args[0] == "genpair")
+{
+    var c = new DotNetCrypto();
+    using var compKey = await c.GenerateEd25519Key();
+    using var wKey = await c.GenerateEd25519Key();
+    byte[] compPub = (await c.ExportPublicKeySpki(compKey))[^32..];
+    byte[] wPub = (await c.ExportPublicKeySpki(wKey))[^32..];
+    byte[] compPriv = await c.ExportPrivateKeyPkcs8(compKey);
+    byte[] wPriv = await c.ExportPrivateKeyPkcs8(wKey);
+    var rk = new byte[20];
+    System.Security.Cryptography.RandomNumberGenerator.Fill(rk);
+    Console.WriteLine("CompanionPubB64  = \"" + Convert.ToBase64String(compPub) + "\";");
+    Console.WriteLine("CompanionPrivB64 = \"" + Convert.ToBase64String(compPriv) + "\";");
+    Console.WriteLine("WatchPubB64      = \"" + Convert.ToBase64String(wPub) + "\";");
+    Console.WriteLine("WatchPrivB64     = \"" + Convert.ToBase64String(wPriv) + "\";");
+    Console.WriteLine("RoomKeyB64       = \"" + Convert.ToBase64String(rk) + "\";");
+    return 0;
+}
+
+// Long-lived "watch" peer for the browser <-> .NET demo (Stage 1b). Joins the fixed
+// self-test room with the watch-role record and echoes anything the browser sends, so a
+// person can SEE the browser Companion talk to a .NET WebRTC peer over the hub.
+// Run: dotnet run --project SpawnWear.Bridge.Desktop -- watch
+if (args.Length > 0 && args[0] == "watch")
+{
+    var wcrypto = new DotNetCrypto();
+    var wopts = new BridgeWebRtcOptions();
+    var wfactory = new WebRtcTransportFactory(wopts, wcrypto, RandomPeerId());
+    await using var w = wfactory.CreateTransport(WebRtcSelfTestPairing.WatchRecord());
+    w.MessageReceived += m =>
+    {
+        var text = System.Text.Encoding.UTF8.GetString(m.Payload);
+        Console.WriteLine($"[watch] recv channel='{m.ChannelId}' payload='{text}'");
+        try { _ = w.SendAsync(new TransportMessage(m.ChannelId, System.Text.Encoding.UTF8.GetBytes("echo: " + text))); }
+        catch (Exception ex) { Console.WriteLine($"[watch] echo failed: {ex.Message}"); }
+    };
+    Console.WriteLine($"[watch] hub={wopts.AnnounceUrl}");
+    Console.WriteLine($"[watch] joining the self-test room, waiting for the Companion (browser) to connect... (Ctrl+C to stop)");
+    await w.ConnectAsync(CancellationToken.None);
+    Console.WriteLine("[watch] CONNECTED + mutually verified. Echoing messages. Ctrl+C to stop.");
+    await Task.Delay(System.Threading.Timeout.Infinite);
+    return 0;
+}
+
+// Companion-role peer using the SAME fixed self-test pairing - to verify the fixed records
+// + the watch-mode echo end-to-end on .NET before the browser button is exercised.
+// Run (against a running `-- watch`): dotnet run --project SpawnWear.Bridge.Desktop -- companion
+if (args.Length > 0 && args[0] == "companion")
+{
+    var ccrypto = new DotNetCrypto();
+    var copts = new BridgeWebRtcOptions();
+    var cfactory = new WebRtcTransportFactory(copts, ccrypto, RandomPeerId());
+    await using var cpeer = cfactory.CreateTransport(WebRtcSelfTestPairing.CompanionRecord());
+    var echoTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    cpeer.MessageReceived += m => echoTcs.TrySetResult(System.Text.Encoding.UTF8.GetString(m.Payload));
+    try
+    {
+        using var ccts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        Console.WriteLine("[companion] connecting to the watch peer over the hub...");
+        await cpeer.ConnectAsync(ccts.Token);
+        Console.WriteLine("[companion] connected + verified; sending ping...");
+        await cpeer.SendAsync(new TransportMessage("selftest", System.Text.Encoding.UTF8.GetBytes("ping from companion")), ccts.Token);
+        var reply = await echoTcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Console.WriteLine($"[companion] SUCCESS - watch replied: '{reply}'");
+        return 0;
+    }
+    catch (Exception ex) { Console.WriteLine($"[companion] FAIL - {ex.GetType().Name}: {ex.Message}"); return 1; }
+}
+
 var crypto = new DotNetCrypto();
 var options = new BridgeWebRtcOptions(); // default hub: wss://hub.spawndev.com:44365/announce
 

@@ -65,6 +65,22 @@
     }
 </div>
 
+<div class="card" style="margin-top:1rem;">
+    <div class="stat-label" style="margin-bottom:0.4rem;">WEBRTC SELF-TEST (DEV)</div>
+    <p class="muted" style="font-size:0.85rem;">
+        Connects this browser to a .NET peer (<code>SpawnWear.Bridge.Desktop -- watch</code>) over
+        hub.spawndev.com using a fixed test pairing - proving the watch &lt;-&gt; companion WebRTC path
+        (datachannel + Ed25519 challenge) before the watch firmware can be a peer.
+    </p>
+    <button class="secondary" @onclick="DoWebRtcSelfTestAsync" disabled="@_webRtcSelfTestBusy">
+        @(_webRtcSelfTestBusy ? "Connecting…" : "Run WebRTC self-test")
+    </button>
+    @if (_webRtcSelfTestStatus is not null)
+    {
+        <div class="muted" style="margin-top:0.5rem; font-family: ui-monospace, monospace; font-size:0.8rem;">@_webRtcSelfTestStatus</div>
+    }
+</div>
+
 @if (!Bridge.IsConnected && _savedPairings.Count > 0)
 {
     <div class="card">
@@ -149,6 +165,8 @@
     bool _pairing;
     string _pairingCode = "";   // 6-digit code the user reads off the watch screen (Level 2 binding)
     bool _promotingToWebRtc;
+    bool _webRtcSelfTestBusy;
+    string? _webRtcSelfTestStatus;
     List<PairingRecord> _savedPairings = new();
 
     protected override void OnInitialized()
@@ -222,6 +240,39 @@
         }
         catch (NotImplementedException ex) { _lastError = "BLE transport not yet wired (Phase 4a). " + ex.Message; }
         catch (Exception ex) { _lastError = ex.Message; }
+    }
+
+    async Task DoWebRtcSelfTestAsync()
+    {
+        _webRtcSelfTestBusy = true;
+        _webRtcSelfTestStatus = "Connecting to the .NET peer over hub.spawndev.com…";
+        await InvokeAsync(StateHasChanged);
+        SpawnWear.Bridge.WebRtc.WebRtcTransport? transport = null;
+        try
+        {
+            transport = WebRtcFactory.CreateTransport(WebRtcSelfTestPairing.CompanionRecord());
+            var echo = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            transport.MessageReceived += m => echo.TrySetResult(System.Text.Encoding.UTF8.GetString(m.Payload));
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            await transport.ConnectAsync(cts.Token);
+            _webRtcSelfTestStatus = "Connected + Ed25519-verified. Sending a ping…";
+            await InvokeAsync(StateHasChanged);
+
+            await transport.SendAsync(new TransportMessage("selftest", System.Text.Encoding.UTF8.GetBytes("ping from browser")), cts.Token);
+            var reply = await echo.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            _webRtcSelfTestStatus = $"SUCCESS — datachannel + mutual Ed25519 challenge over the hub. Peer replied: \"{reply}\"";
+        }
+        catch (Exception ex)
+        {
+            _webRtcSelfTestStatus = $"FAILED: {ex.GetType().Name}: {ex.Message} (is the desktop peer running? dotnet run --project SpawnWear.Bridge.Desktop -- watch)";
+        }
+        finally
+        {
+            if (transport is not null) { try { await transport.DisposeAsync(); } catch { } }
+            _webRtcSelfTestBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     async Task DoPairAsync()
