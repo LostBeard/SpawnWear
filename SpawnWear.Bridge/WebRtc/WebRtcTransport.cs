@@ -133,8 +133,13 @@ public class WebRtcTransport : ITransport, IAsyncDisposable
     {
         if (_channel is not null)
         {
+            // Unhook our handlers BEFORE closing, so our own Close() does not re-enter
+            // OnDataChannelClosed (which would fire-and-forget another DisconnectAsync and
+            // surface as an unhandled exception during disposal).
+            _channel.OnBinaryMessage -= OnBinaryMessage;
+            _channel.OnClose         -= OnDataChannelClosed;
             try { _channel.Close(); } catch { /* ignore */ }
-            _channel.Dispose();
+            try { _channel.Dispose(); } catch { /* ignore */ }
             _channel = null;
         }
         var roomKey = RoomKey.FromBytes(_pairing.RoomKey);
