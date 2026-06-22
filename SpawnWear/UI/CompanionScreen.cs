@@ -75,7 +75,10 @@ namespace SpawnWear.UI
             int footerWidth = SmallFont.MeasureString(footer, footerScale);
             SmallFont.DrawString(_fb, footer, (_panelWidth - footerWidth) / 2, _panelHeight - 60, footerScale, Color.White);
 
-            _fb.Flush();
+            // Explicit full-panel flush: this page has a large empty region below
+            // the rows that must overwrite whatever screen was underneath (the
+            // sub-page is pushed over Settings), so don't rely on a default flush.
+            _fb.Flush(0, 0, _panelWidth, _panelHeight);
             _statusBar?.Render(true);
             _list.Invalidate();
         }
