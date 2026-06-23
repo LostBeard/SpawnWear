@@ -52,9 +52,11 @@ namespace SpawnWear
         static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
         static StatusBar _statusBar;        // shared status bar; OnTick refreshes the Companion-link icon
         static Bitmap _fb; // shared framebuffer reference for screenshots
-        // DIAGNOSTIC 2026-06-23: the watch freezes ~15-20s after boot (suspect: WebRTC/libpeer native).
-        // Gated OFF to confirm the cause + give a stable, deployable watch. Re-enable once fixed.
-        const bool EnableWebRtcTransport = false;
+        // FREEZE ROOT-CAUSED 2026-06-23: unlocked shared I2C bus across 3 threads (main loop StatusBar
+        // AXP/RTC, WebRTC thread IMU+battery telemetry, touch interrupt). Concurrent transactions wedged
+        // the bus -> a native read blocked -> cooperative CLR froze. Was masked until WebRTC's thread
+        // added the 5Hz IMU reads. Fixed by BoardSetup.I2cLock around every driver transaction. Re-enabled.
+        const bool EnableWebRtcTransport = true;
 
         static int _bootButtonClickPending; // 0=none, 1=short(Back), 2=long; set by ISR, drained by loop
         static long _bootDownUtcTicks;

@@ -79,7 +79,7 @@ namespace SpawnWear.Drivers.Rtc
         {
             byte[] cmd = new byte[] { REG_SECONDS };
             byte[] buf = new byte[7];
-            _i2c.WriteRead(cmd, buf);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(cmd, buf); }
 
             // Bit 7 of the seconds register is the OS (oscillator stop) flag.
             bool osFlag = (buf[0] & 0x80) != 0;
@@ -122,13 +122,13 @@ namespace SpawnWear.Drivers.Rtc
         public byte ReadReg(byte register)
         {
             byte[] read = new byte[1];
-            _i2c.WriteRead(new byte[] { register }, read);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(new byte[] { register }, read); }
             return read[0];
         }
 
         public void WriteReg(byte register, byte value)
         {
-            _i2c.Write(new byte[] { register, value });
+            lock (BoardSetup.I2cLock) { _i2c.Write(new byte[] { register, value }); }
         }
 
         static int BcdToDec(byte bcd) => (bcd >> 4) * 10 + (bcd & 0x0F);

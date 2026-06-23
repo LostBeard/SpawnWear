@@ -124,7 +124,7 @@ namespace SpawnWear.Drivers.Touch
             SpanByte writeBuf = new byte[1];
             writeBuf[0] = RegFingerNum;
             SpanByte readBuf = new byte[6];
-            _i2c.WriteRead(writeBuf, readBuf);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, readBuf); }
 
             byte fingerCount = readBuf[0];
             ushort x1 = Decode12Bit(readBuf[1], readBuf[2]); // X1H | X1L
@@ -136,7 +136,7 @@ namespace SpawnWear.Drivers.Touch
             {
                 writeBuf[0] = RegX2PosH;
                 SpanByte t2 = new byte[4];
-                _i2c.WriteRead(writeBuf, t2);
+                lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, t2); }
                 x2 = Decode12Bit(t2[0], t2[1]);
                 y2 = Decode12Bit(t2[2], t2[3]);
             }
@@ -159,7 +159,7 @@ namespace SpawnWear.Drivers.Touch
             SpanByte writeBuf = new byte[1];
             writeBuf[0] = reg;
             SpanByte readBuf = new byte[1];
-            _i2c.WriteRead(writeBuf, readBuf);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, readBuf); }
             return readBuf[0];
         }
 
@@ -168,7 +168,7 @@ namespace SpawnWear.Drivers.Touch
             SpanByte buf = new byte[2];
             buf[0] = reg;
             buf[1] = value;
-            _i2c.Write(buf);
+            lock (BoardSetup.I2cLock) { _i2c.Write(buf); }
         }
 
         // The X/Y high byte uses bits 11:8 in the low nibble; the upper nibble is touch-event flags

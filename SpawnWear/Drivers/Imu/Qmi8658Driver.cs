@@ -266,7 +266,7 @@ namespace SpawnWear.Drivers.Imu
         public byte ReadReg(byte register)
         {
             byte[] read = new byte[1];
-            _i2c.WriteRead(new byte[] { register }, read);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(new byte[] { register }, read); }
             return read[0];
         }
 
@@ -275,7 +275,7 @@ namespace SpawnWear.Drivers.Imu
         /// </summary>
         public void WriteReg(byte register, byte value)
         {
-            _i2c.Write(new byte[] { register, value });
+            lock (BoardSetup.I2cLock) { _i2c.Write(new byte[] { register, value }); }
         }
 
         /// <summary>
@@ -285,7 +285,7 @@ namespace SpawnWear.Drivers.Imu
         /// </summary>
         public void ReadRegs(byte start, byte[] buf)
         {
-            _i2c.WriteRead(new byte[] { start }, buf);
+            lock (BoardSetup.I2cLock) { _i2c.WriteRead(new byte[] { start }, buf); }
         }
     }
 }

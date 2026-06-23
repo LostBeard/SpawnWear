@@ -15,6 +15,14 @@ namespace SpawnWear.Drivers
         private static bool _i2cConfigured;
         private static GpioController _gpio;
 
+        /// <summary>One lock for the entire shared I2C bus. Six devices live on the single bus (SDA=15,
+        /// SCL=14) and are read from THREE threads - the main event loop (StatusBar: AXP/RTC), the WebRTC
+        /// transport thread (IMU + battery telemetry), and the touch interrupt thread. Concurrent
+        /// transactions corrupt the bus and wedge a device, which blocks a native read and freezes the
+        /// cooperative CLR. Every chip-specific transaction MUST take this lock. (See CLAUDE.md "One I2C
+        /// bus, six devices ... lock around chip-specific transactions".)</summary>
+        public static readonly object I2cLock = new object();
+
         /// <summary>Lazy global GPIO controller. Cheap to call repeatedly.</summary>
         public static GpioController GpioController
         {
