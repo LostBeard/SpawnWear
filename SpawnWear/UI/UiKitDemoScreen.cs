@@ -67,13 +67,13 @@ namespace SpawnWear.UI
         {
             _taps++;
             _status.Text = "TAPS: " + _taps;
-            RenderAll();
+            RequestRender();
         }
 
         private void OnToggled(bool on)
         {
             _status.Text = on ? "FEEDBACK ON" : "FEEDBACK OFF";
-            RenderAll();
+            RequestRender();
         }
 
         public override void OnResume()

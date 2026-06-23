@@ -17,21 +17,35 @@ namespace SpawnDev.UI
 
         protected WidgetScreen(IUiSurface surface) { Surface = surface; }
 
-        /// <summary>Lay out the tree against current sizes, paint it, and push the whole surface.
-        /// (Dirty-rect partial flush is a later optimization; full flush is correct + simple.)</summary>
-        protected void RenderAll()
+        private bool _needsRender = true;
+
+        /// <summary>Request a repaint on the next Tick. Rendering is DEFERRED to the event loop rather
+        /// than done synchronously inside OnResume/OnTap: the navigator calls OnResume mid-transition
+        /// (during the tap that opened the screen), and drawing then left the previous screen partially
+        /// visible. Rendering on the next Tick lets the transition + touch handling settle first.</summary>
+        protected void RequestRender() { _needsRender = true; }
+
+        private void RenderNow()
         {
             if (Root == null) return;
+            Surface.Clear(Theme.Current.Background); // full clear (the launcher does this) before draw
             Root.Layout();
             Root.Draw(Surface);
-            Surface.FlushAll();
+            Surface.FlushAll();                      // no-arg whole-bitmap flush
         }
 
-        public virtual void OnResume() => RenderAll();
+        public virtual void OnResume() { _needsRender = true; }
         public virtual void OnPause() { }
-        public virtual void Tick() { }
-        public virtual void Invalidate() => RenderAll();
-        public virtual bool OnTap(int x, int y) => Root != null && Root.OnTap(x, y);
+        public virtual void Tick() { if (_needsRender) { _needsRender = false; RenderNow(); } }
+        public virtual void Invalidate() { _needsRender = true; }
+
+        public virtual bool OnTap(int x, int y)
+        {
+            if (Root == null) return false;
+            bool consumed = Root.OnTap(x, y);
+            if (consumed) _needsRender = true; // a widget changed state -> repaint next tick
+            return consumed;
+        }
     }
 
     /// <summary>

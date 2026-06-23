@@ -62,6 +62,11 @@ namespace SpawnWear
         // is a swipe (also Phase 2). For V1 we treat any short single-finger
         // touch as a tap and let the navigator cycle screens.
         const int TapMaxMs = 350;
+        // Debounce: a lifting finger can bounce a 2nd quick tap right after one that changed screens,
+        // which would then act on the NEW screen (e.g. immediately closing a just-opened sub-page).
+        // Ignore taps that land within this window of the previous dispatched tap.
+        const int TapDebounceMs = 250;
+        static long _lastTapDispatchUtcTicks;
         const int TapMaxMoveSquared = 30 * 30;
         // Long-press = finger held in roughly the same place for >= 800 ms.
         // Triggers ScreenNavigator.GoHome() so the user can always get back to
@@ -1393,7 +1398,19 @@ namespace SpawnWear
                         if (_nav != null && _stateAtFingerDown == ScreenState.Active)
                         {
                             if (isLongPress) _nav.GoHome();
-                            else if (isTap) _nav.HandleTap(_fingerLastX, _fingerLastY);
+                            else if (isTap)
+                            {
+                                long sinceLastTapMs = (nowTicks - _lastTapDispatchUtcTicks) / TimeSpan.TicksPerMillisecond;
+                                if (sinceLastTapMs >= TapDebounceMs)
+                                {
+                                    _lastTapDispatchUtcTicks = nowTicks;
+                                    _nav.HandleTap(_fingerLastX, _fingerLastY);
+                                }
+                                else
+                                {
+                                    Debug.WriteLine("[Touch] tap debounced (" + sinceLastTapMs + "ms since last)");
+                                }
+                            }
                         }
                     }
 
