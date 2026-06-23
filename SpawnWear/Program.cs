@@ -972,6 +972,14 @@ namespace SpawnWear
         // Read progress: GET /webrtc-status. Dev diagnostic.
         public static string ConnectStatus = "idle";
 
+        // Set true by the "sys.disconnect" graceful-bye from the Companion; the persistent loop exits
+        // immediately when it sees this (vs. waiting out the ICE keepalive timeout).
+        static bool _sysDisconnectRequested;
+        static void OnSysDisconnect(string channelId, byte[] payload)
+        {
+            _sysDisconnectRequested = true;
+        }
+
         // RETIRED dev HTTP trigger. The autonomous WebRtcTransportService now owns the connection
         // lifecycle and drives WebRtcConnectRun(bus) on its own thread; the HTTP server is no longer
         // started. Kept as a no-op so the (retired) HttpServer.cs still compiles.
@@ -1187,9 +1195,15 @@ namespace SpawnWear
                     LogSd("CONNECTED - bus pump + telemetry stream");
                     bus.ClearSendQueue();     // drop anything stale from a previous link
                     bus.IsConnected = true;
+                    // Graceful-bye: the Companion sends "sys.disconnect" right before it tears down, so
+                    // we exit immediately instead of waiting out the ~10s ICE keepalive timeout (which
+                    // stays as the fallback for ungraceful drops - crash, dead WiFi).
+                    _sysDisconnectRequested = false;
+                    bus.Subscribe("sys.disconnect", OnSysDisconnect);
                     int rxCount = 0, txCount = 0, tick = 0, seq = 0;
                     byte[] rxFrame = new byte[1100]; // >= native SW_RX_MSG_MAX (1024)
-                    while (SpawnDev.WebRTC.PeerConnection.GetState(h) == SpawnDev.WebRTC.PeerConnection.StateCompleted)
+                    while (SpawnDev.WebRTC.PeerConnection.GetState(h) == SpawnDev.WebRTC.PeerConnection.StateCompleted
+                           && !_sysDisconnectRequested)
                     {
                         System.Threading.Thread.Sleep(200);
 
@@ -1225,8 +1239,9 @@ namespace SpawnWear
                     }
                     bus.IsConnected = false;
                     bus.ClearSendQueue();
+                    string why = _sysDisconnectRequested ? "companion sys.disconnect" : "keepalive timeout";
                     ConnectStatus = "disconnected (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
-                    LogSd("peer disconnected (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ") - link closed");
+                    LogSd("peer disconnected (" + why + ", seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")");
                 }
                 else
                 {

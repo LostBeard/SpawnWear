@@ -131,6 +131,16 @@ public class WebRtcTransport : ITransport, IAsyncDisposable
 
     public async Task DisconnectAsync()
     {
+        // Graceful bye: tell the watch we're leaving on a system channel so it flips its link state
+        // immediately, instead of waiting out its ~10s ICE keepalive timeout. Best-effort, with a
+        // short flush delay before we tear the channel down; the keepalive timeout remains the fallback
+        // for ungraceful drops (crash, dead WiFi, browser killed).
+        if (_channel is not null && IsConnected)
+        {
+            try { await SendAsync(new TransportMessage("sys.disconnect", Array.Empty<byte>())); } catch { /* ignore */ }
+            try { await Task.Delay(150); } catch { /* ignore */ }
+        }
+
         if (_channel is not null)
         {
             // Unhook our handlers BEFORE closing, so our own Close() does not re-enter
