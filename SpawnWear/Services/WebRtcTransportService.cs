@@ -27,6 +27,11 @@ namespace SpawnWear.Services
         Thread _thread;
         bool _running;  // nanoFramework has no 'volatile'; plain bool read/write is atomic enough here
 
+        /// <summary>The multiplexing channel bus shared by the OS and loadable apps. Survives across
+        /// connect/reconnect cycles - subscribers register once and the service routes whenever a link
+        /// is up. OS services use <c>Bus.Send/Subscribe</c>; apps get a scoped <c>Bus.OpenAppChannel</c>.</summary>
+        public TransportBus Bus { get; } = new TransportBus();
+
         /// <summary>Reconnect cool-down after a connection ends or a failed attempt (ms).</summary>
         public int ReconnectDelayMs { get; set; } = 3000;
 
@@ -65,9 +70,10 @@ namespace SpawnWear.Services
                     if (wifiUp && paired)
                     {
                         // Blocks for the life of the connection: connect (re-announcing until the
-                        // Companion is reachable) -> mutual challenge -> stay connected until the
-                        // peer disconnects, then returns here and we reconnect.
-                        Program.WebRtcConnectRun();
+                        // Companion is reachable) -> mutual challenge -> stay connected, pumping the
+                        // channel Bus (drain sends, route inbound) until the peer disconnects, then
+                        // returns here and we reconnect.
+                        Program.WebRtcConnectRun(Bus);
                     }
                     else
                     {

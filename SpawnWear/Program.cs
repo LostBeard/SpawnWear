@@ -966,13 +966,12 @@ namespace SpawnWear
         // Read progress: GET /webrtc-status. Dev diagnostic.
         public static string ConnectStatus = "idle";
 
+        // RETIRED dev HTTP trigger. The autonomous WebRtcTransportService now owns the connection
+        // lifecycle and drives WebRtcConnectRun(bus) on its own thread; the HTTP server is no longer
+        // started. Kept as a no-op so the (retired) HttpServer.cs still compiles.
         public static void StartWebRtcConnect()
         {
-            // Run SYNCHRONOUSLY on the caller (HTTP) thread. A nanoFramework `new Thread()`
-            // crashed during the libpeer interop (likely thread-stack too small for the native
-            // call chain); the HTTP thread runs the same offer path fine (/webrtc-offer).
-            ConnectStatus = "starting";
-            WebRtcConnectRun();
+            ConnectStatus = "ignored - WebRTC is now autonomous (WebRtcTransportService)";
         }
 
         // Crash-survival + TIMELINE log: mirror each connect stage to SD (mounted at I:\) with an
@@ -1013,8 +1012,9 @@ namespace SpawnWear
             0x8B,0xC8,0x28,0xBC,0xAD,0xDE,0x13,0x7E,0xEF,0x8D,0x90,0xBD,0xEC,0x9D,0xC0,0x6A };
 
         // Public so the autonomous WebRtcTransportService can drive it. Blocks for the life of one
-        // connection (connect -> mutual challenge -> stay connected until the peer disconnects).
-        public static void WebRtcConnectRun()
+        // connection (connect -> mutual challenge -> stay connected, pumping the channel Bus, until the
+        // peer disconnects). The bus carries the OS + app channels multiplexed over this one link.
+        public static void WebRtcConnectRun(SpawnWear.Services.TransportBus bus)
         {
             SwTrackerSignaling tr = null;
             int h = -1;
@@ -1178,22 +1178,46 @@ namespace SpawnWear
                     // companion all the time it needs to finish ITS half of the mutual challenge. (First
                     // version runs on the HTTP thread, so /webrtc-connect stays open for the connection's
                     // life; a background-thread WebRTC service is the next refinement.)
-                    LogSd("CONNECTED - persistent loop (channel stays open until peer disconnects)");
-                    int rxCount = 0;
+                    LogSd("CONNECTED - bus pump + telemetry stream");
+                    bus.ClearSendQueue();     // drop anything stale from a previous link
+                    bus.IsConnected = true;
+                    int rxCount = 0, txCount = 0, tick = 0, seq = 0;
+                    byte[] rxFrame = new byte[1100]; // >= native SW_RX_MSG_MAX (1024)
                     while (SpawnDev.WebRTC.PeerConnection.GetState(h) == SpawnDev.WebRTC.PeerConnection.StateCompleted)
                     {
                         System.Threading.Thread.Sleep(200);
-                        int rn = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rx);
+
+                        // 1) drain the bus send queue (OS + app channels, multiplexed) onto the wire
+                        byte[] frame;
+                        while ((frame = bus.DequeueSend()) != null)
+                        {
+                            SpawnDev.WebRTC.PeerConnection.Send(h, frame, frame.Length);
+                            txCount++;
+                        }
+
+                        // 2) route any inbound frame to its channel subscriber (isolated per-handler)
+                        int rn = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rxFrame);
                         if (rn > 0)
                         {
                             rxCount++;
-                            string preview = rn <= 80 ? new string(System.Text.Encoding.UTF8.GetChars(rx, 0, rn)) : (rn + " bytes");
-                            ConnectStatus = "CONNECTED (rx=" + rxCount + ")";
-                            LogSd("rx#" + rxCount + " (" + rn + "B): " + preview);
+                            bus.RouteReceived(rxFrame, rn);
+                        }
+
+                        // 3) first sys.* consumer: stream battery + imu ~1 Hz on the existing channels
+                        //    the Companion dashboard already decodes ("battery" / "imu").
+                        tick++;
+                        if (tick >= 5)
+                        {
+                            tick = 0;
+                            seq++;
+                            PublishTelemetry(bus);
+                            ConnectStatus = "CONNECTED - streaming (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
                         }
                     }
-                    ConnectStatus = "disconnected (was connected, rx=" + rxCount + ")";
-                    LogSd("peer disconnected after " + rxCount + " msgs - link closed");
+                    bus.IsConnected = false;
+                    bus.ClearSendQueue();
+                    ConnectStatus = "disconnected (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
+                    LogSd("peer disconnected (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ") - link closed");
                 }
                 else
                 {
@@ -1210,6 +1234,57 @@ namespace SpawnWear
                 try { tr?.Dispose(); } catch { }
                 try { if (h >= 0) SpawnDev.WebRTC.PeerConnection.Close(h); } catch { }
             }
+        }
+
+        // First sys.* telemetry consumer: publish battery + IMU on the EXISTING Companion channels, in
+        // the same binary schemas WatchProfileService notifies over BLE - so the Companion dashboard
+        // (BridgeClient battery/imu decode + Home.razor cards) renders them unchanged.
+        //   battery: [percent:u8][flags:u8][mV:u16-LE][mA:i16-LE]
+        //   imu:     [ax,ay,az,gx,gy,gz : i16-LE]   accel = milli-g, gyro = deci-dps (clamped to i16)
+        static void PublishTelemetry(SpawnWear.Services.TransportBus bus)
+        {
+            try
+            {
+                int pct = _axp.ReadBatteryPercent();
+                int mv = _axp.ReadBatteryMillivolts();
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                if (mv < 0) mv = 0;
+                byte[] bat = new byte[6];
+                bat[0] = (byte)pct;
+                bat[1] = 0; // flags: charging/vbus/low not wired yet
+                bat[2] = (byte)(mv & 0xFF);
+                bat[3] = (byte)((mv >> 8) & 0xFF);
+                bat[4] = 0;
+                bat[5] = 0; // current mA not measured yet
+                bus.Send("battery", bat);
+            }
+            catch (Exception ex) { Debug.WriteLine("[Telemetry] battery EX " + ex.Message); }
+
+            try
+            {
+                Qmi8658Driver.ImuSample s;
+                if (_imu != null && _imu.TryRead(out s))
+                {
+                    byte[] imu = new byte[12];
+                    WriteI16Clamped(imu, 0, (int)(s.AccelX * 1000f));
+                    WriteI16Clamped(imu, 2, (int)(s.AccelY * 1000f));
+                    WriteI16Clamped(imu, 4, (int)(s.AccelZ * 1000f));
+                    WriteI16Clamped(imu, 6, (int)(s.GyroX * 10f));
+                    WriteI16Clamped(imu, 8, (int)(s.GyroY * 10f));
+                    WriteI16Clamped(imu, 10, (int)(s.GyroZ * 10f));
+                    bus.Send("imu", imu);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine("[Telemetry] imu EX " + ex.Message); }
+        }
+
+        static void WriteI16Clamped(byte[] buf, int off, int val)
+        {
+            if (val > 32767) val = 32767;
+            if (val < -32768) val = -32768;
+            buf[off] = (byte)(val & 0xFF);
+            buf[off + 1] = (byte)((val >> 8) & 0xFF);
         }
 
         static void StartTouchProbe()
