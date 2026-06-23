@@ -1,5 +1,19 @@
 # Phase 7b - Watch WebRTC via libpeer (integration plan)
 
+## CURRENT STATE (2026-06-23) - milestones 1-5 REACHED; DTLS handshake is the last blocker
+The pipeline works end-to-end: libpeer builds+links into nf, a `PeerConnection` constructs, the
+watch self-produces an offer with candidates, the hand-rolled tracker-WS transport connects through
+the REAL hub.spawndev.com, and the watch reaches the **early interop test (milestone 5)** against a
+`SpawnWear.Bridge.Desktop answerroom` SipSorcery peer. **ICE connects both directions (~235ms) and
+the DTLS handshake is bidirectional.** It then fails: the watch's mbedTLS sends `handshake_failure(40)`
+/ returns -0x6E00 at a negotiation step. TLS1.2 cipher + curve + sig-alg are all instrumented and
+none fire (so those PASS); both ends are ECDSA P-256. The DTLS crash and the watch-freeze are FIXED.
+**Full pick-up state, the `g_sw_dtls_cp` diagnostic codes, and the next test (TLS 1.3 now genuinely
+forced off - it had been silently overridden by a duplicate Kconfig line) are in memory
+`project-spawnwear-2026-06-23-dtls-handshake-failure-narrowed` and the patch doc
+`nf-interpreter/Patches/libpeer-dtls-srtp-recv-timeout.md`.** The plan below is the original
+2026-06-22 integration research, kept for reference.
+
 Supersedes the libdatachannel assumptions in `phase7-firmware-stub.md` §"WebRTC peer integration". Decision (2026-06-22, TJ): **`sepfy/libpeer`** as the watch-side WebRTC stack, integrated into the LostBeard nf-interpreter fork. Background: [[project_phase7b_libdatachannel_research_finding_2026_05_05]]. Stage 1 (browser/.NET WebRTC over the hub) is PROVEN ([[spawnwear-2026-06-22-phase7-webrtc-stage1a-proven]]); this is the watch's half.
 
 ## What libpeer gives us (researched 2026-06-22, sourced)
