@@ -1035,23 +1035,45 @@ namespace SpawnWear
 
                 SpawnDev.WebRTC.PeerConnection.SetRemoteDescription(h, answer, SpawnDev.WebRTC.PeerConnection.SdpTypeAnswer);
                 LogSd("remote-set ok, dtls handshake starting (poll)");
+                // Wait for StateCompleted (4 = DTLS + SCTP done, data channel OPEN). State 3
+                // (Connected) is only ICE - don't stop there or we'd Close before DTLS finishes.
                 bool connected = false;
                 int lastSt = -999;
-                for (int i = 0; i < 200; i++)
+                for (int i = 0; i < 300; i++)
                 {
                     System.Threading.Thread.Sleep(50);
                     int st = SpawnDev.WebRTC.PeerConnection.GetState(h);
                     ConnectStatus = "state=" + st + " iter=" + i;
                     if (st != lastSt) { LogSd("state=" + st + " iter=" + i); lastSt = st; }
-                    if (st == SpawnDev.WebRTC.PeerConnection.StateConnected ||
-                        st == SpawnDev.WebRTC.PeerConnection.StateCompleted)
+                    if (st == SpawnDev.WebRTC.PeerConnection.StateCompleted)
                     {
-                        ConnectStatus = "CONNECTED state=" + st;
                         connected = true;
                         break;
                     }
                 }
-                if (!connected) ConnectStatus = "not-connected (" + ConnectStatus + ")";
+                if (connected)
+                {
+                    // Data channel is up - send a probe and look for the peer's echo.
+                    byte[] probe = System.Text.Encoding.UTF8.GetBytes("ping from watch");
+                    SpawnDev.WebRTC.PeerConnection.Send(h, probe, probe.Length);
+                    ConnectStatus = "DATACHANNEL OPEN - sent probe";
+                    LogSd("DATACHANNEL OPEN - sent probe");
+                    byte[] rx = new byte[512];
+                    for (int i = 0; i < 100; i++)
+                    {
+                        System.Threading.Thread.Sleep(50);
+                        int n = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rx);
+                        if (n > 0)
+                        {
+                            ConnectStatus = "ECHO(" + n + "): " + new string(System.Text.Encoding.UTF8.GetChars(rx, 0, n));
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    ConnectStatus = "not-connected (" + ConnectStatus + ")";
+                }
                 LogSd("done: " + ConnectStatus);
             }
             catch (Exception ex)
