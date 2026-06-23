@@ -122,6 +122,19 @@ namespace SpawnWear
         bool _windowOpen;
         string _currentCode;
 
+        /// <summary>True once a companion has been paired (peer pubkey + room key are non-zero).
+        /// Phase 7c: gates the WebRTC connect on having a real paired identity to challenge with.</summary>
+        public bool IsPaired => !IsAllZero(_peerPubKey) && !IsAllZero(_roomKey);
+
+        /// <summary>The watch's 64-byte Ed25519 signing key (seed-derived). For WebRtcChallenge Sign.</summary>
+        public byte[] SigningKey => _ourPrivKey64;
+
+        /// <summary>The paired companion's 32-byte Ed25519 public key. For WebRtcChallenge Verify.</summary>
+        public byte[] PeerPubKey => _peerPubKey;
+
+        /// <summary>The 20-byte shared room key from pairing - the hub room the watch + companion meet in.</summary>
+        public byte[] PairedRoomKey => _roomKey;
+
         /// <summary>True while the user has pairing armed on the Companion page.</summary>
         public bool IsPairingWindowOpen => _windowOpen;
 

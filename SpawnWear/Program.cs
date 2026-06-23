@@ -1041,9 +1041,14 @@ namespace SpawnWear
                 SpawnDev.WebRTC.PeerConnection.GetLocalSdp(h, sbuf);
                 string offer = new string(System.Text.Encoding.UTF8.GetChars(sbuf));
 
-                // Phase 7b: fresh room + per-attempt-ish offer-id so stale cached offers from prior
-                // test runs don't pollute the answerer (it was swarming dead PCs answering old offers).
-                byte[] room = System.Text.Encoding.UTF8.GetBytes("SWclean0623pmRoom01x");
+                // Phase 7c: when paired, meet the Companion in the shared room from BLE pairing (the
+                // 20-byte room key); otherwise use the fixed milestone-3 test room. Per-attempt-ish
+                // offer-id avoids stale cached offers polluting the answerer.
+                bool usePairing = _pairing != null && _pairing.IsPaired;
+                byte[] room = usePairing
+                    ? _pairing.PairedRoomKey
+                    : System.Text.Encoding.UTF8.GetBytes("SWclean0623pmRoom01x");
+                LogSd(usePairing ? "PAIRED - using real companion identity + room" : "UNPAIRED - using embedded test pairing");
                 byte[] pid = System.Text.Encoding.UTF8.GetBytes("-SW0001-watchTESTpid");
                 byte[] oid = System.Text.Encoding.UTF8.GetBytes("wOffer" + (DateTime.UtcNow.Ticks % 100000000));
                 LogSd("offer-ready len=" + len);
@@ -1096,10 +1101,23 @@ namespace SpawnWear
                     // 32 = a challenge nonce; 96 = [nonce:32][sig:64] response. Each peer sends its
                     // own nonce and answers the other's; each verifies the other's sig with the peer's
                     // Ed25519 pubkey. Real RFC 8032 crypto via SpawnDev.Crypto.Ed25519 (Monocypher).
-                    byte[] watchPub = new byte[32];
-                    byte[] watchPriv64 = new byte[64];
-                    SpawnDev.Crypto.Ed25519.KeyPairFromSeed(TestWatchSeed, watchPub, watchPriv64);
-                    LogSd("identity pub[0]=" + watchPub[0] + " (expect 37)");
+                    // Identity for the challenge: real PairingService keys when paired, else test keys.
+                    byte[] watchPriv64;
+                    byte[] peerPub;
+                    if (usePairing)
+                    {
+                        watchPriv64 = _pairing.SigningKey;   // 64-byte seed-derived Ed25519 signing key
+                        peerPub = _pairing.PeerPubKey;        // paired companion's 32-byte pubkey
+                        LogSd("challenge identity: REAL pairing (companion pub[0]=" + peerPub[0] + ")");
+                    }
+                    else
+                    {
+                        byte[] tpub = new byte[32];
+                        watchPriv64 = new byte[64];
+                        SpawnDev.Crypto.Ed25519.KeyPairFromSeed(TestWatchSeed, tpub, watchPriv64);
+                        peerPub = TestCompanionPub;
+                        LogSd("challenge identity: TEST pub[0]=" + tpub[0] + " (expect 37)");
+                    }
 
                     byte[] ourNonce = new byte[32];
                     SpawnDev.Crypto.X25519.GeneratePrivateKey(ourNonce); // ESP32 HW RNG fills 32 bytes
@@ -1134,7 +1152,7 @@ namespace SpawnWear
                             for (int k = 0; k < 32; k++) { if (rx[k] != ourNonce[k]) { nonceOk = false; break; } }
                             byte[] sig = new byte[64];
                             Array.Copy(rx, 32, sig, 0, 64);
-                            if (nonceOk && SpawnDev.Crypto.Ed25519.Verify(sig, TestCompanionPub, ourNonce))
+                            if (nonceOk && SpawnDev.Crypto.Ed25519.Verify(sig, peerPub, ourNonce))
                             {
                                 ourVerified = true;
                                 LogSd("verified companion response");
