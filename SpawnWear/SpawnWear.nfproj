@@ -19,7 +19,6 @@
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
     <Compile Include="BleUuids.cs" />
-    <Compile Include="_DeployPad.cs" />
     <Compile Include="Config\WifiCredentials.cs" />
     <Compile Include="DebugConsoleService.cs" />
     <Compile Include="DeviceInfoService.cs" />

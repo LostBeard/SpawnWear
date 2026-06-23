@@ -142,11 +142,6 @@ namespace SpawnWear
             {
                 _fb = fb;
 
-                // Bug A (narrow size-specific deploy reset) workaround: REFERENCE _DeployPad so the
-                // linker keeps it, shifting the total deploy size off the failing band to a known-
-                // good ~361 KB. Remove this line + _DeployPad.cs once Bug A is root-caused.
-                if (DeployPad.Len() < 0) { _fb = null; }
-
                 // Native Ed25519/X25519 (Monocypher) interop boot self-test with ON-SCREEN
                 // visual bisection of the boot hang first seen 2026-06-21. Runs AFTER the
                 // display is live (no boot console exists) so each native call flashes a
