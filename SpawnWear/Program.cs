@@ -139,6 +139,30 @@ namespace SpawnWear
             if (fb != null)
             {
                 _fb = fb;
+
+                // Bug A (narrow size-specific deploy reset) workaround: REFERENCE _DeployPad so the
+                // linker keeps it, shifting the total deploy size off the failing band to a known-
+                // good ~361 KB. Remove this line + _DeployPad.cs once Bug A is root-caused.
+                if (DeployPad.Len() < 0) { _fb = null; }
+
+                // Native Ed25519/X25519 (Monocypher) interop boot self-test with ON-SCREEN
+                // visual bisection of the boot hang first seen 2026-06-21. Runs AFTER the
+                // display is live (no boot console exists) so each native call flashes a
+                // distinct full-screen color; a frozen panel color names the hanging call.
+                // Remove once the crypto boot hang is root-caused.
+                CryptoSelfTest(fb);
+
+                // Native libpeer WebRTC interop boot smoke test (Phase 7b milestone 2):
+                // construct a PeerConnection + data channel and generate an offer on-device.
+                // NAVY->GREEN = the watch produced a WebRTC offer SDP. Dev diagnostic; remove
+                // before ship. (Runs early; ICE uses host candidates if WiFi isn't up yet.)
+                WebRtcSelfTest(fb);
+
+                // Phase 7b milestone 3: NO automatic WebRTC connect at boot (libpeer's blocking
+                // DTLS recv destabilizes the watch once it reaches DTLS). The offer SDP is instead
+                // generated ON DEMAND via GET /webrtc-offer (Create->offer->Close only - never
+                // reaches DTLS, so it's the proven-safe path) for off-watch ICE-candidate diagnosis.
+
                 // Start the HTTP server now that we have a framebuffer to serve from.
                 // Will be a no-op if WiFi failed to connect.
                 if (_wifi != null && _wifi.IsConnected)
@@ -719,6 +743,325 @@ namespace SpawnWear
                 _displayStatus = "EX:" + t;
                 Debug.WriteLine("[Display] EX " + ex.GetType().Name + ": " + ex.Message);
                 return null;
+            }
+        }
+
+        // Full-screen color flush used as a boot-time progress marker (no console exists).
+        static void CryptoMark(Bitmap fb, Color c)
+        {
+            fb.FillRectangle(0, 0, BoardPins.LcdWidth, BoardPins.LcdHeight, c);
+            fb.Flush();
+        }
+
+        // Native crypto boot self-test with ON-SCREEN visual bisection. Each native
+        // Monocypher call is preceded by a full-screen color flush. If a native call
+        // HANGS, the last color left on the panel names the offending call:
+        //   RED     -> X25519.GeneratePrivateKey  (pure esp_fill_random / HW RNG, in isolation)
+        //   ORANGE  -> X25519.GetPublicKey        (crypto_x25519_public_key, field math)
+        //   YELLOW  -> X25519.SharedSecret        (crypto_x25519 ECDH)
+        //   CYAN    -> Ed25519.GenerateKeyPair    (esp_fill_random + crypto_ed25519_key_pair / SHA-512)
+        //   BLUE    -> Ed25519.Sign               (SHA-512)
+        //   MAGENTA -> Ed25519.Verify             (SHA-512) + tamper rejection
+        // The cheapest + most-suspect primitive (the HW RNG) runs FIRST and ALONE, so a
+        // "RED forever" pins the hang on esp_fill_random vs the heavier SHA-512 paths.
+        // Full success flashes GREEN (held ~1s) then boot continues; a computed-result
+        // mismatch (not a hang) flashes WHITE; a managed throw flashes dim GRAY.
+        static void CryptoSelfTest(Bitmap fb)
+        {
+            try
+            {
+                // 1) Pure hardware RNG in isolation (esp_fill_random, nothing else).
+                CryptoMark(fb, Color.FromArgb(255, 0, 0));        // RED
+                byte[] aPriv = new byte[32], aPub = new byte[32];
+                byte[] bPriv = new byte[32], bPub = new byte[32];
+                SpawnDev.Crypto.X25519.GeneratePrivateKey(aPriv);
+
+                // 2) Curve25519 base-point multiply (field arithmetic, no SHA, no RNG).
+                CryptoMark(fb, Color.FromArgb(255, 128, 0));      // ORANGE
+                SpawnDev.Crypto.X25519.GetPublicKey(aPub, aPriv);
+                SpawnDev.Crypto.X25519.GeneratePrivateKey(bPriv);
+                SpawnDev.Crypto.X25519.GetPublicKey(bPub, bPriv);
+
+                // 3) X25519 ECDH agreement (both sides derive the same shared secret).
+                CryptoMark(fb, Color.FromArgb(255, 255, 0));      // YELLOW
+                byte[] sa = new byte[32], sb = new byte[32];
+                SpawnDev.Crypto.X25519.SharedSecret(sa, aPriv, bPub);
+                SpawnDev.Crypto.X25519.SharedSecret(sb, bPriv, aPub);
+                bool agree = true;
+                for (int i = 0; i < 32; i++) if (sa[i] != sb[i]) agree = false;
+
+                // 4) Ed25519 keypair (esp_fill_random seed + crypto_ed25519_key_pair / SHA-512).
+                CryptoMark(fb, Color.FromArgb(0, 220, 255));      // CYAN
+                byte[] pub = new byte[32];
+                byte[] priv = new byte[64];
+                SpawnDev.Crypto.Ed25519.GenerateKeyPair(pub, priv);
+
+                // 5) Ed25519 sign (SHA-512).
+                CryptoMark(fb, Color.FromArgb(0, 0, 255));        // BLUE
+                byte[] msg = new byte[] { 0x53, 0x70, 0x61, 0x77, 0x6E, 0x57, 0x65, 0x61, 0x72 }; // "SpawnWear"
+                byte[] sig = new byte[64];
+                SpawnDev.Crypto.Ed25519.Sign(sig, priv, msg);
+
+                // 6) Ed25519 verify (SHA-512) + tamper rejection.
+                CryptoMark(fb, Color.FromArgb(255, 0, 255));      // MAGENTA
+                bool verified = SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
+                msg[0] ^= 0xFF; // tamper
+                bool tamperRejected = !SpawnDev.Crypto.Ed25519.Verify(sig, pub, msg);
+
+                // 7) RFC 8032 known-answer test (white marker): derive + sign the PUBLISHED
+                // Ed25519 TEST 2 vector and require a byte-exact public key + signature, plus
+                // acceptance on verify. Byte-exact RFC 8032 == guaranteed interop with the
+                // Companion's WebCrypto / Ed25519Managed (also RFC 8032) - this is what makes
+                // real BLE pairing work, proven without a device on hand.
+                CryptoMark(fb, Color.FromArgb(255, 255, 255));    // WHITE = running the KAT
+                bool kat = KnownAnswerTestRfc8032();
+
+                bool pass = agree && verified && tamperRejected && kat;
+                if (pass)
+                {
+                    CryptoMark(fb, Color.FromArgb(0, 255, 0));    // GREEN = all good (incl. RFC 8032)
+                    System.Threading.Thread.Sleep(1200);
+                }
+                else
+                {
+                    // A white STROBE (not a frozen marker color, not green) = the crypto ran
+                    // but computed a WRONG result - an RFC 8032 / interop fault to chase, NOT
+                    // a hang. Distinct on sight from both the rainbow and the green pass.
+                    for (int b = 0; b < 5; b++)
+                    {
+                        CryptoMark(fb, Color.FromArgb(255, 255, 255));
+                        System.Threading.Thread.Sleep(180);
+                        CryptoMark(fb, Color.FromArgb(0, 0, 0));
+                        System.Threading.Thread.Sleep(180);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // A managed throw (e.g. CLR_E_INVALID_PARAMETER) is NOT the boot hang we
+                // are hunting; dim gray distinguishes it from a frozen marker color.
+                CryptoMark(fb, Color.FromArgb(40, 40, 40));
+                System.Threading.Thread.Sleep(1000);
+            }
+        }
+
+        // RFC 8032 Section 7.1 Ed25519 TEST 2 (1-byte message 0x72). A byte-exact match of
+        // the seed-derived public key + the signature (and acceptance on verify) proves the
+        // watch's Monocypher Ed25519 is standard RFC 8032 - hence interoperable with the
+        // Companion's WebCrypto / Ed25519Managed. Vectors are the published constants.
+        static readonly byte[] KatSeed = new byte[] {
+            0x4c,0xcd,0x08,0x9b,0x28,0xff,0x96,0xda,0x9d,0xb6,0xc3,0x46,0xec,0x11,0x4e,0x0f,
+            0x5b,0x8a,0x31,0x9f,0x35,0xab,0xa6,0x24,0xda,0x8c,0xf6,0xed,0x4f,0xb8,0xa6,0xfb };
+        static readonly byte[] KatPub = new byte[] {
+            0x3d,0x40,0x17,0xc3,0xe8,0x43,0x89,0x5a,0x92,0xb7,0x0a,0xa7,0x4d,0x1b,0x7e,0xbc,
+            0x9c,0x98,0x2c,0xcf,0x2e,0xc4,0x96,0x8c,0xc0,0xcd,0x55,0xf1,0x2a,0xf4,0x66,0x0c };
+        static readonly byte[] KatMsg = new byte[] { 0x72 };
+        static readonly byte[] KatSig = new byte[] {
+            0x92,0xa0,0x09,0xa9,0xf0,0xd4,0xca,0xb8,0x72,0x0e,0x82,0x0b,0x5f,0x64,0x25,0x40,
+            0xa2,0xb2,0x7b,0x54,0x16,0x50,0x3f,0x8f,0xb3,0x76,0x22,0x23,0xeb,0xdb,0x69,0xda,
+            0x08,0x5a,0xc1,0xe4,0x3e,0x15,0x99,0x6e,0x45,0x8f,0x36,0x13,0xd0,0xf1,0x1d,0x8c,
+            0x38,0x7b,0x2e,0xae,0xb4,0x30,0x2a,0xee,0xb0,0x0d,0x29,0x16,0x12,0xbb,0x0c,0x00 };
+
+        static bool KnownAnswerTestRfc8032()
+        {
+            byte[] pub = new byte[32];
+            byte[] priv = new byte[64];
+            SpawnDev.Crypto.Ed25519.KeyPairFromSeed(KatSeed, pub, priv);
+            if (!BytesEqual(pub, KatPub)) return false;
+
+            byte[] sig = new byte[64];
+            SpawnDev.Crypto.Ed25519.Sign(sig, priv, KatMsg);
+            if (!BytesEqual(sig, KatSig)) return false;
+
+            // The published signature must verify against the published public key.
+            return SpawnDev.Crypto.Ed25519.Verify(KatSig, KatPub, KatMsg);
+        }
+
+        static bool BytesEqual(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
+        }
+
+        // On-screen smoke test of the native libpeer WebRTC interop (Phase 7b milestone 2).
+        // Proves the watch can construct a PeerConnection, open a data channel, and GENERATE a
+        // WebRTC offer (ICE-gathered via STUN over WiFi) - the whole managed->native->libpeer
+        // path. NAVY = starting; GREEN = offer SDP produced; ORANGE = created but no SDP (ICE
+        // gather failed - check WiFi/STUN); RED = Create failed; WHITE strobe = exception.
+        // Dev diagnostic; remove before ship. Run AFTER WiFi is up (needs STUN reachability).
+        static void WebRtcSelfTest(Bitmap fb)
+        {
+            try
+            {
+                CryptoMark(fb, Color.FromArgb(0, 0, 160));   // NAVY = WebRTC interop test start
+                int h = SpawnDev.WebRTC.PeerConnection.Create();
+                if (h < 0)
+                {
+                    CryptoMark(fb, Color.FromArgb(160, 0, 0)); // RED = Create failed
+                    System.Threading.Thread.Sleep(1500);
+                    return;
+                }
+                SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                SpawnDev.WebRTC.PeerConnection.CreateOffer(h);
+
+                int len = 0;
+                for (int i = 0; i < 120 && len == 0; i++) // up to ~6s for ICE gathering
+                {
+                    System.Threading.Thread.Sleep(50);
+                    len = SpawnDev.WebRTC.PeerConnection.GetLocalSdpLength(h);
+                }
+
+                CryptoMark(fb, len > 0 ? Color.FromArgb(0, 255, 0)        // GREEN = offer SDP generated
+                                       : Color.FromArgb(255, 128, 0));    // ORANGE = no SDP (ICE gather failed)
+                System.Threading.Thread.Sleep(1800);
+                SpawnDev.WebRTC.PeerConnection.Close(h);
+            }
+            catch (Exception)
+            {
+                for (int b = 0; b < 4; b++)
+                {
+                    CryptoMark(fb, Color.FromArgb(255, 255, 255));
+                    System.Threading.Thread.Sleep(160);
+                    CryptoMark(fb, Color.FromArgb(0, 0, 0));
+                    System.Threading.Thread.Sleep(160);
+                }
+            }
+        }
+
+        // On-demand libpeer offer generator for HTTP diagnosis (Phase 7b milestone 3):
+        // Create -> data channel -> offer -> read SDP -> Close. Never sets a remote description,
+        // so it never reaches libpeer's blocking DTLS recv - this is the proven-safe path
+        // (same as the boot WebRtcSelfTest). Returns the offer SDP (with ICE candidates) so we
+        // can inspect exactly what the watch advertises. Called from GET /webrtc-offer.
+        public static string GenerateOfferSdp()
+        {
+            int h = -1;
+            try
+            {
+                h = SpawnDev.WebRTC.PeerConnection.Create();
+                if (h < 0) return "ERROR: Create failed";
+                SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                SpawnDev.WebRTC.PeerConnection.CreateOffer(h);
+                int len = 0;
+                for (int i = 0; i < 120 && len == 0; i++)
+                {
+                    System.Threading.Thread.Sleep(50);
+                    len = SpawnDev.WebRTC.PeerConnection.GetLocalSdpLength(h);
+                }
+                if (len == 0) return "ERROR: no offer SDP generated";
+                byte[] sbuf = new byte[len];
+                SpawnDev.WebRTC.PeerConnection.GetLocalSdp(h, sbuf);
+                return new string(System.Text.Encoding.UTF8.GetChars(sbuf));
+            }
+            catch (Exception ex)
+            {
+                return "ERROR: " + ex.Message;
+            }
+            finally
+            {
+                try { if (h >= 0) SpawnDev.WebRTC.PeerConnection.Close(h); } catch { }
+            }
+        }
+
+        // HTTP-triggered full WebRTC connect attempt (Phase 7b milestone 3), on a background
+        // thread so it never blocks the UI/HTTP. With the libpeer DTLS recv-timeout fix this no
+        // longer freezes - it progresses or times out. Trigger: GET /webrtc-connect.
+        // Read progress: GET /webrtc-status. Dev diagnostic.
+        public static string ConnectStatus = "idle";
+
+        public static void StartWebRtcConnect()
+        {
+            // Run SYNCHRONOUSLY on the caller (HTTP) thread. A nanoFramework `new Thread()`
+            // crashed during the libpeer interop (likely thread-stack too small for the native
+            // call chain); the HTTP thread runs the same offer path fine (/webrtc-offer).
+            ConnectStatus = "starting";
+            WebRtcConnectRun();
+        }
+
+        // Crash-survival log: the connect reboots the watch mid-DTLS, wiping in-memory status, so
+        // we mirror the current stage to SD (mounted at I:\). Read it back after the reboot via
+        // GET /webrtc-log to see the last stage reached before the native crash. Dev diagnostic.
+        static void LogSd(string s)
+        {
+            try { System.IO.File.WriteAllText("I:\\webrtc.log", s); } catch { }
+        }
+
+        public static string ReadWebRtcLog()
+        {
+            try { return System.IO.File.ReadAllText("I:\\webrtc.log"); }
+            catch (Exception ex) { return "no log (" + ex.Message + ")"; }
+        }
+
+        static void WebRtcConnectRun()
+        {
+            SwTrackerSignaling tr = null;
+            int h = -1;
+            try
+            {
+                h = SpawnDev.WebRTC.PeerConnection.Create();
+                if (h < 0) { ConnectStatus = "create-failed"; return; }
+                SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                SpawnDev.WebRTC.PeerConnection.CreateOffer(h);
+                int len = 0;
+                for (int i = 0; i < 120 && len == 0; i++)
+                {
+                    System.Threading.Thread.Sleep(50);
+                    len = SpawnDev.WebRTC.PeerConnection.GetLocalSdpLength(h);
+                }
+                if (len == 0) { ConnectStatus = "no-offer-sdp"; return; }
+                byte[] sbuf = new byte[len];
+                SpawnDev.WebRTC.PeerConnection.GetLocalSdp(h, sbuf);
+                string offer = new string(System.Text.Encoding.UTF8.GetChars(sbuf));
+
+                byte[] room = System.Text.Encoding.UTF8.GetBytes("SWtestRoom0123456789");
+                byte[] pid = System.Text.Encoding.UTF8.GetBytes("-SW0001-watchTESTpid");
+                byte[] oid = System.Text.Encoding.UTF8.GetBytes("watchOffer0123456789");
+                tr = new SwTrackerSignaling();
+                if (!tr.Connect()) { ConnectStatus = "ws-connect-failed"; return; }
+                tr.AnnounceOffer(room, pid, oid, offer);
+                ConnectStatus = "announced";
+
+                string answer = tr.WaitForAnswer(oid, 20000);
+                if (answer == null) { ConnectStatus = "no-answer"; return; }
+                ConnectStatus = "answered len=" + answer.Length;
+
+                // Free the WebSocket + its TLS (mbedtls) BEFORE the DTLS handshake (also mbedtls)
+                // to cut peak memory - a likely cause of the reboot during DTLS. We already have
+                // the answer; the signaling socket isn't needed for this non-trickle connection.
+                try { tr.Dispose(); } catch { }
+                tr = null;
+                LogSd("answered, ws-freed, about to SetRemoteDescription");
+
+                SpawnDev.WebRTC.PeerConnection.SetRemoteDescription(h, answer, SpawnDev.WebRTC.PeerConnection.SdpTypeAnswer);
+                LogSd("remote-set ok, dtls handshake starting (poll)");
+                bool connected = false;
+                int lastSt = -999;
+                for (int i = 0; i < 200; i++)
+                {
+                    System.Threading.Thread.Sleep(50);
+                    int st = SpawnDev.WebRTC.PeerConnection.GetState(h);
+                    ConnectStatus = "state=" + st + " iter=" + i;
+                    if (st != lastSt) { LogSd("state=" + st + " iter=" + i); lastSt = st; }
+                    if (st == SpawnDev.WebRTC.PeerConnection.StateConnected ||
+                        st == SpawnDev.WebRTC.PeerConnection.StateCompleted)
+                    {
+                        ConnectStatus = "CONNECTED state=" + st;
+                        connected = true;
+                        break;
+                    }
+                }
+                if (!connected) ConnectStatus = "not-connected (" + ConnectStatus + ")";
+                LogSd("done: " + ConnectStatus);
+            }
+            catch (Exception ex)
+            {
+                ConnectStatus = "EX " + ex.Message;
+            }
+            finally
+            {
+                try { tr?.Dispose(); } catch { }
+                try { if (h >= 0) SpawnDev.WebRTC.PeerConnection.Close(h); } catch { }
             }
         }
 

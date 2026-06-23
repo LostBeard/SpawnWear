@@ -95,3 +95,29 @@ What's ruled OUT now: partition size (2.5-2.9 MB), managed heap (PSRAM, MBs), ba
 **NEXT-SESSION ROOT-CAUSE (no more guessing — instrument):** add `CLR_Debug::Printf` / `ESP_LOGI` logging to `Esp32FlashDriver_Write` (already logs "Writting %dB @ %d" — capture it), `Esp32FlashDriver_InitializeDevice` (log the `esp_partition_mmap` return + mapped size), and the CLR deploy-commit (`src/CLR/Debugger/Debugger.cpp` AccessMemory_Write ~line 831 + Monitor_DeploymentExecute) at offsets near 358,648. One deploy of the 358,896 build then shows EXACTLY whether the last `esp_partition_write` returns ESP_OK (→ crash is in the commit/resolve) or never returns (→ crash is the write itself), and whether any read-back past 358 KB happens. Then fix that specific spot. The repartition (deploy@0x370000) is currently FLASHED on the watch + the CSV change is UNCOMMITTED in nf-interpreter (revert or keep — it's a harmless valid layout, just doesn't fix the ceiling).
 
 **Workaround that WORKS:** keep total `.pe` under ~358,000 (removed boot `CryptoSelfTest` → UI-kit shipped at 358,084, hardware-verified). Recovery if a deploy bricks the runtime: `tools/nf-recover-py313.bat COM6` (erase_flash + reflash) then redeploy a sub-358k build.
+
+## 2026-06-21 EVENING UPDATE (Riker) — the "CEILING" IS ILLUSORY; two separate bugs
+
+Everything above framed this as a monotonic ~358 KB deploy ceiling. **That framing is WRONG.** Hardware testing this evening proved a **LARGER build deploys fine**:
+
+- 358,084 bytes → deploys + runs ✅
+- **358,896 bytes → fails to deploy** ❌ (the "ceiling" build)
+- **360,904 + 361,048 bytes → deploy cleanly ✅** ← bigger, but fine
+
+So there is **no size ceiling**. There are two distinct bugs:
+
+**Bug A — the 358,896 deploy failure (narrow, size-specific).** The device **RESETS (reboots) on the final write** — it is NOT flash corruption, NOT a crash/panic/hang:
+- `nf-attach` immediately after the failure → device ALIVE + responsive (a blocked task would leave it dead; `Monitor_WriteMemory` always replies even on error, so "No reply" + alive ⇒ reset mid-command).
+- NO coredump despite full coredump-to-flash + INT_WDT + TASK_WDT(panic) instrumentation ⇒ a plain reset, not a panic/WDT.
+- `reboot=false` deploy still fails ⇒ device-side, not the host's reboot signal.
+- Reset reason reads `ESP_RST_USB`, but a plain power-cycle also reads USB on this board ⇒ generic/inconclusive.
+- **Workaround: pad the build ~2 KB** to dodge the bad size. Real fix = why ~358,896 specifically resets in nanoFramework's device-side deploy path (deep, low priority).
+
+**Bug B — the REAL blocker: boot `CryptoSelfTest()` HANGS the watch (black screen).** Isolated + confirmed:
+- 361,048 pad-only build (NO crypto) → home screen ✅; 360,904 crypto+pad build → BLACK ❌ (same size/deploy/firmware, only crypto differs).
+- `CryptoSelfTest()` runs before `EnablePowerRails()` in `Program.cs`, so a hang there ⇒ display never powers ⇒ black/no-touch.
+- It's a HANG not an exception (wrapped in try/catch) ⇒ a native Monocypher call enters and never returns. Likely the first call `Ed25519.GenerateKeyPair` blocking on RNG/entropy at early boot (UNVERIFIED).
+- **Never seen before because Bug A always failed the deploy first** — the boot self-test never ran on hardware until we padded past Bug A.
+- NEXT: bisect which of the 5 native crypto calls hangs (re-apply `Plans/crypto-selftest-boot.patch`). Full handoff in agent memory `project-spawnwear-EOD-2026-06-21-riker-deploy-ceiling-is-illusory-crypto-selftest-hangs`.
+
+The old `check-deploy-size.cs` / `DeployCeilingBytes` guards are based on the disproven ceiling model — treat them as "avoid the 358,896 bad-spot," not a hard limit.

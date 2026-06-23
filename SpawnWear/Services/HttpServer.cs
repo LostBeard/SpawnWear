@@ -182,6 +182,30 @@ namespace SpawnWear.Services
             {
                 ServeScreenshot(client);
             }
+            else if (path == "/webrtc-offer")
+            {
+                // Phase 7b milestone-3 diagnostic: generate a fresh libpeer offer on demand
+                // (Create->offer->Close - never reaches the blocking DTLS recv) and return its
+                // SDP so the ICE candidates can be inspected off-watch.
+                ServeText(client, Program.GenerateOfferSdp());
+            }
+            else if (path == "/webrtc-connect")
+            {
+                // Phase 7b milestone-3: run a full connect attempt SYNCHRONOUSLY (blocks this
+                // request ~30s) and return the final status. The watch UI stays up (other thread).
+                Program.StartWebRtcConnect();
+                ServeText(client, Program.ConnectStatus);
+            }
+            else if (path == "/webrtc-status")
+            {
+                // Phase 7b milestone-3: progress of the last /webrtc-connect attempt.
+                ServeText(client, Program.ConnectStatus);
+            }
+            else if (path == "/webrtc-log")
+            {
+                // Phase 7b milestone-3: crash-survival stage log from SD (survives the reboot).
+                ServeText(client, Program.ReadWebRtcLog());
+            }
             else if (path == "/apps" && method == "GET")
             {
                 ServeAppsList(client);

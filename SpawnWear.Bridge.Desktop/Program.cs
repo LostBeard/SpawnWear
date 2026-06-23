@@ -124,6 +124,39 @@ if (args.Length > 0 && args[0] == "companion")
     catch (Exception ex) { Console.WriteLine($"[companion] FAIL - {ex.GetType().Name}: {ex.Message}"); return 1; }
 }
 
+// Answer offers in a plain ASCII-named room - the peer for the watch firmware's milestone-3
+// WebRtcConnectTest (which is the OFFERER and does NOT run the Ed25519 challenge yet). We only
+// want to prove the libpeer(watch) <-> SipSorcery(desktop) ICE/DTLS/datachannel interop: the
+// transport answers the watch's offer and the datachannel opens (the watch then reads
+// PeerConnection state == Connected). The challenge will fail (the watch doesn't participate),
+// which is expected here - the connection forms first.
+// Run: dotnet run --project SpawnWear.Bridge.Desktop -- answerroom [roomAscii]
+if (args.Length > 0 && args[0] == "answerroom")
+{
+    var roomStr = args.Length > 1 ? args[1] : "SWtestRoom0123456789";
+    var room = System.Text.Encoding.ASCII.GetBytes(roomStr);
+    var arcrypto = new DotNetCrypto();
+    var aropts = new BridgeWebRtcOptions();
+    var arfactory = new WebRtcTransportFactory(aropts, arcrypto, RandomPeerId());
+    var arRecord = WebRtcSelfTestPairing.CompanionRecord() with { RoomKey = room };
+    await using var arpeer = arfactory.CreateTransport(arRecord);
+    arpeer.MessageReceived += m =>
+        Console.WriteLine($"[answerroom] recv channel='{m.ChannelId}' payload='{System.Text.Encoding.UTF8.GetString(m.Payload)}'");
+    Console.WriteLine($"[answerroom] hub={aropts.AnnounceUrl} room='{roomStr}' - answering the watch's offer (Ctrl+C to stop)");
+    try
+    {
+        await arpeer.ConnectAsync(CancellationToken.None);
+        Console.WriteLine("[answerroom] CONNECTED + verified (datachannel up).");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[answerroom] ConnectAsync ended: {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine("[answerroom] (datachannel may still have opened - watch only needs ICE/DTLS up. Holding the process.)");
+    }
+    await Task.Delay(System.Threading.Timeout.Infinite);
+    return 0;
+}
+
 var crypto = new DotNetCrypto();
 var options = new BridgeWebRtcOptions(); // default hub: wss://hub.spawndev.com:44365/announce
 

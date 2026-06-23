@@ -19,6 +19,7 @@
   <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
   <ItemGroup>
     <Compile Include="BleUuids.cs" />
+    <Compile Include="_DeployPad.cs" />
     <Compile Include="Config\WifiCredentials.cs" />
     <Compile Include="DebugConsoleService.cs" />
     <Compile Include="DeviceInfoService.cs" />
@@ -38,6 +39,8 @@
     <Compile Include="Services\AppRepositoryService.cs" />
     <Compile Include="Services\EventLoop.cs" />
     <Compile Include="Services\HttpServer.cs" />
+    <Compile Include="Services\SwWebSocket.cs" />
+    <Compile Include="Services\SwTrackerSignaling.cs" />
     <Compile Include="Services\LoggerService.cs" />
     <Compile Include="Services\ServiceHost.cs" />
     <Compile Include="UI\AboutScreen.cs" />
@@ -69,6 +72,9 @@
     </Reference>
     <Reference Include="SpawnDev.Crypto">
       <HintPath>..\SpawnDev.Crypto\bin\Debug\SpawnDev.Crypto.dll</HintPath>
+    </Reference>
+    <Reference Include="SpawnDev.WebRTC">
+      <HintPath>..\SpawnDev.WebRTC\bin\Debug\SpawnDev.WebRTC.dll</HintPath>
     </Reference>
     <Reference Include="nanoFramework.Graphics">
       <HintPath>..\packages\nanoFramework.Graphics.2.0.0-spawnwear.2\lib\nanoFramework.Graphics.dll</HintPath>

@@ -271,7 +271,11 @@ var assemblyBytes = peFiles.Select(p => File.ReadAllBytes(p)).ToList();
 var paramsForDeploy = deploymentExecute.GetParameters();
 object[] callArgs = new object[paramsForDeploy.Length];
 callArgs[0] = assemblyBytes;
-callArgs[1] = true;   // rebootAfterDeploy - let DeploymentExecute handle the reboot, same as VS
+// rebootAfterDeploy - normally true (same as VS). Set env NF_DEPLOY_REBOOT=false to test
+// whether the host-issued reboot is what resets the chip on large deploys (deploy-ceiling debug).
+bool rebootAfterDeploy = !string.Equals(Environment.GetEnvironmentVariable("NF_DEPLOY_REBOOT"), "false", StringComparison.OrdinalIgnoreCase);
+callArgs[1] = rebootAfterDeploy;
+Console.WriteLine($"rebootAfterDeploy = {rebootAfterDeploy}");
 if (paramsForDeploy.Length >= 3) callArgs[2] = false; // skipErase = false (full erase + write)
 
 // Build IProgress<MessageWithProgress> + IProgress<string> instances so the deploy
