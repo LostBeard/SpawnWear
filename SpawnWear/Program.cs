@@ -344,6 +344,11 @@ namespace SpawnWear
                 }
             }
 
+            // Execute any app/file-management commands that arrived on the bus (sys.apps / sys.files)
+            // HERE on the main thread, so SD + UI work is serialized with the launcher / app-loader -
+            // same anti-contention discipline the I2C lock enforces for the I2C bus.
+            ProcessSysCommands();
+
             try
             {
                 long nowTicks = DateTime.UtcNow.Ticks;
@@ -1021,6 +1026,118 @@ namespace SpawnWear
             _sysDisconnectRequested = true;
         }
 
+        // ===== sys.* command channels: app + file management over the bus =====
+        // Handlers run on the WebRTC pump thread (bus.RouteReceived) and ONLY enqueue. The real SD + UI
+        // work runs on the MAIN thread (ProcessSysCommands, from OnTick), serialized with the launcher /
+        // SD-browser / app-loader - so no cross-thread SD or framebuffer contention (the same discipline
+        // the I2cLock enforces for the I2C bus). Replies go back on the same channel via the bus.
+        static readonly System.Collections.ArrayList _sysCmdQueue = new System.Collections.ArrayList();
+        static readonly object _sysCmdLock = new object();
+
+        static void OnSysApps(string channelId, byte[] payload) { EnqueueSysCmd(channelId, payload); }
+
+        static void EnqueueSysCmd(string channelId, byte[] payload)
+        {
+            if (payload == null || payload.Length == 0) return;
+            lock (_sysCmdLock) { _sysCmdQueue.Add(new object[] { channelId, payload }); }
+            if (_eventLoop != null) _eventLoop.Wake();
+        }
+
+        static void ProcessSysCommands()
+        {
+            if (_webrtc == null) return;
+            var bus = _webrtc.Bus;
+            while (true)
+            {
+                object[] item = null;
+                lock (_sysCmdLock)
+                {
+                    if (_sysCmdQueue.Count == 0) break;
+                    item = (object[])_sysCmdQueue[0];
+                    _sysCmdQueue.RemoveAt(0);
+                }
+                try
+                {
+                    string ch = (string)item[0];
+                    byte[] p = (byte[])item[1];
+                    if (ch == "sys.apps") ProcessAppsCommand(bus, p);
+                }
+                catch (Exception ex) { Debug.WriteLine("[sys] cmd EX " + ex.Message); }
+            }
+        }
+
+        // sys.apps. Request: [op:u8][...]. Reply: [op:u8][ok:u8][...].
+        //   op=1 LIST      -> [1][1][count:u8] then count*{[nameLen:u8][name][size:u32 LE]}
+        //   op=2 INSTALL   [nameLen:u8][name][pe bytes...]  -> text reply
+        //   op=3 UNINSTALL [nameLen:u8][name]               -> text reply
+        //   op=4 LAUNCH    [nameLen:u8][name]               -> text reply
+        static void ProcessAppsCommand(SpawnWear.Services.TransportBus bus, byte[] p)
+        {
+            if (p.Length < 1 || _appRepo == null) return;
+            byte op = p[0];
+            if (op == 1) // LIST
+            {
+                AppInfo[] apps = _appRepo.ListInfo();
+                int n = apps.Length > 255 ? 255 : apps.Length;
+                int total = 3;
+                byte[][] names = new byte[n][];
+                for (int i = 0; i < n; i++)
+                {
+                    names[i] = System.Text.Encoding.UTF8.GetBytes(apps[i].Name);
+                    total += 1 + names[i].Length + 4;
+                }
+                byte[] r = new byte[total];
+                int o = 0;
+                r[o++] = 1; r[o++] = 1; r[o++] = (byte)n;
+                for (int i = 0; i < n; i++)
+                {
+                    r[o++] = (byte)names[i].Length;
+                    for (int k = 0; k < names[i].Length; k++) r[o++] = names[i][k];
+                    uint sz = (uint)apps[i].Size;
+                    r[o++] = (byte)(sz & 0xFF); r[o++] = (byte)((sz >> 8) & 0xFF);
+                    r[o++] = (byte)((sz >> 16) & 0xFF); r[o++] = (byte)((sz >> 24) & 0xFF);
+                }
+                bus.Send("sys.apps", r);
+                Debug.WriteLine("[sys.apps] LIST -> " + n + " apps");
+            }
+            else if (op == 2 || op == 3 || op == 4)
+            {
+                int nameLen = p.Length > 1 ? p[1] : 0;
+                byte[] nb = new byte[nameLen];
+                for (int k = 0; k < nameLen; k++) nb[k] = p[2 + k];
+                string name = new string(System.Text.Encoding.UTF8.GetChars(nb));
+                if (op == 2) // INSTALL
+                {
+                    int peOff = 2 + nameLen;
+                    byte[] pe = new byte[p.Length - peOff];
+                    for (int k = 0; k < pe.Length; k++) pe[k] = p[peOff + k];
+                    bool ok = _appRepo.Install(name, pe);
+                    SysReply(bus, "sys.apps", op, ok, ok ? "installed " + name + " (" + pe.Length + "b)" : "install failed: " + name);
+                }
+                else if (op == 3) // UNINSTALL
+                {
+                    bool ok = _appRepo.Uninstall(name);
+                    SysReply(bus, "sys.apps", op, ok, ok ? "uninstalled " + name : "uninstall failed: " + name);
+                }
+                else // op == 4 LAUNCH (safe: we are on the main thread here)
+                {
+                    LaunchInstalledApp(name);
+                    SysReply(bus, "sys.apps", op, true, "launched " + name);
+                }
+            }
+        }
+
+        // Generic text reply: [op:u8][ok:u8][msgLen:u8][msg UTF-8].
+        static void SysReply(SpawnWear.Services.TransportBus bus, string ch, byte op, bool ok, string msg)
+        {
+            byte[] m = System.Text.Encoding.UTF8.GetBytes(msg);
+            int len = m.Length > 200 ? 200 : m.Length;
+            byte[] r = new byte[3 + len];
+            r[0] = op; r[1] = (byte)(ok ? 1 : 0); r[2] = (byte)len;
+            for (int k = 0; k < len; k++) r[3 + k] = m[k];
+            bus.Send(ch, r);
+        }
+
         // RETIRED dev HTTP trigger. The autonomous WebRtcTransportService now owns the connection
         // lifecycle and drives WebRtcConnectRun(bus) on its own thread; the HTTP server is no longer
         // started. Kept as a no-op so the (retired) HttpServer.cs still compiles.
@@ -1241,6 +1358,7 @@ namespace SpawnWear
                     // stays as the fallback for ungraceful drops - crash, dead WiFi).
                     _sysDisconnectRequested = false;
                     bus.Subscribe("sys.disconnect", OnSysDisconnect);
+                    bus.Subscribe("sys.apps", OnSysApps);   // app management (list/install/uninstall/launch)
                     // DEMO of the app.* lane: a scoped app channel that streams MessagePack alongside the
                     // OS telemetry, proving the two lanes coexist + stay isolated. A real loadable app gets
                     // its IAppChannel from the app host exactly this way (confined to app.demo.*).

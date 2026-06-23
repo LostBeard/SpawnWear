@@ -143,7 +143,8 @@ namespace SpawnWear.UI
             Debug.WriteLine("[Nav] tap=(" + x + "," + y + ") consumed=" + consumed + " depth=" + _depth);
             if (consumed) return;
             if (_depth > 0) Pop();
-            else Next();
+            // Top-level paging is swipe-only now (removed: else Next()) - a stray tap no longer jumps
+            // screens. Sub-pages still pop on an unconsumed tap; the BOOT button is the primary Back.
         }
 
         private void ClearStack()
