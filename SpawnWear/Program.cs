@@ -48,7 +48,8 @@ namespace SpawnWear
         static WifiConfigService _bleConfig;   // BLE provider handle, so Settings can toggle advertising
         static bool _bleAdvertising = true;
         static bool _sdIsolationTest = false;
-        static HttpServer _http;
+        static HttpServer _http;            // RETIRED - kept for potential future need; no longer started
+        static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
         static Bitmap _fb; // shared framebuffer reference for screenshots
         static int _bootButtonClickPending; // set by ISR, drained by main loop
         static bool _fingerDown;
@@ -163,23 +164,18 @@ namespace SpawnWear
                 // generated ON DEMAND via GET /webrtc-offer (Create->offer->Close only - never
                 // reaches DTLS, so it's the proven-safe path) for off-watch ICE-candidate diagnosis.
 
-                // Start the HTTP server now that we have a framebuffer to serve from.
-                // Will be a no-op if WiFi failed to connect.
-                if (_wifi != null && _wifi.IsConnected)
-                {
-                    _http = new HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, port: 8080);
-                    if (_sd != null) _http.AttachSdCard(_sd);
-                    try
-                    {
-                        _http.Start();
-                        Debug.WriteLine("[SpawnWear] HTTP at http://" + _wifi.IpAddress + ":8080/");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine("[SpawnWear] HTTP start failed: " + ex.Message);
-                        _http = null;
-                    }
-                }
+                // HTTP server RETIRED (2026-06-23). It was dev scaffolding (GET /webrtc-connect,
+                // /webrtc-status, /webrtc-offer) for bringing WebRTC up. The watch's real surface is
+                // BLE (pairing) + WebRTC (transport); neither needs an HTTP server. HttpServer.cs is
+                // kept in the tree so it can return if a concrete need appears.
+                //
+                // Instead, start the autonomous WebRTC transport service: it owns the connection on its
+                // own thread (connect -> stay connected -> reconnect on drop), gated on paired + WiFi.
+                // No external trigger - the watch maintains its own link to the Companion. With the HTTP
+                // server gone there is no second thread touching libpeer, so no concurrency to crash on.
+                _webrtc = new WebRtcTransportService(_pairing, _wifi);
+                _webrtc.Start();
+                Debug.WriteLine("[SpawnWear] WebRTC transport service started");
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 // WiFi state -> status bar. We don't have RSSI on this build so
                 // signal strength is reported as full bars (4) when connected
@@ -1016,7 +1012,9 @@ namespace SpawnWear
             0x1D,0x1B,0x98,0xD3,0x27,0x57,0xC4,0xBA,0x6F,0x2D,0xBF,0xAE,0xE3,0x6F,0xA2,0xA7,
             0x8B,0xC8,0x28,0xBC,0xAD,0xDE,0x13,0x7E,0xEF,0x8D,0x90,0xBD,0xEC,0x9D,0xC0,0x6A };
 
-        static void WebRtcConnectRun()
+        // Public so the autonomous WebRtcTransportService can drive it. Blocks for the life of one
+        // connection (connect -> mutual challenge -> stay connected until the peer disconnects).
+        public static void WebRtcConnectRun()
         {
             SwTrackerSignaling tr = null;
             int h = -1;
