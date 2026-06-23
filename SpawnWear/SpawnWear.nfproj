@@ -51,6 +51,8 @@
     <Compile Include="UiKit\IUiSurface.cs" />
     <Compile Include="UiKit\WatchSurface.cs" />
     <Compile Include="UiKit\Elements.cs" />
+    <Compile Include="UiKit\Theme.cs" />
+    <Compile Include="UiKit\WidgetScreen.cs" />
     <Compile Include="UI\LoadedAppScreen.cs" />
     <Compile Include="UI\WifiScreen.cs" />
     <Compile Include="UI\IScreen.cs" />

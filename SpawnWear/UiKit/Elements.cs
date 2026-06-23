@@ -50,6 +50,15 @@ namespace SpawnDev.UI
             }
             return false;
         }
+
+        /// <summary>Position this element's children within its own bounds. Default: each child lays
+        /// out its own subtree (children are absolutely positioned). Containers like
+        /// <see cref="UIColumn"/> override this to place their children. The host calls this on the
+        /// root once after sizing it, before <see cref="Draw"/>.</summary>
+        public virtual void Layout()
+        {
+            for (int i = 0; i < Children.Count; i++) ((UIElement)Children[i]).Layout();
+        }
     }
 
     /// <summary>Container with an optional solid background (mirrors GameUI UIPanel).</summary>
@@ -92,8 +101,8 @@ namespace SpawnDev.UI
 
         public string Text = "";
         public int Scale = 4;
-        public Color Background = Color.Gray;
-        public Color Foreground = Color.White;
+        public Color Background = Theme.Current.Surface;
+        public Color Foreground = Theme.Current.OnSurface;
         public ClickHandler Clicked;
 
         public override void Draw(IUiSurface s)
@@ -109,6 +118,70 @@ namespace SpawnDev.UI
         {
             if (!Visible || !Contains(px, py)) return false;
             if (Clicked != null) Clicked();
+            return true;
+        }
+    }
+
+    /// <summary>Vertical stack layout: places its children top-to-bottom within its own bounds, each
+    /// stretched to the column's content width (kept at its own Height), separated by Spacing. Set the
+    /// column's X/Y/Width/Height (e.g. a safe-area band) and add children; the host calls Layout.</summary>
+    public class UIColumn : UIElement
+    {
+        public int Spacing = 10;
+        public int PadTop, PadBottom, PadLeft, PadRight;
+
+        public override void Layout()
+        {
+            int y = Y + PadTop;
+            int cw = Width - PadLeft - PadRight;
+            for (int i = 0; i < Children.Count; i++)
+            {
+                var c = (UIElement)Children[i];
+                if (!c.Visible) continue;
+                c.X = X + PadLeft;
+                c.Y = y;
+                c.Width = cw;
+                c.Layout();
+                y += c.Height + Spacing;
+            }
+        }
+    }
+
+    /// <summary>A labelled on/off toggle row (themed): label on the left, a pill track + knob on the
+    /// right. Tapping flips <see cref="On"/> and fires <see cref="Toggled"/>.</summary>
+    public class UISwitch : UIElement
+    {
+        public delegate void ToggleHandler(bool on);
+
+        public string Text = "";
+        public int Scale = 4;
+        public bool On;
+        public ToggleHandler Toggled;
+
+        public UISwitch() { Height = Theme.Current.RowHeight; }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            var t = Theme.Current;
+            s.DrawRect(X, Y, Width, Height, t.Surface);
+            int th = s.TextHeight(Scale);
+            s.DrawText(Text, X + t.CornerInset + 8, Y + (Height - th) / 2, Scale, t.OnSurface);
+            // pill track + knob on the right
+            int trackW = 64, trackH = 34;
+            int tx = X + Width - trackW - t.CornerInset - 8;
+            int ty = Y + (Height - trackH) / 2;
+            s.DrawRect(tx, ty, trackW, trackH, On ? t.Accent : t.Divider);
+            int knob = trackH - 8;
+            int kx = On ? (tx + trackW - knob - 4) : (tx + 4);
+            s.DrawRect(kx, ty + 4, knob, knob, On ? t.OnAccent : t.Muted);
+        }
+
+        public override bool OnTap(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            On = !On;
+            if (Toggled != null) Toggled(On);
             return true;
         }
     }

@@ -1,79 +1,86 @@
 using nanoFramework.UI;
 using SpawnDev.UI;
-using System.Drawing;
 
 namespace SpawnWear.UI
 {
     /// <summary>
-    /// Proof screen for the new UI library: builds a UIElement tree (panel + label
-    /// + button + counter) and renders it through an IUiSurface (WatchSurface here,
-    /// a Blazor 2D canvas later). Tapping the button increments the counter via the
-    /// widget's Clicked event; tapping elsewhere falls through so the navigator pops
-    /// back. This is the watch-first milestone for the GameUI-mirrored UI lib.
+    /// Proof screen for the widget framework. Extends <see cref="WidgetScreen"/> (which owns the
+    /// lifecycle/draw/hit-test), builds a themed tree with a <see cref="UIColumn"/> laying out a
+    /// button + a real <see cref="UISwitch"/> + a status label inside the round-corner
+    /// <see cref="SafeArea"/> band - no hand-positioned pixels. Tap the button to count; flip the
+    /// switch to see toggle state; a miss falls through so the navigator pops/advances.
     /// </summary>
-    public class UiKitDemoScreen : IScreen
+    public class UiKitDemoScreen : WidgetScreen
     {
-        private readonly WatchSurface _surface;
-        private readonly UIPanel _root;
-        private readonly UILabel _count;
+        private readonly UILabel _status;
         private int _taps;
 
         public UiKitDemoScreen(Bitmap fb, int panelWidth, int panelHeight)
+            : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
-            _surface = new WatchSurface(fb, panelWidth, panelHeight);
+            var t = Theme.Current;
 
-            _root = new UIPanel { X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = Color.Black };
-
-            // All inside the rounded-corner safe band (y 100..402), horizontally centered.
-            _root.Add(new UILabel
+            var root = new UIPanel
             {
-                X = 0, Y = 110, Width = panelWidth, Height = 44,
-                Text = "UI KIT", Scale = 5, Center = true, Color = Color.White,
+                X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background,
+            };
+
+            // Title: centered content is safe anywhere vertically (never clips the round corners).
+            root.Add(new UILabel
+            {
+                X = 0, Y = 100, Width = panelWidth, Height = 50,
+                Text = "UI KIT", Scale = t.TitleScale, Center = true, Color = t.OnSurface,
             });
+
+            // Content column inside the safe band, below the title. The column lays out its children
+            // top-to-bottom at the column's width - the screen no longer positions each one.
+            var col = new UIColumn
+            {
+                X = SafeArea.EdgeInset, Y = 185,
+                Width = panelWidth - 2 * SafeArea.EdgeInset, Height = 300,
+                Spacing = t.Gap,
+            };
 
             var button = new UIButton
             {
-                X = (panelWidth - 220) / 2, Y = 200, Width = 220, Height = 76,
-                Text = "TAP +1", Scale = 4, Background = Color.Gray, Foreground = Color.White,
+                Height = 80, Text = "TAP +1", Scale = t.BodyScale,
+                Background = t.Accent, Foreground = t.OnAccent,
             };
             button.Clicked = OnButtonClicked;
-            _root.Add(button);
+            col.Add(button);
 
-            _count = new UILabel
+            var sw = new UISwitch { Text = "FEEDBACK", Scale = t.BodyScale };
+            sw.Toggled = OnToggled;
+            col.Add(sw);
+
+            _status = new UILabel
             {
-                X = 0, Y = 310, Width = panelWidth, Height = 40,
-                Text = "TAPS: 0", Scale = 4, Center = true, Color = Color.White,
+                Height = 44, Text = "TAPS: 0", Scale = t.BodyScale, Center = true, Color = t.Muted,
             };
-            _root.Add(_count);
+            col.Add(_status);
+
+            root.Add(col);
+            Root = root;
         }
 
         private void OnButtonClicked()
         {
             _taps++;
-            _count.Text = "TAPS: " + _taps;
-            Render();
+            _status.Text = "TAPS: " + _taps;
+            RenderAll();
         }
 
-        private void Render()
+        private void OnToggled(bool on)
         {
-            _root.Draw(_surface);   // root panel fills the screen black, then children
-            _surface.FlushAll();
+            _status.Text = on ? "FEEDBACK ON" : "FEEDBACK OFF";
+            RenderAll();
         }
 
-        public void Tick() { /* static between taps */ }
-
-        public void Invalidate() => Render();
-
-        public void OnResume()
+        public override void OnResume()
         {
             _taps = 0;
-            _count.Text = "TAPS: 0";
-            Render();
+            _status.Text = "TAPS: 0";
+            base.OnResume();
         }
-
-        public void OnPause() { }
-
-        // Button consumes -> stay; a miss returns false so the navigator pops back.
-        public bool OnTap(int x, int y) => _root.OnTap(x, y);
     }
 }
