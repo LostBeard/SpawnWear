@@ -50,6 +50,9 @@ namespace SpawnWear.UI
         // (1 = weakest, 4 = strongest). Set by the main loop based on whatever
         // signal-strength source is convenient.
         int _wifiBars = -1;
+        // Companion link state: true when the WebRTC/hub link to the Companion app is up. Set by the
+        // main loop from WebRtcTransportService. Always shown (green up / dim gray down).
+        bool _companionConnected = false;
 
         // Cached last-rendered values for change detection.
         int _lastHour = -1;
@@ -58,6 +61,7 @@ namespace SpawnWear.UI
         int _lastVbusIn = -1; // 0/1; -1 = not yet read
         int _lastBleAdvertising = -1;
         int _lastWifiBars = int.MinValue;
+        int _lastCompanionConnected = -1; // 0/1; -1 = not yet read
 
         public StatusBar(Bitmap fb, int panelWidth, Axp2101Driver axp, Pcf85063Driver rtc)
         {
@@ -80,6 +84,10 @@ namespace SpawnWear.UI
             if (bars > 4) bars = 4;
             _wifiBars = bars;
         }
+
+        /// <summary>Sets the Companion-link indicator. true = the WebRTC/hub link to the Companion app
+        /// is up (green), false = not connected (dim gray). Always shown.</summary>
+        public void SetCompanionConnected(bool on) => _companionConnected = on;
 
         /// <summary>
         /// Renders the bar. <paramref name="force"/> bypasses the change-detection
@@ -123,7 +131,8 @@ namespace SpawnWear.UI
                 || pct != _lastBatteryPercent
                 || vbus != _lastVbusIn
                 || bleVal != _lastBleAdvertising
-                || _wifiBars != _lastWifiBars;
+                || _wifiBars != _lastWifiBars
+                || (_companionConnected ? 1 : 0) != _lastCompanionConnected;
             if (!changed) return;
 
             // Clear the bar region.
@@ -163,6 +172,11 @@ namespace SpawnWear.UI
                 cursor -= IconBoxGap + IconBoxSize;
             }
 
+            // Companion link icon: ALWAYS shown so the link state is always visible.
+            // Green = WebRTC link to the Companion app is up; dim gray = down.
+            DrawCompanionIcon(cursor, iconY, IconBoxSize, _companionConnected);
+            cursor -= IconBoxGap + IconBoxSize;
+
             // USB plug indicator - filled square when vbus in, no draw when not.
             if (vbus == 1)
             {
@@ -183,9 +197,27 @@ namespace SpawnWear.UI
             _lastVbusIn = vbus;
             _lastBleAdvertising = bleVal;
             _lastWifiBars = _wifiBars;
+            _lastCompanionConnected = _companionConnected ? 1 : 0;
         }
 
         // ----- Icons -----
+
+        // Companion link: two nodes (watch + companion) joined by a bar. Green when the WebRTC link is
+        // up, dim gray when down. Drawn with rectangles to match the other driver-free icons.
+        void DrawCompanionIcon(int x, int y, int size, bool connected)
+        {
+            Color color = connected ? Color.LimeGreen : Color.FromArgb(70, 70, 70);
+            int cy = y + size / 2;
+            int node = size / 3;            // node square side
+            int nodeY = cy - node / 2;
+            // left node (the watch)
+            _fb.FillRectangle(x, nodeY, node, node, color);
+            // right node (the companion)
+            _fb.FillRectangle(x + size - node, nodeY, node, node, color);
+            // connecting bar
+            int barH = size / 6;
+            _fb.FillRectangle(x + node, cy - barH / 2, size - 2 * node, barH, color);
+        }
 
         void DrawBatteryIcon(int x, int y, int size, int pct)
         {

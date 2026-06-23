@@ -50,6 +50,7 @@ namespace SpawnWear
         static bool _sdIsolationTest = false;
         static HttpServer _http;            // RETIRED - kept for potential future need; no longer started
         static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
+        static StatusBar _statusBar;        // shared status bar; OnTick refreshes the Companion-link icon
         static Bitmap _fb; // shared framebuffer reference for screenshots
         static int _bootButtonClickPending; // set by ISR, drained by main loop
         static bool _fingerDown;
@@ -177,6 +178,7 @@ namespace SpawnWear
                 _webrtc.Start();
                 Debug.WriteLine("[SpawnWear] WebRTC transport service started");
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
+                _statusBar = statusBar; // expose to OnTick for the live Companion-link icon
                 // WiFi state -> status bar. We don't have RSSI on this build so
                 // signal strength is reported as full bars (4) when connected
                 // and -1 (hidden) when not. Phase 2 will read RSSI from the
@@ -322,6 +324,10 @@ namespace SpawnWear
 
                 if (_screenState != ScreenState.Sleep)
                 {
+                    // Refresh the Companion-link icon from the live transport state. Cheap: the status
+                    // bar only repaints when the value actually changes (change-detection cache).
+                    if (_statusBar != null && _webrtc != null)
+                        _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
                     _nav.Current.Tick();
                 }
             }
@@ -1203,14 +1209,17 @@ namespace SpawnWear
                             bus.RouteReceived(rxFrame, rn);
                         }
 
-                        // 3) first sys.* consumer: stream battery + imu ~1 Hz on the existing channels
-                        //    the Companion dashboard already decodes ("battery" / "imu").
+                        // 3) first sys.* consumer. IMU every tick (~200ms = 5 Hz) for smooth live
+                        //    motion - cheap now that Send is lock-free. Battery every ~2 s (changes
+                        //    slowly; keeps the shared I2C bus light). Both on the existing channels the
+                        //    Companion dashboard already decodes ("imu" / "battery").
+                        PublishImu(bus);
                         tick++;
-                        if (tick >= 5)
+                        if (tick >= 10)
                         {
                             tick = 0;
                             seq++;
-                            PublishTelemetry(bus);
+                            PublishBattery(bus);
                             ConnectStatus = "CONNECTED - streaming (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
                         }
                     }
@@ -1236,12 +1245,12 @@ namespace SpawnWear
             }
         }
 
-        // First sys.* telemetry consumer: publish battery + IMU on the EXISTING Companion channels, in
-        // the same binary schemas WatchProfileService notifies over BLE - so the Companion dashboard
-        // (BridgeClient battery/imu decode + Home.razor cards) renders them unchanged.
+        // First sys.* telemetry consumers: publish on the EXISTING Companion channels, in the same
+        // binary schemas WatchProfileService notifies over BLE - so the Companion dashboard
+        // (BridgeClient decode + Home.razor cards) renders them unchanged.
         //   battery: [percent:u8][flags:u8][mV:u16-LE][mA:i16-LE]
         //   imu:     [ax,ay,az,gx,gy,gz : i16-LE]   accel = milli-g, gyro = deci-dps (clamped to i16)
-        static void PublishTelemetry(SpawnWear.Services.TransportBus bus)
+        static void PublishBattery(SpawnWear.Services.TransportBus bus)
         {
             try
             {
@@ -1260,7 +1269,10 @@ namespace SpawnWear
                 bus.Send("battery", bat);
             }
             catch (Exception ex) { Debug.WriteLine("[Telemetry] battery EX " + ex.Message); }
+        }
 
+        static void PublishImu(SpawnWear.Services.TransportBus bus)
+        {
             try
             {
                 Qmi8658Driver.ImuSample s;
