@@ -1004,6 +1004,18 @@ namespace SpawnWear
             catch (Exception ex) { return "no log (" + ex.Message + ")"; }
         }
 
+        // Phase 7c: embedded WebRtcSelfTestPairing keys for the milestone-3 WebRTC challenge test
+        // (the watch hasn't BLE-paired with the Bridge.Desktop answerroom; production uses the real
+        // PairingService identity instead). TestWatchSeed = the 32-byte Ed25519 seed extracted from
+        // WebRtcSelfTestPairing.WatchPrivB64 (PKCS8 -> last 32 bytes); KeyPairFromSeed(seed) derives
+        // WatchPub (starts 0x25). TestCompanionPub = WebRtcSelfTestPairing.CompanionPubB64 raw bytes.
+        static readonly byte[] TestWatchSeed = new byte[] {
+            0x44,0x3A,0x30,0x41,0x8F,0xDE,0x47,0x2C,0x68,0x38,0xB5,0x96,0x27,0xFD,0x69,0xA3,
+            0x3F,0x7B,0xE0,0x20,0x1E,0xCB,0x35,0x48,0xD7,0xBD,0xF7,0x0D,0xB2,0x88,0x01,0xE2 };
+        static readonly byte[] TestCompanionPub = new byte[] {
+            0x1D,0x1B,0x98,0xD3,0x27,0x57,0xC4,0xBA,0x6F,0x2D,0xBF,0xAE,0xE3,0x6F,0xA2,0xA7,
+            0x8B,0xC8,0x28,0xBC,0xAD,0xDE,0x13,0x7E,0xEF,0x8D,0x90,0xBD,0xEC,0x9D,0xC0,0x6A };
+
         static void WebRtcConnectRun()
         {
             SwTrackerSignaling tr = null;
@@ -1078,25 +1090,62 @@ namespace SpawnWear
                     SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
                     LogSd("opened DCEP data channel (post-SCTP)");
                     System.Threading.Thread.Sleep(500);
-                    // Data channel is up - send a probe and look for the peer's echo.
-                    byte[] probe = System.Text.Encoding.UTF8.GetBytes("ping from watch");
-                    SpawnDev.WebRTC.PeerConnection.Send(h, probe, probe.Length);
-                    ConnectStatus = "DATACHANNEL OPEN - sent probe";
-                    LogSd("DATACHANNEL OPEN - sent probe");
-                    // Phase 7b: TryReceive currently BLOCKS ~10s/call (native interop poll), so keep
-                    // this short - the connect itself is done at DATACHANNEL OPEN; this is only an
-                    // echo probe. 8 iters bounds the post-open wait instead of the old 100 (~1000s).
-                    byte[] rx = new byte[512];
-                    for (int i = 0; i < 8; i++)
+
+                    // Phase 7c: Ed25519 MUTUAL CHALLENGE over the data channel - mirrors
+                    // SpawnWear.Bridge.WebRtc.WebRtcChallenge. Frames are distinguished by length:
+                    // 32 = a challenge nonce; 96 = [nonce:32][sig:64] response. Each peer sends its
+                    // own nonce and answers the other's; each verifies the other's sig with the peer's
+                    // Ed25519 pubkey. Real RFC 8032 crypto via SpawnDev.Crypto.Ed25519 (Monocypher).
+                    byte[] watchPub = new byte[32];
+                    byte[] watchPriv64 = new byte[64];
+                    SpawnDev.Crypto.Ed25519.KeyPairFromSeed(TestWatchSeed, watchPub, watchPriv64);
+                    LogSd("identity pub[0]=" + watchPub[0] + " (expect 37)");
+
+                    byte[] ourNonce = new byte[32];
+                    SpawnDev.Crypto.X25519.GeneratePrivateKey(ourNonce); // ESP32 HW RNG fills 32 bytes
+                    SpawnDev.WebRTC.PeerConnection.Send(h, ourNonce, 32);
+                    LogSd("sent our challenge nonce");
+
+                    bool peerAnswered = false; // we signed + returned the companion's nonce
+                    bool ourVerified = false;  // we verified the companion's response to our nonce
+                    byte[] rx = new byte[256];
+                    for (int i = 0; i < 40 && !(peerAnswered && ourVerified); i++)
                     {
                         System.Threading.Thread.Sleep(50);
                         int n = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rx);
-                        if (n > 0)
+                        if (n == 32)
                         {
-                            ConnectStatus = "ECHO(" + n + "): " + new string(System.Text.Encoding.UTF8.GetChars(rx, 0, n));
-                            break;
+                            // Companion's challenge -> sign the nonce, return [nonce:32][sig:64].
+                            byte[] dom = new byte[32];
+                            Array.Copy(rx, 0, dom, 0, 32);
+                            byte[] sig = new byte[64];
+                            SpawnDev.Crypto.Ed25519.Sign(sig, watchPriv64, dom);
+                            byte[] resp = new byte[96];
+                            Array.Copy(dom, 0, resp, 0, 32);
+                            Array.Copy(sig, 0, resp, 32, 64);
+                            SpawnDev.WebRTC.PeerConnection.Send(h, resp, 96);
+                            peerAnswered = true;
+                            LogSd("answered companion challenge");
+                        }
+                        else if (n == 96)
+                        {
+                            // Companion's response to OUR nonce -> echoed nonce must match + sig verify.
+                            bool nonceOk = true;
+                            for (int k = 0; k < 32; k++) { if (rx[k] != ourNonce[k]) { nonceOk = false; break; } }
+                            byte[] sig = new byte[64];
+                            Array.Copy(rx, 32, sig, 0, 64);
+                            if (nonceOk && SpawnDev.Crypto.Ed25519.Verify(sig, TestCompanionPub, ourNonce))
+                            {
+                                ourVerified = true;
+                                LogSd("verified companion response");
+                            }
+                            else { LogSd("companion response BAD (nonceOk=" + nonceOk + ")"); }
                         }
                     }
+                    ConnectStatus = (peerAnswered && ourVerified)
+                        ? "VERIFIED - mutual Ed25519 challenge OK"
+                        : "challenge incomplete (answered=" + peerAnswered + " verified=" + ourVerified + ")";
+                    LogSd(ConnectStatus);
                 }
                 else
                 {
