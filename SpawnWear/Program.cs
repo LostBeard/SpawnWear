@@ -1164,6 +1164,16 @@ namespace SpawnWear
                         ? "VERIFIED - mutual Ed25519 challenge OK"
                         : "challenge incomplete (answered=" + peerAnswered + " verified=" + ourVerified + ")";
                     LogSd(ConnectStatus);
+
+                    // Phase 7c: the mutual challenge is MUTUAL - the companion must also receive OUR
+                    // challenge response and verify it. We sent that response just before verifying the
+                    // companion's, so if we Close() now (finally{}) the channel drops ~0.5s later and the
+                    // companion's ConnectAsync fails its half before it finishes. Hold the channel OPEN a
+                    // few seconds so the companion can complete its verification (and so we keep the data
+                    // channel up briefly - the real transport keeps it open indefinitely).
+                    LogSd("holding channel open for companion to verify its half...");
+                    System.Threading.Thread.Sleep(8000);
+                    LogSd("hold complete");
                 }
                 else
                 {
