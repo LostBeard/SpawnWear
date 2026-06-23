@@ -59,6 +59,26 @@ namespace SpawnDev.UI
         {
             for (int i = 0; i < Children.Count; i++) ((UIElement)Children[i]).Layout();
         }
+
+        /// <summary>Finger pressed at (px,py): route top-most-first to the deepest interactive child
+        /// containing the point so it can show a pressed state. Returns true if a child took it. (Raw
+        /// down; the classified tap still comes via <see cref="OnTap"/> on release.)</summary>
+        public virtual bool OnPress(int px, int py)
+        {
+            if (!Visible) return false;
+            for (int i = Children.Count - 1; i >= 0; i--)
+            {
+                var c = (UIElement)Children[i];
+                if (c.Visible && c.Contains(px, py) && c.OnPress(px, py)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Finger released anywhere: clear any pressed state in the subtree.</summary>
+        public virtual void OnRelease()
+        {
+            for (int i = 0; i < Children.Count; i++) ((UIElement)Children[i]).OnRelease();
+        }
     }
 
     /// <summary>Container with an optional solid background (mirrors GameUI UIPanel).</summary>
@@ -123,6 +143,15 @@ namespace SpawnDev.UI
             if (Clicked != null) Clicked();
             return true;
         }
+
+        public override bool OnPress(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            Pressed = true;
+            return true;
+        }
+
+        public override void OnRelease() { Pressed = false; }
     }
 
     /// <summary>Vertical stack layout: places its children top-to-bottom within its own bounds, each

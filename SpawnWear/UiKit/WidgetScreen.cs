@@ -1,3 +1,4 @@
+using System;
 using SpawnWear.UI;       // IScreen
 using SpawnWear.Drivers;  // BoardPins (corner radius)
 
@@ -10,7 +11,16 @@ namespace SpawnDev.UI
     /// invalidate, and route taps into the tree's hit-test. Replaces the per-screen hand-rolled
     /// draw/flush/hit-test boilerplate.
     /// </summary>
-    public abstract class WidgetScreen : IScreen
+    /// <summary>A screen wanting raw finger press/release (in addition to IScreen's classified OnTap) -
+    /// for press-state animation, drag, scroll. The event loop dispatches OnPress on finger-down and
+    /// OnRelease on finger-up. Old immediate-mode screens simply don't implement it.</summary>
+    public interface IPressable
+    {
+        void OnPress(int x, int y);
+        void OnRelease();
+    }
+
+    public abstract class WidgetScreen : IScreen, IPressable
     {
         protected readonly IUiSurface Surface;
         protected UIElement Root;
@@ -18,6 +28,15 @@ namespace SpawnDev.UI
         protected WidgetScreen(IUiSurface surface) { Surface = surface; }
 
         private bool _needsRender = true;
+        private long _pressStartTicks;
+        private bool _pressShowing;     // a press-state is currently rendered
+        private bool _releaseRequested; // finger lifted; clear the press once it has been visible a bit
+        private const int MinPressVisibleMs = 90;
+
+        /// <summary>True while a press release is pending - the event loop keeps ticking fast so the
+        /// pressed state stays visible briefly even on a very quick tap (otherwise the finger lifts
+        /// before the loop ever renders the pressed frame, and no animation is seen).</summary>
+        public bool IsAnimating { get { return _pressShowing && _releaseRequested; } }
 
         /// <summary>Request a repaint on the next Tick. Rendering is DEFERRED to the event loop rather
         /// than done synchronously inside OnResume/OnTap: the navigator calls OnResume mid-transition
@@ -36,7 +55,21 @@ namespace SpawnDev.UI
 
         public virtual void OnResume() { _needsRender = true; }
         public virtual void OnPause() { }
-        public virtual void Tick() { if (_needsRender) { _needsRender = false; RenderNow(); } }
+        public virtual void Tick()
+        {
+            if (_releaseRequested)
+            {
+                long heldMs = (DateTime.UtcNow.Ticks - _pressStartTicks) / TimeSpan.TicksPerMillisecond;
+                if (heldMs >= MinPressVisibleMs)
+                {
+                    if (Root != null) Root.OnRelease();
+                    _pressShowing = false;
+                    _releaseRequested = false;
+                    _needsRender = true;
+                }
+            }
+            if (_needsRender) { _needsRender = false; RenderNow(); }
+        }
         public virtual void Invalidate() { _needsRender = true; }
 
         public virtual bool OnTap(int x, int y)
@@ -45,6 +78,27 @@ namespace SpawnDev.UI
             bool consumed = Root.OnTap(x, y);
             if (consumed) _needsRender = true; // a widget changed state -> repaint next tick
             return consumed;
+        }
+
+        // IPressable: raw finger down/up -> press-state in the tree (e.g. a button darkens while held).
+        public virtual void OnPress(int x, int y)
+        {
+            if (Root != null && Root.OnPress(x, y))
+            {
+                _pressStartTicks = DateTime.UtcNow.Ticks;
+                _pressShowing = true;
+                _releaseRequested = false;
+                _needsRender = true;
+            }
+        }
+
+        public virtual void OnRelease()
+        {
+            // Defer the visual release so the pressed frame is guaranteed at least MinPressVisibleMs on
+            // screen (Tick does the actual clear). On a quick tap the finger lifts before the loop ever
+            // rendered the press; deferring keeps it visible.
+            if (_pressShowing) _releaseRequested = true;
+            else if (Root != null) Root.OnRelease();
         }
     }
 

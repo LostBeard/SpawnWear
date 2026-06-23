@@ -52,7 +52,11 @@ namespace SpawnWear
         static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
         static StatusBar _statusBar;        // shared status bar; OnTick refreshes the Companion-link icon
         static Bitmap _fb; // shared framebuffer reference for screenshots
-        static int _bootButtonClickPending; // set by ISR, drained by main loop
+        static int _bootButtonClickPending; // 0=none, 1=short(Back), 2=long; set by ISR, drained by loop
+        static long _bootDownUtcTicks;
+        const int BootLongPressMs = 600;
+        internal delegate void BootButtonAction();
+        static BootButtonAction _bootLongPressAction; // programmable long-press (AI agent hold-to-talk later)
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
 
@@ -299,12 +303,25 @@ namespace SpawnWear
         /// </summary>
         static int OnTick(EventLoop.WakeReason reason)
         {
-            // BOOT-button screenshot capture lived here - removed in favor of the
-            // HTTP server's /screenshot.bin endpoint. The boot-button click pending
-            // flag is harmless if set; just drained without action.
-            if (_bootButtonClickPending > 0)
+            // BOOT (GPIO0) side button: short press = Back (pop a sub-page, else go Home);
+            // long press = programmable action (default Home; the AI agent can claim it for hold-to-talk).
+            if (_bootButtonClickPending != 0)
             {
+                int kind = _bootButtonClickPending;
                 _bootButtonClickPending = 0;
+                if (_nav != null)
+                {
+                    if (kind == 1)
+                    {
+                        if (_nav.StackDepth > 0) _nav.Pop();
+                        else if (_nav.CurrentIndex != 0) _nav.GoHome();
+                    }
+                    else
+                    {
+                        if (_bootLongPressAction != null) _bootLongPressAction();
+                        else _nav.GoHome();
+                    }
+                }
             }
 
             try
@@ -336,6 +353,10 @@ namespace SpawnWear
                 Debug.WriteLine("[Tick] EX " + ex.GetType().Name + ": " + ex.Message);
             }
 
+            // Keep ticking fast while a widget screen is mid press-release animation, so the pressed
+            // state stays visible briefly even on a very quick tap (finger lifts before a slow tick).
+            var animWs = _nav != null ? _nav.Current as SpawnDev.UI.WidgetScreen : null;
+            if (animWs != null && animWs.IsAnimating) return 16;
             if (_fingerDown) return 16;
             switch (_screenState)
             {
@@ -1380,6 +1401,12 @@ namespace SpawnWear
                             _fingerDownY = snapshot.Y1;
                             _stateAtFingerDown = _screenState;
                             Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ") state=" + _stateAtFingerDown);
+                            // Raw press -> widget press-state animation (only on an active screen).
+                            if (_nav != null && _screenState == ScreenState.Active)
+                            {
+                                var pressDown = _nav.Current as SpawnDev.UI.IPressable;
+                                if (pressDown != null) pressDown.OnPress(snapX, snapY);
+                            }
                         }
                     }
                     else if (wasDown)
@@ -1397,6 +1424,9 @@ namespace SpawnWear
                         // to the UI.
                         if (_nav != null && _stateAtFingerDown == ScreenState.Active)
                         {
+                            // Release the press-state first (button returns to normal), then the tap.
+                            var pressUp = _nav.Current as SpawnDev.UI.IPressable;
+                            if (pressUp != null) pressUp.OnRelease();
                             if (isLongPress) _nav.GoHome();
                             else if (isTap)
                             {
@@ -1547,10 +1577,20 @@ namespace SpawnWear
                 pin.SetPinMode(System.Device.Gpio.PinMode.InputPullUp);
                 pin.ValueChanged += (sender, args) =>
                 {
-                    if (args.ChangeType != System.Device.Gpio.PinEventTypes.Falling) return;
-                    Debug.WriteLine("[Boot] PRESS - queue screenshot");
-                    _bootButtonClickPending = 1;
-                    if (_eventLoop != null) _eventLoop.Wake();
+                    // InputPullUp: Falling = press, Rising = release. Classify short (= Back) vs long
+                    // (= programmable, e.g. hold-to-talk to the AI agent) on release, like a Fitbit.
+                    long now = DateTime.UtcNow.Ticks;
+                    if (args.ChangeType == System.Device.Gpio.PinEventTypes.Falling)
+                    {
+                        _bootDownUtcTicks = now;
+                    }
+                    else if (args.ChangeType == System.Device.Gpio.PinEventTypes.Rising && _bootDownUtcTicks != 0)
+                    {
+                        long heldMs = (now - _bootDownUtcTicks) / TimeSpan.TicksPerMillisecond;
+                        _bootButtonClickPending = heldMs >= BootLongPressMs ? 2 : 1; // 1 = back, 2 = long
+                        Debug.WriteLine("[Boot] " + (_bootButtonClickPending == 2 ? "LONG" : "short") + " press (" + heldMs + "ms)");
+                        if (_eventLoop != null) _eventLoop.Wake();
+                    }
                 };
                 Debug.WriteLine("[Boot] B2 - Falling-edge handler attached");
             }
