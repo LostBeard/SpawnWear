@@ -1054,12 +1054,21 @@ namespace SpawnWear
                 LogSd("offer-ready len=" + len);
                 tr = new SwTrackerSignaling();
                 if (!tr.Connect()) { ConnectStatus = "ws-connect-failed"; return; }
-                tr.AnnounceOffer(room, pid, oid, offer);
-                ConnectStatus = "announced";
-                LogSd("announced");
-
-                string answer = tr.WaitForAnswer(oid, 20000);
-                if (answer == null) { ConnectStatus = "no-answer"; return; }
+                // Phase 7d: ROBUST announce. A single announce-and-hope is brittle - it only works if
+                // the companion happens to be in the tracker pool at that exact instant. Instead,
+                // re-announce our offer every ~5s for up to ~60s. The companion re-announces on the
+                // hub's interval, so once it's in the pool our next re-announce reaches it and it
+                // answers. WaitForAnswer reads the live socket and discards non-answers, so looping it
+                // between re-announces just keeps reading.
+                string answer = null;
+                for (int attempt = 1; attempt <= 12 && answer == null; attempt++)
+                {
+                    tr.AnnounceOffer(room, pid, oid, offer);
+                    ConnectStatus = "announcing (try " + attempt + ")";
+                    LogSd("announce try " + attempt);
+                    answer = tr.WaitForAnswer(oid, 5000);
+                }
+                if (answer == null) { ConnectStatus = "no-answer (after re-announces)"; return; }
                 ConnectStatus = "answered len=" + answer.Length;
 
                 // Free the WebSocket + its TLS (mbedtls) BEFORE the DTLS handshake (also mbedtls)
@@ -1165,15 +1174,28 @@ namespace SpawnWear
                         : "challenge incomplete (answered=" + peerAnswered + " verified=" + ourVerified + ")";
                     LogSd(ConnectStatus);
 
-                    // Phase 7c: the mutual challenge is MUTUAL - the companion must also receive OUR
-                    // challenge response and verify it. We sent that response just before verifying the
-                    // companion's, so if we Close() now (finally{}) the channel drops ~0.5s later and the
-                    // companion's ConnectAsync fails its half before it finishes. Hold the channel OPEN a
-                    // few seconds so the companion can complete its verification (and so we keep the data
-                    // channel up briefly - the real transport keeps it open indefinitely).
-                    LogSd("holding channel open for companion to verify its half...");
-                    System.Threading.Thread.Sleep(8000);
-                    LogSd("hold complete");
+                    // Phase 7d: PERSISTENT connection. Instead of holding 8s and closing, stay connected
+                    // for the LIFE of the link: drain incoming messages and keep the channel up until the
+                    // peer disconnects (GetState leaves Completed) or the link drops. This also gives the
+                    // companion all the time it needs to finish ITS half of the mutual challenge. (First
+                    // version runs on the HTTP thread, so /webrtc-connect stays open for the connection's
+                    // life; a background-thread WebRTC service is the next refinement.)
+                    LogSd("CONNECTED - persistent loop (channel stays open until peer disconnects)");
+                    int rxCount = 0;
+                    while (SpawnDev.WebRTC.PeerConnection.GetState(h) == SpawnDev.WebRTC.PeerConnection.StateCompleted)
+                    {
+                        System.Threading.Thread.Sleep(200);
+                        int rn = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rx);
+                        if (rn > 0)
+                        {
+                            rxCount++;
+                            string preview = rn <= 80 ? new string(System.Text.Encoding.UTF8.GetChars(rx, 0, rn)) : (rn + " bytes");
+                            ConnectStatus = "CONNECTED (rx=" + rxCount + ")";
+                            LogSd("rx#" + rxCount + " (" + rn + "B): " + preview);
+                        }
+                    }
+                    ConnectStatus = "disconnected (was connected, rx=" + rxCount + ")";
+                    LogSd("peer disconnected after " + rxCount + " msgs - link closed");
                 }
                 else
                 {
