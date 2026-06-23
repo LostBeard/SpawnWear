@@ -78,6 +78,9 @@ namespace SpawnWear
         // Ignore taps that land within this window of the previous dispatched tap.
         const int TapDebounceMs = 250;
         static long _lastTapDispatchUtcTicks;
+        // Swipe: a quick, mostly-horizontal flick beyond the tap radius -> page the rotation.
+        const int SwipeMinDist = 70;  // min horizontal px to count as a swipe
+        const int SwipeMaxMs = 600;   // a flick, not a slow drag
         const int TapMaxMoveSquared = 30 * 30;
         // Long-press = finger held in roughly the same place for >= 800 ms.
         // Triggers ScreenNavigator.GoHome() so the user can always get back to
@@ -1435,7 +1438,10 @@ namespace SpawnWear
                         bool stayedPut = (dx * dx + dy * dy) < TapMaxMoveSquared;
                         bool isTap = elapsedMs < TapMaxMs && stayedPut;
                         bool isLongPress = elapsedMs >= LongPressMinMs && stayedPut;
-                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress);
+                        int adx = dx < 0 ? -dx : dx;
+                        int ady = dy < 0 ? -dy : dy;
+                        bool isSwipe = !stayedPut && elapsedMs < SwipeMaxMs && adx >= SwipeMinDist && adx > ady;
+                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress + " swipe=" + isSwipe);
                         // Wake-tap consumption: any gesture whose finger-DOWN happened while
                         // the screen was asleep is consumed by the wake itself, not dispatched
                         // to the UI.
@@ -1445,6 +1451,11 @@ namespace SpawnWear
                             var pressUp = _nav.Current as SpawnDev.UI.IPressable;
                             if (pressUp != null) pressUp.OnRelease();
                             if (isLongPress) _nav.GoHome();
+                            else if (isSwipe)
+                            {
+                                if (dx < 0) _nav.Next();  // swipe left -> next screen
+                                else _nav.Prev();          // swipe right -> previous screen
+                            }
                             else if (isTap)
                             {
                                 long sinceLastTapMs = (nowTicks - _lastTapDispatchUtcTicks) / TimeSpan.TicksPerMillisecond;

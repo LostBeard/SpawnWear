@@ -103,6 +103,19 @@ namespace SpawnWear.UI
             SafeResume(_screens[_activeIndex]);
         }
 
+        /// <summary>Rotates to the PREVIOUS top-level screen (wraps). No-op while a sub-page is open.
+        /// Wired to swipe-right, the mirror of <see cref="Next"/> (swipe-left).</summary>
+        public void Prev()
+        {
+            if (_depth > 0) return;
+            int prev = (_activeIndex - 1 + _screens.Length) % _screens.Length;
+            if (prev == _activeIndex) return;
+            SafePause(_screens[_activeIndex]);
+            _activeIndex = prev;
+            Debug.WriteLine("[Nav] Switched (prev) to screen index " + _activeIndex);
+            SafeResume(_screens[_activeIndex]);
+        }
+
         /// <summary>
         /// Returns to the home screen (rotation index 0), collapsing any open
         /// sub-pages. Wired to the long-press gesture so a held finger always
