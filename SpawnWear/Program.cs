@@ -52,8 +52,13 @@ namespace SpawnWear
         static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
         static StatusBar _statusBar;        // shared status bar; OnTick refreshes the Companion-link icon
         static Bitmap _fb; // shared framebuffer reference for screenshots
+        // DIAGNOSTIC 2026-06-23: the watch freezes ~15-20s after boot (suspect: WebRTC/libpeer native).
+        // Gated OFF to confirm the cause + give a stable, deployable watch. Re-enable once fixed.
+        const bool EnableWebRtcTransport = false;
+
         static int _bootButtonClickPending; // 0=none, 1=short(Back), 2=long; set by ISR, drained by loop
         static long _bootDownUtcTicks;
+        static ScreenState _bootStateAtPress; // screen state when the button went down (wake-vs-act gate)
         const int BootLongPressMs = 600;
         internal delegate void BootButtonAction();
         static BootButtonAction _bootLongPressAction; // programmable long-press (AI agent hold-to-talk later)
@@ -179,8 +184,15 @@ namespace SpawnWear
                 // No external trigger - the watch maintains its own link to the Companion. With the HTTP
                 // server gone there is no second thread touching libpeer, so no concurrency to crash on.
                 _webrtc = new WebRtcTransportService(_pairing, _wifi);
-                _webrtc.Start();
-                Debug.WriteLine("[SpawnWear] WebRTC transport service started");
+                if (EnableWebRtcTransport)
+                {
+                    _webrtc.Start();
+                    Debug.WriteLine("[SpawnWear] WebRTC transport service started");
+                }
+                else
+                {
+                    Debug.WriteLine("[SpawnWear] WebRTC transport service DISABLED (freeze diagnostic 2026-06-23)");
+                }
                 var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
                 _statusBar = statusBar; // expose to OnTick for the live Companion-link icon
                 // WiFi state -> status bar. We don't have RSSI on this build so
@@ -309,7 +321,10 @@ namespace SpawnWear
             {
                 int kind = _bootButtonClickPending;
                 _bootButtonClickPending = 0;
-                if (_nav != null)
+                // Match a screen touch: a press that woke the screen from dim/sleep only wakes it (the
+                // _lastTouchUtcTicks bump already un-dimmed it); it does not also navigate. Act only when
+                // the screen was already Active at press time.
+                if (_nav != null && _bootStateAtPress == ScreenState.Active)
                 {
                     if (kind == 1)
                     {
@@ -1582,10 +1597,13 @@ namespace SpawnWear
                     long now = DateTime.UtcNow.Ticks;
                     if (args.ChangeType == System.Device.Gpio.PinEventTypes.Falling)
                     {
+                        _bootStateAtPress = _screenState; // capture BEFORE counting activity (wake-vs-act)
                         _bootDownUtcTicks = now;
+                        _lastTouchUtcTicks = now;          // count as activity -> wake/un-dim the screen
                     }
                     else if (args.ChangeType == System.Device.Gpio.PinEventTypes.Rising && _bootDownUtcTicks != 0)
                     {
+                        _lastTouchUtcTicks = now;          // activity
                         long heldMs = (now - _bootDownUtcTicks) / TimeSpan.TicksPerMillisecond;
                         _bootButtonClickPending = heldMs >= BootLongPressMs ? 2 : 1; // 1 = back, 2 = long
                         Debug.WriteLine("[Boot] " + (_bootButtonClickPending == 2 ? "LONG" : "short") + " press (" + heldMs + "ms)");
