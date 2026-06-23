@@ -142,6 +142,18 @@ public class WebRtcTransport : ITransport, IAsyncDisposable
             try { _channel.Dispose(); } catch { /* ignore */ }
             _channel = null;
         }
+
+        // Close the peer connection(s), not just the data channel. Closing only the channel leaves the
+        // RTCPeerConnection (and its ICE agent) alive, so the browser keeps sending ICE consent
+        // keepalives and the remote peer never trips its keepalive timeout - it stays "connected"
+        // forever (the watch's Companion-link icon stayed green after Disconnect). Unhook our handlers
+        // first to avoid re-entering DisconnectAsync via OnPeerDisconnected, then dispose the handler,
+        // which Close()s + Dispose()s every pooled/active IRTCPeerConnection. This transport is one-shot
+        // (a fresh one is created per Connect), so disposing the handler here is correct.
+        _handler.OnDataChannel      -= OnDataChannel;
+        _handler.OnPeerDisconnected -= OnPeerDisconnected;
+        try { _handler.Dispose(); } catch { /* ignore */ }
+
         var roomKey = RoomKey.FromBytes(_pairing.RoomKey);
         try { _signaling.Unsubscribe(roomKey); } catch { /* ignore */ }
         try { await _signaling.AnnounceAsync(roomKey, new AnnounceOptions { Event = "stopped" }); } catch { /* ignore */ }
