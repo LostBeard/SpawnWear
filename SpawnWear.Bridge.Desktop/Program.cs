@@ -18,6 +18,14 @@ using SpawnWear.Bridge.WebRtc;
 // authenticate + exchange data through the hub, the watch just has to do the
 // same thing with libpeer. Run: dotnet run --project SpawnWear.Bridge.Desktop
 
+// Phase 7b: be patient with the watch's ICE. The watch (constrained embedded peer) only starts
+// answering STUN connectivity checks ~20s in - it can't validate them until it has our ufrag/pwd
+// from the answer, which is delayed by non-trickle ICE gathering + hub relay. SipSorcery's default
+// 16s FAILED timeout fires first -> a transient ICE failure that can corrupt the SCTP handshake.
+// Set once here so EVERY desktop-peer mode (answerroom included), not just dcdiag, gets it.
+SIPSorcery.Net.RtpIceChannel.FAILED_TIMEOUT_PERIOD = 30;
+SIPSorcery.Net.RtpIceChannel.DISCONNECTED_TIMEOUT_PERIOD = 20;
+
 // Diagnostic: does a desktop (SipSorcery) peer connection embed ICE candidates into
 // LocalDescription.Sdp after gathering? The tracker path (RtcPeerConnectionRoomHandler)
 // is NON-trickle - it announces LocalDescription.Sdp, so if candidates aren't in it the
@@ -108,12 +116,7 @@ if (args.Length > 0 && args[0] == "setuptest")
 if (args.Length > 0 && args[0] == "dcdiag")
 {
     var dcRoomStr = args.Length > 1 ? args[1] : "SWclean0623pmRoom01x";
-    // Phase 7b ICE flakiness fix: the watch (constrained embedded peer) only starts answering STUN
-    // connectivity checks ~20s in (it can't validate them until it has our ufrag/pwd from the answer,
-    // delayed by non-trickle ICE gathering + hub relay). SipSorcery's default 16s FAILED timeout
-    // fires first -> transient ICE failure that can corrupt the SCTP handshake. Be more patient.
-    SIPSorcery.Net.RtpIceChannel.FAILED_TIMEOUT_PERIOD = 30;
-    SIPSorcery.Net.RtpIceChannel.DISCONNECTED_TIMEOUT_PERIOD = 20;
+    // (ICE FAILED_TIMEOUT_PERIOD bumped to 30 at the top of Main - covers every desktop mode.)
     SIPSorcery.LogFactory.Set(LoggerFactory.Create(b =>
         b.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss.fff "; }).SetMinimumLevel(LogLevel.Debug)));
     var dcOpts = new BridgeWebRtcOptions();
