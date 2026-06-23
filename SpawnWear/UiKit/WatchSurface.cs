@@ -42,6 +42,8 @@ namespace SpawnDev.UI
 
         public void Flush(int x, int y, int w, int h) => _fb.Flush(x, y, w, h);
 
-        public void FlushAll() => _fb.Flush(0, 0, _w, _h);
+        // No-arg Flush pushes the WHOLE bitmap reliably (the launcher uses this for full repaints).
+        // The partial Flush(0,0,w,h) was dropping the bottom rows via the CO5300 even/odd alignment.
+        public void FlushAll() => _fb.Flush();
     }
 }

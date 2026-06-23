@@ -103,12 +103,15 @@ namespace SpawnDev.UI
         public int Scale = 4;
         public Color Background = Theme.Current.Surface;
         public Color Foreground = Theme.Current.OnSurface;
+        public int CornerRadius = Theme.Current.Radius;
+        public bool Pressed;   // visual press-state, driven by the gesture layer (animation lands there)
         public ClickHandler Clicked;
 
         public override void Draw(IUiSurface s)
         {
             if (!Visible) return;
-            s.DrawRect(X, Y, Width, Height, Background);
+            Color bg = Pressed ? Theme.Current.SurfacePressed : Background;
+            Shapes.RoundedRect(s, X, Y, Width, Height, CornerRadius, bg);
             int tw = s.MeasureText(Text, Scale);
             int th = s.TextHeight(Scale);
             s.DrawText(Text, X + (Width - tw) / 2, Y + (Height - th) / 2, Scale, Foreground);
@@ -164,17 +167,17 @@ namespace SpawnDev.UI
         {
             if (!Visible) return;
             var t = Theme.Current;
-            s.DrawRect(X, Y, Width, Height, t.Surface);
+            Shapes.RoundedRect(s, X, Y, Width, Height, t.Radius, t.Surface);   // rounded row/card
             int th = s.TextHeight(Scale);
-            s.DrawText(Text, X + t.CornerInset + 8, Y + (Height - th) / 2, Scale, t.OnSurface);
-            // pill track + knob on the right
-            int trackW = 64, trackH = 34;
-            int tx = X + Width - trackW - t.CornerInset - 8;
+            s.DrawText(Text, X + t.CornerInset + 14, Y + (Height - th) / 2, Scale, t.OnSurface);
+            // capsule track + circular knob on the right
+            int trackW = 70, trackH = 36;
+            int tx = X + Width - trackW - t.CornerInset - 14;
             int ty = Y + (Height - trackH) / 2;
-            s.DrawRect(tx, ty, trackW, trackH, On ? t.Accent : t.Divider);
+            Shapes.RoundedRect(s, tx, ty, trackW, trackH, trackH / 2, On ? t.Accent : t.Divider);
             int knob = trackH - 8;
             int kx = On ? (tx + trackW - knob - 4) : (tx + 4);
-            s.DrawRect(kx, ty + 4, knob, knob, On ? t.OnAccent : t.Muted);
+            Shapes.RoundedRect(s, kx, ty + 4, knob, knob, knob / 2, On ? t.OnAccent : t.Muted);
         }
 
         public override bool OnTap(int px, int py)

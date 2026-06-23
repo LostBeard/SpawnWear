@@ -40,7 +40,8 @@ namespace SpawnDev.UI
         // Default metrics
         public int CornerInset  = 6;    // visual padding inside surfaces
         public int RowHeight    = 64;
-        public int Gap          = 10;   // default spacing between stacked elements
+        public int Gap          = 12;   // default spacing between stacked elements
+        public int Radius       = 18;   // default widget corner radius (rounded = polished)
 
         /// <summary>The active theme. Default is the dark palette.</summary>
         public static Theme Current = new Theme();
