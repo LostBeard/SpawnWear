@@ -27,6 +27,6 @@ if errorlevel 1 ( echo [ERROR] read_flash failed & exit /b 2 )
 
 echo.
 echo ==^> Decoding coredump (info_corefile, ELF format)
-python "%ESPCD%" info_corefile -t elf -c "%TEMP%\coredump.bin" "%NF_ELF%"
+python "%ESPCD%" info_corefile -t raw -c "%TEMP%\coredump.bin" "%NF_ELF%"
 echo ==^> done (raw partition saved at %TEMP%\coredump.bin)
 endlocal

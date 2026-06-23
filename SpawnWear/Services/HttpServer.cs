@@ -206,6 +206,12 @@ namespace SpawnWear.Services
                 // Phase 7b milestone-3: crash-survival stage log from SD (survives the reboot).
                 ServeText(client, Program.ReadWebRtcLog());
             }
+            else if (path == "/webrtc-checkpoint")
+            {
+                // Phase 7b milestone-3: libpeer's RTC-noinit DTLS checkpoint (survives the crash
+                // reboot via GetState(-1)): 1=handshake entered, 2=SRTP key derivation, 4=DTLS done.
+                ServeText(client, "dtls_cp=" + SpawnDev.WebRTC.PeerConnection.GetState(-1).ToString());
+            }
             else if (path == "/apps" && method == "GET")
             {
                 ServeAppsList(client);
