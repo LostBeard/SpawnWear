@@ -74,6 +74,74 @@ if (args.Length > 0 && args[0] == "genpair")
     return 0;
 }
 
+// Phase 7b datachannel debug: feed SipSorcery the WATCH's real setup:passive offer and inspect
+// the answer's a=setup. RFC 8842: answering setup:passive MUST yield setup:active (DTLS client).
+// If the answer is passive/actpass -> two DTLS servers -> deadlock = the datachannel root cause.
+// No watch / no hub needed - pure local SipSorcery CreateAnswer. Run: ... -- setuptest
+if (args.Length > 0 && args[0] == "setuptest")
+{
+    const string watchOffer =
+        "v=0\r\no=- 1495799811084970 1495799811084970 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n" +
+        "a=msid-semantic: iot\r\na=group:BUNDLE datachannel\r\n" +
+        "m=application 50712 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n" +
+        "a=mid:datachannel\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n" +
+        "a=fingerprint:sha-256 E2:D5:E4:2B:AB:7D:00:52:FE:EF:E8:66:18:0F:E5:26:BA:2F:C3:9F:AB:B9:DA:A1:BD:50:71:97:DB:C7:B6:19\r\n" +
+        "a=setup:passive\r\na=ice-ufrag:IJ2Y\r\na=ice-pwd:IJ2YZjhuHmpHKsrVNcbtv6ZI\r\n" +
+        "a=candidate:0 1 UDP 2129201151 192.168.1.170 59655 typ host\r\n";
+    SIPSorcery.LogFactory.Set(LoggerFactory.Create(b => b.AddSimpleConsole(o => o.SingleLine = true).SetMinimumLevel(LogLevel.Debug)));
+    var stpc = SpawnDev.RTC.RTCPeerConnectionFactory.Create(new BridgeWebRtcOptions().ToPeerConnectionConfig());
+    await stpc.SetRemoteDescription(new SpawnDev.RTC.RTCSessionDescriptionInit { Type = "offer", Sdp = watchOffer });
+    var ans = await stpc.CreateAnswer();
+    await stpc.SetLocalDescription(ans);
+    Console.WriteLine("=== OFFER setup line: a=setup:passive (watch = DTLS server) ===");
+    Console.WriteLine("=== ANSWER SDP ===");
+    Console.WriteLine(ans.Sdp);
+    var setupLine = (ans.Sdp ?? "").Split('\n').FirstOrDefault(l => l.Contains("a=setup"));
+    Console.WriteLine($"\n>>> ANSWER a=setup = '{setupLine?.Trim()}'  (EXPECT setup:active = DTLS client; setup:passive = BUG = two servers)");
+    return 0;
+}
+
+// Phase 7b datachannel lifecycle diagnostic: join the room with our OWN RtcPeerConnectionRoomHandler
+// and log the ANSWER peer-connection's full lifecycle (ICE state, connection state, OnDataChannel).
+// Tells us exactly how far the watch<->SipSorcery answer PC gets: ICE-connected? DTLS connected?
+// does OnDataChannel ever fire (= watch's DCEP reached SipSorcery's SCTP)? Run: ... -- dcdiag [room]
+if (args.Length > 0 && args[0] == "dcdiag")
+{
+    var dcRoomStr = args.Length > 1 ? args[1] : "SWclean0623pmRoom01x";
+    // Phase 7b ICE flakiness fix: the watch (constrained embedded peer) only starts answering STUN
+    // connectivity checks ~20s in (it can't validate them until it has our ufrag/pwd from the answer,
+    // delayed by non-trickle ICE gathering + hub relay). SipSorcery's default 16s FAILED timeout
+    // fires first -> transient ICE failure that can corrupt the SCTP handshake. Be more patient.
+    SIPSorcery.Net.RtpIceChannel.FAILED_TIMEOUT_PERIOD = 30;
+    SIPSorcery.Net.RtpIceChannel.DISCONNECTED_TIMEOUT_PERIOD = 20;
+    SIPSorcery.LogFactory.Set(LoggerFactory.Create(b =>
+        b.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss.fff "; }).SetMinimumLevel(LogLevel.Debug)));
+    var dcOpts = new BridgeWebRtcOptions();
+    var dcSignaling = SpawnDev.RTC.Signaling.TrackerSignalingClient.GetOrCreate(dcOpts.AnnounceUrl, RandomPeerId());
+    var dcHandler = new SpawnDev.RTC.Signaling.RtcPeerConnectionRoomHandler(dcOpts.ToPeerConnectionConfig());
+    dcHandler.OnPeerConnectionCreated = (pc, id) =>
+    {
+        Console.WriteLine($"[dcdiag] >>> answer PC created for peer={id} (initial conn={pc.ConnectionState} ice={pc.IceConnectionState})");
+        pc.OnConnectionStateChange   += s => Console.WriteLine($"[dcdiag]   ConnectionState -> {s}  (peer={id})");
+        pc.OnIceConnectionStateChange += s => Console.WriteLine($"[dcdiag]   IceConnectionState -> {s}  (peer={id})");
+        pc.OnDataChannel             += dc =>
+        {
+            Console.WriteLine($"[dcdiag]   *** OnDataChannel FIRED label='{dc.Label}' state={dc.ReadyState} (peer={id}) ***");
+            dc.OnBinaryMessage += data => Console.WriteLine($"[dcdiag]   *** RECV BINARY {data.Length}B: '{System.Text.Encoding.UTF8.GetString(data)}' ***");
+            dc.OnStringMessage += s => Console.WriteLine($"[dcdiag]   *** RECV STRING: '{s}' ***");
+        };
+        return Task.CompletedTask;
+    };
+    dcHandler.OnDataChannel += (dc, id) => Console.WriteLine($"[dcdiag] *** handler.OnDataChannel label='{dc.Label}' peer={id} ***");
+    dcHandler.OnPeerConnection += (pc, id) => Console.WriteLine($"[dcdiag] OnPeerConnection (answer returned) peer={id} conn={pc.ConnectionState} ice={pc.IceConnectionState}");
+    var dcRoom = SpawnDev.RTC.Signaling.RoomKey.FromBytes(System.Text.Encoding.ASCII.GetBytes(dcRoomStr));
+    dcSignaling.Subscribe(dcRoom, dcHandler);
+    await dcSignaling.AnnounceAsync(dcRoom, new SpawnDev.RTC.Signaling.AnnounceOptions { Event = "started", Left = 1 });
+    Console.WriteLine($"[dcdiag] joined room '{dcRoomStr}' on {dcOpts.AnnounceUrl} - waiting for the watch's offer (Ctrl+C to stop)");
+    await Task.Delay(System.Threading.Timeout.Infinite);
+    return 0;
+}
+
 // Long-lived "watch" peer for the browser <-> .NET demo (Stage 1b). Joins the fixed
 // self-test room with the watch-role record and echoes anything the browser sends, so a
 // person can SEE the browser Companion talk to a .NET WebRTC peer over the hub.
@@ -133,6 +201,11 @@ if (args.Length > 0 && args[0] == "companion")
 // Run: dotnet run --project SpawnWear.Bridge.Desktop -- answerroom [roomAscii]
 if (args.Length > 0 && args[0] == "answerroom")
 {
+    // Phase 7b: surface SipSorcery's internal ICE/DTLS/SCTP/DCEP logs so we can see whether the
+    // watch's libpeer(usrsctp) datachannel actually reaches SipSorcery's SCTP association + OnDataChannel.
+    SIPSorcery.LogFactory.Set(LoggerFactory.Create(b =>
+        b.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss.fff "; })
+         .SetMinimumLevel(LogLevel.Debug)));
     var roomStr = args.Length > 1 ? args[1] : "SWtestRoom0123456789";
     var room = System.Text.Encoding.ASCII.GetBytes(roomStr);
     var arcrypto = new DotNetCrypto();

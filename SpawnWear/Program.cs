@@ -979,12 +979,23 @@ namespace SpawnWear
             WebRtcConnectRun();
         }
 
-        // Crash-survival log: the connect reboots the watch mid-DTLS, wiping in-memory status, so
-        // we mirror the current stage to SD (mounted at I:\). Read it back after the reboot via
-        // GET /webrtc-log to see the last stage reached before the native crash. Dev diagnostic.
+        // Crash-survival + TIMELINE log: mirror each connect stage to SD (mounted at I:\) with an
+        // elapsed-ms prefix so GET /webrtc-log shows WHERE the ~minutes go (ICE vs DTLS vs which
+        // phase). nanoFramework File has no AppendAllText, so accumulate in RAM and rewrite the
+        // (tiny) file each call - last write still survives a reboot for crash-stage diagnosis.
+        static DateTime _connectStart;
+        static string _logBuf = "";
+        static void LogSdReset()
+        {
+            _connectStart = DateTime.UtcNow;
+            _logBuf = "t=0 connect-start\n";
+            try { System.IO.File.WriteAllText("I:\\webrtc.log", _logBuf); } catch { }
+        }
         static void LogSd(string s)
         {
-            try { System.IO.File.WriteAllText("I:\\webrtc.log", s); } catch { }
+            int ms = (int)(DateTime.UtcNow - _connectStart).TotalMilliseconds;
+            _logBuf += ms + "ms " + s + "\n";
+            try { System.IO.File.WriteAllText("I:\\webrtc.log", _logBuf); } catch { }
         }
 
         public static string ReadWebRtcLog()
@@ -999,9 +1010,13 @@ namespace SpawnWear
             int h = -1;
             try
             {
+                LogSdReset();
                 h = SpawnDev.WebRTC.PeerConnection.Create();
                 if (h < 0) { ConnectStatus = "create-failed"; return; }
-                SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                // Phase 7b: do NOT open the data channel here - libpeer's create_datachannel needs
+                // SCTP connected (it's a no-op otherwise) so this sent no DCEP OPEN. The m=application
+                // line in the offer comes from the peer-connection config, not this call. We open the
+                // channel AFTER StateCompleted below (where SCTP is up), so the DCEP OPEN gets sent.
                 SpawnDev.WebRTC.PeerConnection.CreateOffer(h);
                 int len = 0;
                 for (int i = 0; i < 120 && len == 0; i++)
@@ -1014,13 +1029,17 @@ namespace SpawnWear
                 SpawnDev.WebRTC.PeerConnection.GetLocalSdp(h, sbuf);
                 string offer = new string(System.Text.Encoding.UTF8.GetChars(sbuf));
 
-                byte[] room = System.Text.Encoding.UTF8.GetBytes("SWtestRoom0123456789");
+                // Phase 7b: fresh room + per-attempt-ish offer-id so stale cached offers from prior
+                // test runs don't pollute the answerer (it was swarming dead PCs answering old offers).
+                byte[] room = System.Text.Encoding.UTF8.GetBytes("SWclean0623pmRoom01x");
                 byte[] pid = System.Text.Encoding.UTF8.GetBytes("-SW0001-watchTESTpid");
-                byte[] oid = System.Text.Encoding.UTF8.GetBytes("watchOffer0123456789");
+                byte[] oid = System.Text.Encoding.UTF8.GetBytes("wOffer" + (DateTime.UtcNow.Ticks % 100000000));
+                LogSd("offer-ready len=" + len);
                 tr = new SwTrackerSignaling();
                 if (!tr.Connect()) { ConnectStatus = "ws-connect-failed"; return; }
                 tr.AnnounceOffer(room, pid, oid, offer);
                 ConnectStatus = "announced";
+                LogSd("announced");
 
                 string answer = tr.WaitForAnswer(oid, 20000);
                 if (answer == null) { ConnectStatus = "no-answer"; return; }
@@ -1053,13 +1072,22 @@ namespace SpawnWear
                 }
                 if (connected)
                 {
+                    // Phase 7b: SCTP is connected now - open the DCEP data channel. This sends a
+                    // DATA_CHANNEL_OPEN on our DTLS-server odd stream; SipSorcery (DTLS client) then
+                    // fires ondatachannel + ACKs, establishing the channel. Give it a moment to land.
+                    SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                    LogSd("opened DCEP data channel (post-SCTP)");
+                    System.Threading.Thread.Sleep(500);
                     // Data channel is up - send a probe and look for the peer's echo.
                     byte[] probe = System.Text.Encoding.UTF8.GetBytes("ping from watch");
                     SpawnDev.WebRTC.PeerConnection.Send(h, probe, probe.Length);
                     ConnectStatus = "DATACHANNEL OPEN - sent probe";
                     LogSd("DATACHANNEL OPEN - sent probe");
+                    // Phase 7b: TryReceive currently BLOCKS ~10s/call (native interop poll), so keep
+                    // this short - the connect itself is done at DATACHANNEL OPEN; this is only an
+                    // echo probe. 8 iters bounds the post-open wait instead of the old 100 (~1000s).
                     byte[] rx = new byte[512];
-                    for (int i = 0; i < 100; i++)
+                    for (int i = 0; i < 8; i++)
                     {
                         System.Threading.Thread.Sleep(50);
                         int n = SpawnDev.WebRTC.PeerConnection.TryReceive(h, rx);
