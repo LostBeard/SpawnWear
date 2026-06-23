@@ -74,10 +74,10 @@ namespace SpawnDev.UI
 
         public virtual bool OnTap(int x, int y)
         {
-            if (Root == null) return false;
-            bool consumed = Root.OnTap(x, y);
-            if (consumed) _needsRender = true; // a widget changed state -> repaint next tick
-            return consumed;
+            if (Root != null && Root.OnTap(x, y)) _needsRender = true; // a widget consumed -> repaint
+            // Always consume: a tap on the screen background does nothing. Back is the BOOT side button,
+            // not an accidental tap on empty space (which used to pop the screen).
+            return true;
         }
 
         // IPressable: raw finger down/up -> press-state in the tree (e.g. a button darkens while held).
