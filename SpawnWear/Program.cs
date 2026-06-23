@@ -1200,6 +1200,10 @@ namespace SpawnWear
                     // stays as the fallback for ungraceful drops - crash, dead WiFi).
                     _sysDisconnectRequested = false;
                     bus.Subscribe("sys.disconnect", OnSysDisconnect);
+                    // DEMO of the app.* lane: a scoped app channel that streams MessagePack alongside the
+                    // OS telemetry, proving the two lanes coexist + stay isolated. A real loadable app gets
+                    // its IAppChannel from the app host exactly this way (confined to app.demo.*).
+                    SpawnWear.Services.IAppChannel demoApp = bus.OpenAppChannel("demo");
                     int rxCount = 0, txCount = 0, tick = 0, seq = 0;
                     byte[] rxFrame = new byte[1100]; // >= native SW_RX_MSG_MAX (1024)
                     while (SpawnDev.WebRTC.PeerConnection.GetState(h) == SpawnDev.WebRTC.PeerConnection.StateCompleted
@@ -1234,10 +1238,12 @@ namespace SpawnWear
                             tick = 0;
                             seq++;
                             PublishBattery(bus);
+                            PublishDemo(demoApp, seq); // app.* lane (MessagePack), alongside sys telemetry
                             ConnectStatus = "CONNECTED - streaming (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
                         }
                     }
                     bus.IsConnected = false;
+                    demoApp.Close(); // app lifecycle: unsubscribe the demo channel on teardown
                     bus.ClearSendQueue();
                     string why = _sysDisconnectRequested ? "companion sys.disconnect" : "keepalive timeout";
                     ConnectStatus = "disconnected (seq=" + seq + " tx=" + txCount + " rx=" + rxCount + ")";
@@ -1312,6 +1318,27 @@ namespace SpawnWear
             if (val < -32768) val = -32768;
             buf[off] = (byte)(val & 0xFF);
             buf[off + 1] = (byte)((val >> 8) & 0xFF);
+        }
+
+        // DEMO of the app.* lane: a MessagePack map {msg, seq, tempC} on app.demo.ping. Proves the app
+        // channel (namespaced, isolated) + the nanoFramework MessagePack encoder end to end - the
+        // Companion decodes with MessagePack-CSharp. A real loadable app defines its own typed messages
+        // exactly this way, confined to its own app.<appId>.* namespace.
+        static void PublishDemo(SpawnWear.Services.IAppChannel demo, int seq)
+        {
+            float tempC = 0f;
+            try
+            {
+                Qmi8658Driver.ImuSample s;
+                if (_imu != null && _imu.TryRead(out s)) tempC = s.TempC;
+            }
+            catch { }
+            var w = new SpawnWear.Services.MsgPackWriter(64);
+            w.WriteMapHeader(3);
+            w.WriteString("msg");   w.WriteString("hello from SpawnWear");
+            w.WriteString("seq");   w.WriteInt(seq);
+            w.WriteString("tempC"); w.WriteFloat(tempC);
+            demo.Send("ping", w.ToArray());
         }
 
         static void StartTouchProbe()

@@ -126,6 +126,12 @@
         <div class="stat-value tiny">@(_lastLog ?? "-")</div>
         <div class="stat-sub">debug stream</div>
     </div>
+
+    <div class="card stat">
+        <div class="stat-label">App lane (MessagePack)</div>
+        <div class="stat-value tiny">@(_demoJson ?? "-")</div>
+        <div class="stat-sub">app.demo.ping</div>
+    </div>
 </div>
 
 <style>
@@ -160,6 +166,8 @@
     ButtonEvent? _button;
     string? _lastLog;
     string? _lastError;
+    string? _demoJson;                 // decoded MessagePack from the app.demo.* lane
+    ITransport? _demoTransport;        // held so we can unsubscribe in Dispose
 
     PairingRecord? _record;
     bool _pairing;
@@ -208,6 +216,18 @@
         Bridge.ImuSampleReceived   -= OnImu;
         Bridge.ButtonEventReceived -= OnButton;
         Bridge.DebugLogReceived    -= OnLog;
+        if (_demoTransport is not null) _demoTransport.MessageReceived -= OnDemoMessage;
+    }
+
+    // app.* lane demo: the watch's "demo" app sends a MessagePack map on app.demo.ping. Decode it with
+    // MessagePack-CSharp (ConvertToJson keeps the demo dependency-light - no typed model needed) and show
+    // it. Proves the watch's nanoFramework MessagePack encoder round-trips to the full library here.
+    void OnDemoMessage(TransportMessage m)
+    {
+        if (m.ChannelId != "app.demo.ping") return;
+        try { _demoJson = MessagePack.MessagePackSerializer.ConvertToJson(m.Payload); }
+        catch (Exception ex) { _demoJson = "decode error: " + ex.Message; }
+        InvokeAsync(StateHasChanged);
     }
 
     void OnConnectionChanged(bool connected)
@@ -325,6 +345,12 @@
             await Bridge.UseTransportAsync(transport);
             await Bridge.ConnectAsync();
             _record = pairing;
+
+            // app.* lane demo: subscribe to the watch's demo app channel (app.demo.ping) and decode its
+            // MessagePack payload. This runs ALONGSIDE the OS telemetry (battery/imu) on the same link,
+            // proving the two lanes coexist and stay isolated.
+            var t = Bridge.GetUnderlyingTransport();
+            if (t != null) { _demoTransport = t; t.MessageReceived += OnDemoMessage; }
         }
         catch (Exception ex) { _lastError = "WebRTC connect failed: " + ex.Message; }
         finally

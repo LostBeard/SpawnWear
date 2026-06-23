@@ -41,6 +41,7 @@
     <Compile Include="Services\HttpServer.cs" />
     <Compile Include="Services\SwWebSocket.cs" />
     <Compile Include="Services\SwTrackerSignaling.cs" />
+    <Compile Include="Services\MsgPackWriter.cs" />
     <Compile Include="Services\TransportBus.cs" />
     <Compile Include="Services\WebRtcTransportService.cs" />
     <Compile Include="Services\LoggerService.cs" />
