@@ -43,7 +43,7 @@
     <!-- WebRTC peer (Phase 7). Same package supports desktop too,
          setting up the future SpawnWear.Bridge.Desktop crate to use
          the same WebRTC plumbing via SpawnDev.RTC. -->
-    <PackageReference Include="SpawnDev.RTC" Version="1.1.10" />
+    <PackageReference Include="SpawnDev.RTC" Version="1.1.11" />
   </ItemGroup>
 
 </Project>

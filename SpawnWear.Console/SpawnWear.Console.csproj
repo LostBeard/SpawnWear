@@ -19,7 +19,7 @@
 
   <ItemGroup>
     <!-- Desktop SipSorcery-fork WebRTC backend + cross-platform Ed25519 (same versions as Bridge.Desktop). -->
-    <PackageReference Include="SpawnDev.RTC" Version="1.1.10" />
+    <PackageReference Include="SpawnDev.RTC" Version="1.1.11" />
     <PackageReference Include="SpawnDev.BlazorJS.Cryptography" Version="3.2.0" />
     <!-- Verbose SipSorcery ICE/DTLS/SCTP logging (verbose flag) for connection diagnostics. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />

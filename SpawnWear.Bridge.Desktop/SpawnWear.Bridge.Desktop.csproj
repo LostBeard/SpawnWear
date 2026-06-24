@@ -22,7 +22,7 @@
   <ItemGroup>
     <!-- WebRTC peer (Phase 7). Same library SpawnWear.Bridge references on the
          browser side, but here it picks the desktop SipSorcery-fork backend. -->
-    <PackageReference Include="SpawnDev.RTC" Version="1.1.10" />
+    <PackageReference Include="SpawnDev.RTC" Version="1.1.11" />
     <!-- Console logger so we can surface SipSorcery's internal ICE/DTLS/SCTP logs while
          bringing up the desktop WebRTC peer path (diagnostic; can be removed later). -->
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
