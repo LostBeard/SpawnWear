@@ -23,6 +23,7 @@ namespace SpawnWear.UI
         private readonly ListView _list;
         private readonly ListView.Row _pairRow;
         private readonly ListView.Row _codeRow;
+        private readonly ListView.Row _forgetRow;
         private bool _pairingOn;
         private StatusBar _statusBar;
         public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
@@ -43,8 +44,9 @@ namespace SpawnWear.UI
 
             _pairRow = new ListView.Row { Label = "PAIRING", Value = "OFF", OnTap = TogglePairing };
             _codeRow = new ListView.Row { Label = "CODE", Value = "------", OnTap = null };
+            _forgetRow = new ListView.Row { Label = "FORGET", Value = "-", OnTap = ForgetPairing };
             _list = new ListView(_fb, listX, listY, listWidth, rowHeight, 4,
-                new ListView.Row[] { _pairRow, _codeRow });
+                new ListView.Row[] { _pairRow, _codeRow, _forgetRow });
         }
 
         public void Tick()
@@ -89,6 +91,7 @@ namespace SpawnWear.UI
             _pairingOn = false;
             _pairRow.Value = "OFF";
             _codeRow.Value = "------";
+            _forgetRow.Value = _pairing != null && _pairing.IsPaired ? "TAP" : "-"; // TAP to unpair if paired
             Invalidate();
         }
 
@@ -118,6 +121,17 @@ namespace SpawnWear.UI
                 _pairRow.Value = "OFF";
                 _codeRow.Value = "------";
             }
+        }
+
+        // Watch-side "forget pairing": clears the paired peer + room so the watch reverts to its
+        // unpaired/dev identity (the console + a fresh Companion can then re-pair). Mirrors the
+        // Companion's "Forget Trust", but on the watch where the binding actually lives.
+        private void ForgetPairing()
+        {
+            if (_pairing == null) return;
+            bool wasPaired = _pairing.IsPaired;
+            _pairing.Unpair();
+            _forgetRow.Value = wasPaired ? "DONE" : "NONE";
         }
     }
 }

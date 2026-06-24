@@ -416,6 +416,19 @@ namespace SpawnWear
             }
         }
 
+        /// <summary>Forget the current pairing: clears the paired peer + room key so <see cref="IsPaired"/>
+        /// becomes false (the watch reverts to its unpaired / dev identity), keeping the watch's own seed
+        /// so it can be re-paired later. Persists the cleared state. The watch-side mirror of the
+        /// Companion's "Forget Trust".</summary>
+        public bool Unpair()
+        {
+            _peerPubKey = new byte[PubKeyLength]; // all-zero = unpaired
+            _roomKey = new byte[RoomKeyLength];
+            SavePairingFile();
+            Log("[Pair] Unpaired - cleared paired peer + room (watch identity kept)");
+            return true;
+        }
+
         static bool IsAllZero(byte[] data)
         {
             if (data == null) return true;
