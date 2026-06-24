@@ -1035,6 +1035,7 @@ namespace SpawnWear
         static readonly object _sysCmdLock = new object();
 
         static void OnSysApps(string channelId, byte[] payload) { EnqueueSysCmd(channelId, payload); }
+        static void OnSysFiles(string channelId, byte[] payload) { EnqueueSysCmd(channelId, payload); }
 
         static void EnqueueSysCmd(string channelId, byte[] payload)
         {
@@ -1061,6 +1062,7 @@ namespace SpawnWear
                     string ch = (string)item[0];
                     byte[] p = (byte[])item[1];
                     if (ch == "sys.apps") ProcessAppsCommand(bus, p);
+                    else if (ch == "sys.files") ProcessFilesCommand(bus, p);
                 }
                 catch (Exception ex) { Debug.WriteLine("[sys] cmd EX " + ex.Message); }
             }
@@ -1136,6 +1138,234 @@ namespace SpawnWear
             r[0] = op; r[1] = (byte)(ok ? 1 : 0); r[2] = (byte)len;
             for (int k = 0; k < len; k++) r[3 + k] = m[k];
             bus.Send(ch, r);
+        }
+
+        // sys.files - SD card (D:\) file access over WebRTC. Request [op:u8][pathLen:u8][path][...].
+        // Reply [op:u8][ok:u8][...]; on error ok=0 -> [op][0][msgLen:u8][msg] (via SysReply).
+        //   op=1 LISTDIR [path][startIdx:u16 LE]?          -> [1][1][more:u8][count:u16 LE] count*{[nameLen:u8][name][isDir:u8][size:u32 LE]}
+        //   op=2 STAT    [path]                            -> [2][1][exists:u8][isDir:u8][size:u32 LE]
+        //   op=3 READ    [path][offset:u32 LE][len:u16 LE] -> [3][1][eof:u8][dataLen:u16 LE][data]   (len<=SysFileChunk)
+        //   op=4 WRITE   [path][offset:u32 LE][flags:u8][dataLen:u16 LE][data] -> [4][1][written:u32 LE]   (flags bit0=truncate)
+        //   op=5 DELETE  [path]                            -> text reply (recursive for dirs)
+        //   op=6 MKDIR   [path]                            -> text reply (creates parents)
+        //   op=7 MOVE    [path][newLen:u8][newPath]        -> text reply (rename/move)
+        // Chunked: each READ/WRITE moves <=SysFileChunk bytes to stay under the ~1024-byte inbound frame
+        // limit (SW_RX_MSG_MAX); the caller drives the chunk loop. Maps 1:1 to Dokan/WebFS callbacks
+        // (FindFiles/GetFileInfo/ReadFile/WriteFile/DeleteFile/CreateDirectory/MoveFile) so the Companion
+        // can surface the watch's SD as a Windows drive over WebRTC.
+        // Replies (watch->console) must stay under the native send clamp SW_TX_MSG_MAX (512); read chunks
+        // are sized for it and LISTDIR paginates. Inbound requests may be up to ~1024 (SW_RX_MSG_MAX).
+        const int SysFileChunk = 480;       // read-reply data per chunk: 5 hdr + 480 + ~12 frame < 512
+        const int SysFileListBudget = 460;  // max LISTDIR entry bytes per reply (+ 4 hdr + ~12 frame < 512)
+
+        static void ProcessFilesCommand(SpawnWear.Services.TransportBus bus, byte[] p)
+        {
+            byte op = p[0];
+            if (_sd == null || !_sd.IsMounted) { SysReply(bus, "sys.files", op, false, "SD not mounted"); return; }
+            int pathLen = p.Length > 1 ? p[1] : 0;
+            if (2 + pathLen > p.Length) { SysReply(bus, "sys.files", op, false, "bad request"); return; }
+            byte[] pb = new byte[pathLen];
+            for (int k = 0; k < pathLen; k++) pb[k] = p[2 + k];
+            string rel = new string(System.Text.Encoding.UTF8.GetChars(pb));
+            string full = ResolveSdPath(rel);
+            if (full == null) { SysReply(bus, "sys.files", op, false, "bad path"); return; }
+            int after = 2 + pathLen;
+            try
+            {
+                if (op == 1) FilesListDir(bus, full, p, after);
+                else if (op == 2) FilesStat(bus, full);
+                else if (op == 3) FilesRead(bus, full, p, after);
+                else if (op == 4) FilesWrite(bus, full, p, after);
+                else if (op == 5) FilesDelete(bus, full);
+                else if (op == 6) FilesMkdir(bus, full);
+                else if (op == 7) FilesMove(bus, full, p, after);
+                else SysReply(bus, "sys.files", op, false, "bad op");
+            }
+            catch (Exception ex)
+            {
+                SysReply(bus, "sys.files", op, false, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        // Map a request path (relative to D:\, '/' or '\' separators) to a full D:\ path. Rejects
+        // parent-traversal ("..") and any non-D: absolute path. Returns null if invalid.
+        static string ResolveSdPath(string rel)
+        {
+            if (rel == null) rel = "";
+            // nanoFramework String has no Replace - normalize '/' to '\' by hand.
+            char[] ch = new char[rel.Length];
+            for (int i = 0; i < rel.Length; i++) { char c = rel[i]; ch[i] = (c == '/') ? '\\' : c; }
+            rel = new string(ch);
+            if (rel.IndexOf("..") >= 0) return null;
+            if (rel.Length >= 2 && rel[1] == ':')
+            {
+                if (rel[0] != 'D' && rel[0] != 'd') return null;
+                rel = rel.Substring(2);
+            }
+            while (rel.Length > 0 && rel[0] == '\\') rel = rel.Substring(1);
+            while (rel.Length > 1 && rel[rel.Length - 1] == '\\') rel = rel.Substring(0, rel.Length - 1);
+            return rel.Length == 0 ? "D:\\" : "D:\\" + rel;
+        }
+
+        static uint ReadU32LE(byte[] b, int o) { return (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)); }
+        static void WriteU32LE(byte[] b, int o, uint v) { b[o] = (byte)(v & 0xFF); b[o + 1] = (byte)((v >> 8) & 0xFF); b[o + 2] = (byte)((v >> 16) & 0xFF); b[o + 3] = (byte)((v >> 24) & 0xFF); }
+
+        static byte[] FileEntry(string name, bool isDir, uint size)
+        {
+            byte[] nb = System.Text.Encoding.UTF8.GetBytes(name);
+            if (nb.Length > 255) { byte[] t = new byte[255]; Array.Copy(nb, t, 255); nb = t; }
+            byte[] e = new byte[1 + nb.Length + 1 + 4];
+            int o = 0;
+            e[o++] = (byte)nb.Length;
+            for (int k = 0; k < nb.Length; k++) e[o++] = nb[k];
+            e[o++] = (byte)(isDir ? 1 : 0);
+            WriteU32LE(e, o, size);
+            return e;
+        }
+
+        static void FilesListDir(SpawnWear.Services.TransportBus bus, string full, byte[] p, int after)
+        {
+            if (!System.IO.Directory.Exists(full)) { SysReply(bus, "sys.files", 1, false, "no such dir"); return; }
+            int startIdx = (after + 2 <= p.Length) ? (p[after] | (p[after + 1] << 8)) : 0;
+            // nanoFramework's FATFS enumeration needs a TRAILING backslash: the drive root "D:\" lists
+            // fine, but a subdir as "D:\ftest" returns nothing (and GetDirectories can throw an
+            // empty-message IOException on a files-only dir). Enumerate with the trailing separator, and
+            // stay defensive so one failing call doesn't blank the whole listing.
+            string ep = (full.Length > 0 && full[full.Length - 1] == '\\') ? full : full + "\\";
+            string[] dirs;
+            try { dirs = System.IO.Directory.GetDirectories(ep); }
+            catch (Exception ex) { dirs = new string[0]; Debug.WriteLine("[sys.files] GetDirectories EX " + ex.GetType().Name + " '" + ex.Message + "'"); }
+            string[] files;
+            try { files = System.IO.Directory.GetFiles(ep); }
+            catch (Exception ex) { files = new string[0]; Debug.WriteLine("[sys.files] GetFiles EX " + ex.GetType().Name + " '" + ex.Message + "'"); }
+            int total = dirs.Length + files.Length;
+            // Emit entries [startIdx..) accumulating until the reply would exceed SysFileListBudget,
+            // so each reply stays under the native send clamp (SW_TX_MSG_MAX). more=1 -> caller re-asks
+            // with the next startIdx.
+            System.Collections.ArrayList parts = new System.Collections.ArrayList();
+            int body = 0;
+            byte more = 0;
+            for (int i = startIdx; i < total; i++)
+            {
+                byte[] e;
+                if (i < dirs.Length) e = FileEntry(System.IO.Path.GetFileName(dirs[i]), true, 0);
+                else { string f = files[i - dirs.Length]; uint sz = 0; try { sz = (uint)new System.IO.FileInfo(f).Length; } catch { } e = FileEntry(System.IO.Path.GetFileName(f), false, sz); }
+                if (parts.Count > 0 && body + e.Length > SysFileListBudget) { more = 1; break; }
+                parts.Add(e); body += e.Length;
+            }
+            int cnt = parts.Count;
+            byte[] r = new byte[5 + body];
+            r[0] = 1; r[1] = 1; r[2] = more; r[3] = (byte)(cnt & 0xFF); r[4] = (byte)((cnt >> 8) & 0xFF);
+            int o = 5;
+            for (int i = 0; i < parts.Count; i++)
+            {
+                byte[] e = (byte[])parts[i];
+                for (int k = 0; k < e.Length; k++) r[o++] = e[k];
+            }
+            bus.Send("sys.files", r);
+            Debug.WriteLine("[sys.files] LISTDIR " + full + " [" + startIdx + "] -> " + cnt + " more=" + more);
+        }
+
+        static void FilesStat(SpawnWear.Services.TransportBus bus, string full)
+        {
+            byte exists = 0, isDir = 0; uint size = 0;
+            if (System.IO.Directory.Exists(full)) { exists = 1; isDir = 1; }
+            else if (System.IO.File.Exists(full)) { exists = 1; try { size = (uint)new System.IO.FileInfo(full).Length; } catch { } }
+            byte[] r = new byte[8];
+            r[0] = 2; r[1] = 1; r[2] = exists; r[3] = isDir; WriteU32LE(r, 4, size);
+            bus.Send("sys.files", r);
+        }
+
+        static void FilesRead(SpawnWear.Services.TransportBus bus, string full, byte[] p, int after)
+        {
+            if (after + 6 > p.Length) { SysReply(bus, "sys.files", 3, false, "bad read req"); return; }
+            uint offset = ReadU32LE(p, after);
+            int len = p[after + 4] | (p[after + 5] << 8);
+            if (len > SysFileChunk) len = SysFileChunk;
+            if (!System.IO.File.Exists(full)) { SysReply(bus, "sys.files", 3, false, "no such file"); return; }
+            byte[] data; long size; int rd;
+            using (System.IO.FileStream fs = new System.IO.FileStream(full, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+            {
+                size = fs.Length;
+                if (offset > size) offset = (uint)size;
+                fs.Seek(offset, System.IO.SeekOrigin.Begin);
+                data = new byte[len];
+                rd = fs.Read(data, 0, len);
+            }
+            byte eof = (byte)((offset + (uint)rd >= (uint)size) ? 1 : 0);
+            byte[] r = new byte[5 + rd];
+            r[0] = 3; r[1] = 1; r[2] = eof; r[3] = (byte)(rd & 0xFF); r[4] = (byte)((rd >> 8) & 0xFF);
+            for (int k = 0; k < rd; k++) r[5 + k] = data[k];
+            bus.Send("sys.files", r);
+        }
+
+        static void FilesWrite(SpawnWear.Services.TransportBus bus, string full, byte[] p, int after)
+        {
+            if (after + 7 > p.Length) { SysReply(bus, "sys.files", 4, false, "bad write req"); return; }
+            uint offset = ReadU32LE(p, after);
+            byte flags = p[after + 4];
+            int dataLen = p[after + 5] | (p[after + 6] << 8);
+            int dataOff = after + 7;
+            if (dataOff + dataLen > p.Length) dataLen = p.Length - dataOff;
+            bool truncate = (flags & 1) != 0;
+            using (System.IO.FileStream fs = new System.IO.FileStream(full, truncate ? System.IO.FileMode.Create : System.IO.FileMode.OpenOrCreate, System.IO.FileAccess.Write))
+            {
+                if (!truncate && offset > 0) fs.Seek(offset, System.IO.SeekOrigin.Begin);
+                if (dataLen > 0) fs.Write(p, dataOff, dataLen);
+                fs.Flush();
+            }
+            byte[] r = new byte[6];
+            r[0] = 4; r[1] = 1; WriteU32LE(r, 2, offset + (uint)dataLen);
+            bus.Send("sys.files", r);
+        }
+
+        static void FilesDelete(SpawnWear.Services.TransportBus bus, string full)
+        {
+            if (System.IO.Directory.Exists(full)) { DeleteDirRecursive(full); SysReply(bus, "sys.files", 5, true, "deleted dir"); }
+            else if (System.IO.File.Exists(full)) { System.IO.File.Delete(full); SysReply(bus, "sys.files", 5, true, "deleted"); }
+            else SysReply(bus, "sys.files", 5, false, "not found");
+        }
+
+        static void DeleteDirRecursive(string dir)
+        {
+            string[] files = System.IO.Directory.GetFiles(dir);
+            for (int i = 0; i < files.Length; i++) System.IO.File.Delete(files[i]);
+            string[] subs = System.IO.Directory.GetDirectories(dir);
+            for (int i = 0; i < subs.Length; i++) DeleteDirRecursive(subs[i]);
+            System.IO.Directory.Delete(dir);
+        }
+
+        static void FilesMkdir(SpawnWear.Services.TransportBus bus, string full)
+        {
+            // Create each level under D:\ (nanoFramework CreateDirectory does not make intermediates).
+            if (full.Length > 3)
+            {
+                string rest = full.Substring(3);
+                string cur = "D:\\";
+                string[] segs = rest.Split('\\');
+                for (int i = 0; i < segs.Length; i++)
+                {
+                    if (segs[i].Length == 0) continue;
+                    cur = cur + segs[i];
+                    if (!System.IO.Directory.Exists(cur)) System.IO.Directory.CreateDirectory(cur);
+                    cur = cur + "\\";
+                }
+            }
+            SysReply(bus, "sys.files", 6, true, "ok");
+        }
+
+        static void FilesMove(SpawnWear.Services.TransportBus bus, string full, byte[] p, int after)
+        {
+            if (after >= p.Length) { SysReply(bus, "sys.files", 7, false, "bad move req"); return; }
+            int nlen = p[after];
+            if (after + 1 + nlen > p.Length) { SysReply(bus, "sys.files", 7, false, "bad move req"); return; }
+            byte[] nb = new byte[nlen];
+            for (int k = 0; k < nlen; k++) nb[k] = p[after + 1 + k];
+            string ndest = ResolveSdPath(new string(System.Text.Encoding.UTF8.GetChars(nb)));
+            if (ndest == null) { SysReply(bus, "sys.files", 7, false, "bad dest"); return; }
+            if (System.IO.File.Exists(full)) { System.IO.File.Move(full, ndest); SysReply(bus, "sys.files", 7, true, "moved"); }
+            else if (System.IO.Directory.Exists(full)) { System.IO.Directory.Move(full, ndest); SysReply(bus, "sys.files", 7, true, "moved dir"); }
+            else SysReply(bus, "sys.files", 7, false, "not found");
         }
 
         // RETIRED dev HTTP trigger. The autonomous WebRtcTransportService now owns the connection
@@ -1359,6 +1589,7 @@ namespace SpawnWear
                     _sysDisconnectRequested = false;
                     bus.Subscribe("sys.disconnect", OnSysDisconnect);
                     bus.Subscribe("sys.apps", OnSysApps);   // app management (list/install/uninstall/launch)
+                    bus.Subscribe("sys.files", OnSysFiles); // SD card file access (listdir/stat/read/write/delete/mkdir)
                     // DEMO of the app.* lane: a scoped app channel that streams MessagePack alongside the
                     // OS telemetry, proving the two lanes coexist + stay isolated. A real loadable app gets
                     // its IAppChannel from the app host exactly this way (confined to app.demo.*).
