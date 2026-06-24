@@ -18,6 +18,10 @@ namespace SpawnWear.Services
     {
         readonly SwWebSocket _ws = new SwWebSocket();
 
+        /// <summary>The re-announce interval (seconds) the tracker asked clients to use, parsed from
+        /// its announce response. Defaults to 30s until the server tells us otherwise.</summary>
+        public int IntervalSec { get; private set; } = 30;
+
         public bool Connect()
             => _ws.Connect("hub.spawndev.com", 44365, "/announce", "https://hub.spawndev.com");
 
@@ -50,6 +54,13 @@ namespace SpawnWear.Services
                 string msg = _ws.ReceiveText(timeoutMs);
                 if (msg == null)
                     continue;
+                // The tracker's announce response carries the re-announce interval - honor it instead
+                // of hammering. (It rides on the announce ack, which has no "answer".)
+                if (msg.IndexOf("\"interval\"") >= 0)
+                {
+                    int iv = ParseIntField(msg, "interval");
+                    if (iv >= 5) IntervalSec = iv > 3600 ? 3600 : iv;
+                }
                 // We only care about messages that carry an answer for our offer.
                 if (msg.IndexOf("\"answer\"") < 0)
                     continue;
@@ -106,6 +117,21 @@ namespace SpawnWear.Services
                     sb.Append(c);
             }
             return sb.ToString();
+        }
+
+        // Parse an integer JSON field value: finds "field", the next ':', and reads the digits.
+        // Returns -1 if absent. ("interval" won't match "min interval" - the leading quote differs.)
+        static int ParseIntField(string msg, string field)
+        {
+            int f = msg.IndexOf("\"" + field + "\"");
+            if (f < 0) return -1;
+            int colon = msg.IndexOf(':', f);
+            if (colon < 0) return -1;
+            int i = colon + 1;
+            while (i < msg.Length && (msg[i] == ' ' || msg[i] == '\t')) i++;
+            int val = 0; bool any = false;
+            while (i < msg.Length && msg[i] >= '0' && msg[i] <= '9') { val = val * 10 + (msg[i] - '0'); i++; any = true; }
+            return any ? val : -1;
         }
 
         static int HexVal(char c)
