@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Logging;
 using SpawnDev.BlazorJS.Cryptography;
 using SpawnDev.BlazorJS.Cryptography.DotNet;
 using SpawnWear.Bridge;
@@ -22,11 +23,20 @@ SIPSorcery.Net.RtpIceChannel.DISCONNECTED_TIMEOUT_PERIOD = 20;
 if (args.Length == 0) { Usage(); return 1; }
 
 string room = "SWclean0623pmRoom01x"; // watch's unpaired test room
+bool verbose = false;
 var pos = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--room" && i + 1 < args.Length) room = args[++i];
+    else if (args[i] == "--verbose" || args[i] == "-v") verbose = true;
     else pos.Add(args[i]);
+}
+
+if (verbose)
+{
+    SIPSorcery.LogFactory.Set(LoggerFactory.Create(b =>
+        b.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss.fff "; })
+         .SetMinimumLevel(LogLevel.Debug)));
 }
 if (pos.Count == 0) { Usage(); return 1; }
 string cmd = pos[0].ToLowerInvariant();
@@ -59,6 +69,7 @@ await using var peer = factory.CreateTransport(record);
 
 var replyTcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
 peer.MessageReceived += m => { if (m.ChannelId == "sys.apps") replyTcs.TrySetResult(m.Payload); };
+peer.ConnectionChanged += c => Console.WriteLine($"[console] connection changed: connected={c}");
 
 try
 {
