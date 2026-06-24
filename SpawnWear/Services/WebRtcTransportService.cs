@@ -35,6 +35,12 @@ namespace SpawnWear.Services
         /// <summary>Reconnect cool-down after a connection ends or a failed attempt (ms).</summary>
         public int ReconnectDelayMs { get; set; } = 3000;
 
+        /// <summary>Dev posture: when true the watch ALSO connects while UNPAIRED, announcing with its
+        /// test/dev identity (room "SWclean0623pmRoom01x") so the console / a fresh peer can reach it.
+        /// A paired watch always uses its real paired identity regardless. Production should set this
+        /// false (require pairing) once the console's own BLE pairing exists.</summary>
+        public bool AllowUnpaired { get; set; } = true;
+
         public WebRtcTransportService(PairingService pairing, WifiService wifi)
         {
             _pairing = pairing;
@@ -67,7 +73,9 @@ namespace SpawnWear.Services
                     // authenticate with. Otherwise idle until those become true.
                     bool wifiUp = _wifi != null && _wifi.IsConnected;
                     bool paired = _pairing != null && _pairing.IsPaired;
-                    if (wifiUp && paired)
+                    // Connect when paired (production), OR when unpaired + AllowUnpaired (dev: announce
+                    // with the test identity so the console / a fresh peer can reach the watch).
+                    if (wifiUp && (paired || AllowUnpaired))
                     {
                         // Blocks for the life of the connection: connect (re-announcing until the
                         // Companion is reachable) -> mutual challenge -> stay connected, pumping the
