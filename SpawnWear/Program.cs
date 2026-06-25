@@ -1328,9 +1328,12 @@ namespace SpawnWear
 
         static void DeleteDirRecursive(string dir)
         {
-            string[] files = System.IO.Directory.GetFiles(dir);
+            // nanoFramework FATFS enumeration needs a trailing backslash on a non-root path, else it
+            // returns nothing - which would leave nested files undeleted and throw on Directory.Delete.
+            string ep = (dir.Length > 0 && dir[dir.Length - 1] == '\\') ? dir : dir + "\\";
+            string[] files = System.IO.Directory.GetFiles(ep);
             for (int i = 0; i < files.Length; i++) System.IO.File.Delete(files[i]);
-            string[] subs = System.IO.Directory.GetDirectories(dir);
+            string[] subs = System.IO.Directory.GetDirectories(ep);
             for (int i = 0; i < subs.Length; i++) DeleteDirRecursive(subs[i]);
             System.IO.Directory.Delete(dir);
         }
