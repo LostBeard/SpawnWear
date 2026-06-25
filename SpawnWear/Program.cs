@@ -56,7 +56,12 @@ namespace SpawnWear
         // AXP/RTC, WebRTC thread IMU+battery telemetry, touch interrupt). Concurrent transactions wedged
         // the bus -> a native read blocked -> cooperative CLR froze. Was masked until WebRTC's thread
         // added the 5Hz IMU reads. Fixed by BoardSetup.I2cLock around every driver transaction. Re-enabled.
-        const bool EnableWebRtcTransport = true;
+        const bool EnableWebRtcTransport = false;
+        // 2026-06-25: AppRepo RE-ENABLED as the first single-variable freeze test after the watch recovered.
+        // The AppRepositoryService.Initialize CreateDirectory try/catch fix is in, and the SD now mounts
+        // clean (D:\ with 13 dirs + 8 files incl D:\apps). If the 26s freeze does NOT return with AppRepo on
+        // and WebRTC still off, the app-repo SD reads are cleared and the freeze lives on the WebRTC side.
+        const bool EnableAppRepo = true;
 
         static int _bootButtonClickPending; // 0=none, 1=short(Back), 2=long; set by ISR, drained by loop
         static long _bootDownUtcTicks;
@@ -228,7 +233,8 @@ namespace SpawnWear
                 // /apps/launch reads them back. Not-ready (no SD) just means "no
                 // installed apps" - the watch's built-in screens are unaffected.
                 _appRepo = new AppRepositoryService(_sd);
-                _appRepo.Initialize();
+                if (EnableAppRepo) _appRepo.Initialize();
+                else Debug.WriteLine("[SpawnWear] AppRepo DISABLED (SD-freeze diagnostic 2026-06-24)");
 
                 // The launcher renders built-in system tiles PLUS a live tile per
                 // installed app (BuildLauncherTiles), refreshed every time it comes
@@ -1155,7 +1161,7 @@ namespace SpawnWear
         // can surface the watch's SD as a Windows drive over WebRTC.
         // Replies (watch->console) must stay under the native send clamp SW_TX_MSG_MAX (512); read chunks
         // are sized for it and LISTDIR paginates. Inbound requests may be up to ~1024 (SW_RX_MSG_MAX).
-        const int SysFileChunk = 480;       // read-reply data per chunk: 5 hdr + 480 + ~12 frame < 512
+        const int SysFileChunk = 480;       // read-reply data per chunk: 5 hdr + 480 + ~12 frame < 512 (SW_TX_MSG_MAX)
         const int SysFileListBudget = 460;  // max LISTDIR entry bytes per reply (+ 4 hdr + ~12 frame < 512)
 
         static void ProcessFilesCommand(SpawnWear.Services.TransportBus bus, byte[] p)

@@ -75,11 +75,13 @@ namespace SpawnWear.Services
             }
             try
             {
-                if (!Directory.Exists(AppsDir))
-                {
-                    Directory.CreateDirectory(AppsDir);
-                    Debug.WriteLine("[AppRepo] created " + AppsDir);
-                }
+                // Just attempt the create and tolerate a throw: on this watch Directory.Exists can
+                // return false for an EXISTING dir (FATFS needs a trailing backslash), and then
+                // CreateDirectory throws CLR_E_FILE_IO because the dir is in fact already there. Don't
+                // let that bail Initialize - MigrateFlatApps/ListInfo enumerate with EnsureTrailing and
+                // work fine as long as D:\apps exists (which it does once we have a mounted card).
+                try { Directory.CreateDirectory(AppsDir); Debug.WriteLine("[AppRepo] created " + AppsDir); }
+                catch (Exception cdEx) { Debug.WriteLine("[AppRepo] CreateDirectory (dir likely already exists): " + cdEx.Message); }
                 _ready = true;
                 MigrateFlatApps();
                 Debug.WriteLine("[AppRepo] ready at " + AppsDir);
