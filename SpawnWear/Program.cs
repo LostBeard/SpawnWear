@@ -55,8 +55,11 @@ namespace SpawnWear
         // FREEZE ROOT-CAUSED 2026-06-23: unlocked shared I2C bus across 3 threads (main loop StatusBar
         // AXP/RTC, WebRTC thread IMU+battery telemetry, touch interrupt). Concurrent transactions wedged
         // the bus -> a native read blocked -> cooperative CLR froze. Was masked until WebRTC's thread
-        // added the 5Hz IMU reads. Fixed by BoardSetup.I2cLock around every driver transaction. Re-enabled.
-        const bool EnableWebRtcTransport = false;
+        // added the 5Hz IMU reads. Fixed by BoardSetup.I2cLock around every driver transaction.
+        // 2026-06-25: RE-ENABLED as the second single-variable freeze test - AppRepo round was clean, so
+        // WebRTC is the remaining freeze suspect. If the 26s freeze stays gone with the I2cLock in place,
+        // the freeze is closed and watch-answers-offers can resume.
+        const bool EnableWebRtcTransport = true;
         // 2026-06-25: AppRepo RE-ENABLED as the first single-variable freeze test after the watch recovered.
         // The AppRepositoryService.Initialize CreateDirectory try/catch fix is in, and the SD now mounts
         // clean (D:\ with 13 dirs + 8 files incl D:\apps). If the 26s freeze does NOT return with AppRepo on
