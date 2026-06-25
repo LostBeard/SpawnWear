@@ -93,15 +93,8 @@ namespace SpawnWear.Services
                     Debug.WriteLine("[WebRtcTransport] loop EX " + ex.Message);
                 }
 
-                // Cool-down before the next round. A LIVE link that dropped reconnects promptly
-                // (ReconnectDelayMs); an idle round that never reached a peer backs off to the tracker's
-                // announce interval instead of re-announcing every few seconds (the server sets the
-                // cadence - hammering floods the relay + churns offers).
-                int cooldownMs = Program.ReachedPeerLastRun
-                    ? ReconnectDelayMs
-                    : Program.LastAnnounceIntervalSec * 1000;
-                if (cooldownMs < ReconnectDelayMs) cooldownMs = ReconnectDelayMs;
-                for (int slept = 0; slept < cooldownMs && _running; slept += 250)
+                // Cool-down before the next connect attempt so a missing peer / hub doesn't spin.
+                for (int slept = 0; slept < ReconnectDelayMs && _running; slept += 250)
                     Thread.Sleep(250);
             }
             Debug.WriteLine("[WebRtcTransport] service stopped");

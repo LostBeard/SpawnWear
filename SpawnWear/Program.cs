@@ -1018,14 +1018,6 @@ namespace SpawnWear
         // Read progress: GET /webrtc-status. Dev diagnostic.
         public static string ConnectStatus = "idle";
 
-        // Re-announce cadence the tracker last asked for (seconds) + whether the last connect round
-        // actually reached a peer. WebRtcTransportService uses these to cool down politely: prompt
-        // reconnect after a live link drops, but back off to the server interval when idle (no peer).
-        static int _lastAnnounceIntervalSec = 30;
-        public static int LastAnnounceIntervalSec => _lastAnnounceIntervalSec;
-        static bool _reachedPeerLastRun;
-        public static bool ReachedPeerLastRun => _reachedPeerLastRun;
-
         // Set true by the "sys.disconnect" graceful-bye from the Companion; the persistent loop exits
         // immediately when it sees this (vs. waiting out the ICE keepalive timeout).
         static bool _sysDisconnectRequested;
@@ -1428,7 +1420,6 @@ namespace SpawnWear
         {
             SwTrackerSignaling tr = null;
             int h = -1;
-            _reachedPeerLastRun = false;
             try
             {
                 LogSdReset();
@@ -1463,33 +1454,21 @@ namespace SpawnWear
                 LogSd("offer-ready len=" + len);
                 tr = new SwTrackerSignaling();
                 if (!tr.Connect()) { ConnectStatus = "ws-connect-failed"; return; }
-                // ROBUST announce, but POLITE: announce once, then RE-announce only at the interval the
-                // tracker hands back (it tells clients the cadence; hammering every few seconds floods
-                // the relay and churns offers). The offer stays in the pool between re-announces, and
-                // WaitForAnswer keeps reading the live socket for a peer's answer (it also parses the
-                // server interval off the announce ack). Bounded ~60s find-window per round; the service
-                // loop then cools down (interval-aware) and tries again.
+                // Phase 7d: ROBUST announce. A single announce-and-hope is brittle - it only works if
+                // the companion happens to be in the tracker pool at that exact instant. Instead,
+                // re-announce our offer every ~5s for up to ~60s. The companion re-announces on the
+                // hub's interval, so once it's in the pool our next re-announce reaches it and it
+                // answers. WaitForAnswer reads the live socket and discards non-answers, so looping it
+                // between re-announces just keeps reading.
                 string answer = null;
-                tr.AnnounceOffer(room, pid, oid, offer);
-                ConnectStatus = "announced";
-                long lastAnnounce = DateTime.UtcNow.Ticks;
-                long windowEnd = lastAnnounce + 60L * 1000 * 10000; // ~60s
-                LogSd("announced (server interval=" + tr.IntervalSec + "s)");
-                while (answer == null && DateTime.UtcNow.Ticks < windowEnd)
+                for (int attempt = 1; attempt <= 12 && answer == null; attempt++)
                 {
+                    tr.AnnounceOffer(room, pid, oid, offer);
+                    ConnectStatus = "announcing (try " + attempt + ")";
+                    LogSd("announce try " + attempt);
                     answer = tr.WaitForAnswer(oid, 5000);
-                    if (answer != null) break;
-                    long reMs = (long)tr.IntervalSec * 1000;
-                    if (reMs < 10000) reMs = 10000; // floor so a tiny server value can't re-churn
-                    if ((DateTime.UtcNow.Ticks - lastAnnounce) / 10000 >= reMs)
-                    {
-                        tr.AnnounceOffer(room, pid, oid, offer);
-                        lastAnnounce = DateTime.UtcNow.Ticks;
-                        LogSd("re-announce (interval)");
-                    }
                 }
-                _lastAnnounceIntervalSec = tr.IntervalSec;
-                if (answer == null) { ConnectStatus = "no-answer (idle)"; return; }
+                if (answer == null) { ConnectStatus = "no-answer (after re-announces)"; return; }
                 ConnectStatus = "answered len=" + answer.Length;
 
                 // Free the WebSocket + its TLS (mbedtls) BEFORE the DTLS handshake (also mbedtls)
@@ -1604,7 +1583,6 @@ namespace SpawnWear
                     LogSd("CONNECTED - bus pump + telemetry stream");
                     bus.ClearSendQueue();     // drop anything stale from a previous link
                     bus.IsConnected = true;
-                    _reachedPeerLastRun = true; // a live link this round -> the service reconnects promptly if it drops
                     // Graceful-bye: the Companion sends "sys.disconnect" right before it tears down, so
                     // we exit immediately instead of waiting out the ~10s ICE keepalive timeout (which
                     // stays as the fallback for ungraceful drops - crash, dead WiFi).
