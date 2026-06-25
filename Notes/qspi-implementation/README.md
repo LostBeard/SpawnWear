@@ -18,7 +18,7 @@ The patches in this folder mirror what's on those branches; either is a valid st
 
 ## Apply order
 
-To layer these onto a clean clone of `nf-interpreter` (commit `53be3026` in the IDF 5.4.x era, or rebased onto current main):
+To layer these onto a clean clone of `nf-interpreter` (the active build base is the `feature/qspi-display-driver` branch on ESP-IDF v5.5.4; the older `53be3026` IDF 5.4.x commit also works if you are pinned there - see `Notes/build-environment.md`):
 
 ```bash
 cd /path/to/nf-interpreter

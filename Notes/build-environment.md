@@ -148,13 +148,14 @@ The wrapper script that handles both:
 @echo off
 set MSYSTEM=
 set MSYS=
-set "PATH=C:\Espressif\tools\idf-python\3.11.2;%PATH%"
+:: Do NOT prepend Python 3.11 here - ESP-IDF v5.5.4 uses the idf5.5_py3.13_env venv,
+:: which export.bat selects from the system Python 3.13 on PATH (see TL;DR above).
 call C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat > %TEMP%\nf-export.log 2>&1
-cd /d D:\users\tj\Projects\SpawnWear\_vendor-nf-interpreter
+cd /d D:\users\tj\Projects\nf-interpreter\nf-interpreter
 :: now do whatever cmake/idf.py command you need
 ```
 
-Save as `_vendor-nf-interpreter/local-build.bat` (gitignored - machine-specific) or wherever convenient, and call it directly from bash via `"./local-build.bat"`. Bash invokes .bat files transparently on Windows.
+Save as `D:\users\tj\Projects\nf-interpreter\nf-interpreter\local-build.bat` (gitignored - machine-specific) or wherever convenient, and call it directly from bash via `"./local-build.bat"`. Bash invokes .bat files transparently on Windows.
 
 ## Build flow
 
@@ -203,7 +204,7 @@ Once `build/nanoCLR.bin` exists, flash exactly like the official one. nanoff sup
 ```bash
 nanoff --target ESP32_S3_BLE --serialport COMxx --update --masserase \
        --fwversion 1.16.0.5631 \
-       --archivepath D:\users\tj\Projects\SpawnWear\_vendor-nf-interpreter\build\
+       --archivepath D:\users\tj\Projects\nf-interpreter\nf-interpreter\build\
 ```
 
 (Recipe to be confirmed during first custom-build flash; alternative is to call esptool directly with the same partition layout.)
@@ -304,7 +305,7 @@ nf-interpreter ties itself to a specific ESP-IDF version via `set(ESP32_IDF_TAG 
 If your installed ESP-IDF doesn't match what `main` wants, you have two options:
 
 1. **Install the matching ESP-IDF**: re-run the Espressif Tools Installer with the right version, or `git fetch && git checkout v5.5.4` inside the existing `C:\Espressif\frameworks\esp-idf-v5.5.4\` clone (and re-run `install.bat` to refresh the bundled tools + Python venv).
-2. **Check out an older nf-interpreter commit that matches your ESP-IDF**: `cd _vendor-nf-interpreter && git checkout 53be3026` (the IDF 5.4.2 era). Cleanly recovers without installing more software. Apply your own changes on top, rebase to `main` later when you upgrade IDF.
+2. **Check out an older nf-interpreter commit that matches your ESP-IDF**: `cd D:\users\tj\Projects\nf-interpreter\nf-interpreter && git checkout 53be3026` (the IDF 5.4.2 era). Cleanly recovers without installing more software. Apply your own changes on top, rebase to `main` later when you upgrade IDF.
 
 ### Symptom of a mismatch
 
@@ -321,7 +322,7 @@ cmake configures successfully but `cmake --build` enters a perpetual reconfig lo
 
 Each pass takes ~13 s; we observed 40+ passes in 9 minutes with no actual compilation step ever starting. The signature in the configure output is a line like `ESP32 IDF v5.5.4 source from: C:/Espressif/frameworks/esp-idf-v5.5.4` — nf detects a mismatch (it wants v5.5.4 but the path is v5.4.1) and keeps trying to reconcile.
 
-Fix is one of the two options above. SpawnWear takes option 2 currently (build at commit `53be3026`, IDF 5.4.x era). Final upstream contribution will be rebased onto whatever `main` wants at PR time.
+Fix is one of the two options above. SpawnWear currently takes option 1: the active build is on branch `feature/qspi-display-driver` against ESP-IDF **v5.5.4** (see the TL;DR at the top of this doc). Option 2 (checking out `53be3026` in the IDF 5.4.x era) was an earlier fallback and is retained here for reference. Final upstream contribution will be rebased onto whatever `main` wants at PR time.
 
 ## The big one: Ninja "manifest 'build.ninja' still dirty after 100 tries" — root cause is FUTURE-DATED timestamps in IDF components
 
@@ -361,7 +362,7 @@ then this is exactly the issue. The named CMakeLists.txt is future-dated.
 ```bash
 # from a Git Bash shell. The reference file is build.ninja from the most recent cmake configure;
 # any file newer than it gets its mtime reset to NOW.
-find "C:/Espressif/frameworks/esp-idf-v5.5.4/components" -newer "C:/nf/_vendor-nf-interpreter/build/build.ninja" -type f -exec touch {} +
+find "C:/Espressif/frameworks/esp-idf-v5.5.4/components" -newer "D:/users/tj/Projects/nf-interpreter/nf-interpreter/build/build.ninja" -type f -exec touch {} +
 ```
 
 Or if you don't have a current `build.ninja` yet, touch all the registry-installed components directly:
@@ -420,12 +421,12 @@ The SpawnWear-specific defaults file `targets/ESP32/_IDF/sdkconfig.default_octal
 
 ## Known warnings
 
-- **CMAKE_OBJECT_PATH_MAX warning** on Windows: cmake warns that some intermediate object paths exceed 250 characters and the build "may not work correctly". In practice the build completes, but if it fails on a long-path link error, move the entire `_vendor-nf-interpreter` clone to a shorter root (e.g. `C:\nf-interpreter\`).
+- **CMAKE_OBJECT_PATH_MAX warning** on Windows: cmake warns that some intermediate object paths exceed 250 characters and the build "may not work correctly". In practice the build completes, but if it fails on a long-path link error, move the entire active build clone (`D:\users\tj\Projects\nf-interpreter\nf-interpreter\`) to a shorter root (e.g. `C:\nf-interpreter\`).
 
 ## Files this build environment touches outside the repo
 
 - `config/user-tools-repos.json` inside the active build source (`D:\users\tj\Projects\nf-interpreter\nf-interpreter\config\`) - machine-specific, NOT in the SpawnWear repo's `_vendor-nf-interpreter\`
-- `_vendor-nf-interpreter/config/user-prefs.json` (created here, machine-specific)
-- `_vendor-nf-interpreter/build/` (cmake output, gitignored upstream)
+- `D:\users\tj\Projects\nf-interpreter\nf-interpreter\config\user-prefs.json` (created here, machine-specific)
+- `D:\users\tj\Projects\nf-interpreter\nf-interpreter\build\` (cmake output, gitignored upstream)
 
 When we eventually fork nf-interpreter for the SpawnWear QSPI contribution, those config files stay machine-specific and never get committed.

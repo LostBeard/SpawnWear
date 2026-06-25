@@ -5,12 +5,12 @@ Realities of running C# on the Waveshare ESP32-S3-Touch-AMOLED-2.06 watch under 
 | Capability | Status | Notes |
 |---|---|---|
 | WiFi station + AP | **Supported** | `nanoFramework.System.Device.Wifi`. Drop AP to b/g/n + 20 MHz to auth - see `Research/esp32s3-wifi-router-compatibility.md` |
-| BLE GATT server | **Supported** | `nanoFramework.Device.Bluetooth`. Currently disabled in V1 build to fit under the deploy ceiling - see `Research/nf-interpreter-deploy-ceiling.md` |
+| BLE GATT server | **Supported** | `nanoFramework.Device.Bluetooth`. Active (pairing transport). The deploy ceiling that earlier forced it off was resolved 2026-05-05 (full 2.94 MB partition usable) - see `Research/nf-interpreter-deploy-ceiling.md` |
 | OTA firmware update | **Supported** | nanoFramework has standard OTA (verify package API surface during Phase 3) |
 | I²C device control (AXP2101 / QMI8658 / PCF85063 / FT3168) | **Supported** | `nanoFramework.Hardware.Esp32` + `System.Device.I2c` - drivers written by hand against the chip datasheets |
 | PCF85063 RTC | **Hand-rolled** | Community driver `nanoFramework.IoT.Device.Pcf85063` exists; we wrote our own to skip its dependency tree (`Drivers/Rtc/Pcf85063Driver.cs`) |
 | AXP2101 PMIC | **Hand-rolled** | Community driver `nanoFramework.IoT.Device.Axp2101` is comprehensive but heavier than we need; ours at `Drivers/Power/Axp2101Driver.cs` |
-| QMI8658 IMU | **Hand-roll driver** | No upstream nanoFramework driver; protocol is plain I²C register reads. Phase 9 |
+| QMI8658 IMU | **Supported (hand-rolled)** | No upstream nanoFramework driver; protocol is plain I²C register reads. `Drivers/Imu/Qmi8658Driver.cs` shipped + hardware-verified in Phase 3 (2026-06-20) |
 | FT3168 touch | **Hand-rolled** | `Drivers/Touch/Ft3168Driver.cs`. See `Notes/ft3168-driver-notes.md` for the burst-read layout that bit us |
 | AMOLED display via CO5300 QSPI | **Custom upstream contribution** | nanoFramework's display drivers are SPI, not QSPI. Lives on the LostBeard fork at `feature/qspi-display-driver` branches of `nf-interpreter` + `nanoFramework.Graphics`. See `Notes/qspi-display-driver-design.md`. Will PR upstream once verified end-to-end |
 | I²S audio (ES8311 / ES7210) | **Gap / partial** | nanoFramework I²S surface is limited. PDM mic capture is even more constrained. Phase 6 is a research item before promising delivery |

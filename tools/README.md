@@ -4,7 +4,7 @@ Development tools for SpawnWear bring-up, written as `.NET 10` single-file C# sc
 
 ## Daily dev loop
 
-For routine code iteration the canonical path is **Visual Studio 2022 + nanoFramework extension + F5 / Build → Deploy Solution**. The watch must be in runtime mode (COM9 in our setup). See [`Notes/flashing.md`](../Notes/flashing.md) for the full discussion of why the bootloader-mode dance is NOT the right path for app re-deploys.
+For routine code iteration the canonical path is **Visual Studio 2022 + nanoFramework extension + F5 / Build → Deploy Solution**. The watch must be in runtime mode (COM9 in the examples below; the port varies by machine/cable - this session it was COM3). See [`Notes/flashing.md`](../Notes/flashing.md) for the full discussion of why the bootloader-mode dance is NOT the right path for app re-deploys.
 
 The tools below cover the CLI-driven cases — useful when iterating from a Claude Code agent, scripting CI smoke tests, or debugging without a VS GUI.
 
@@ -47,18 +47,24 @@ dotnet run tools/nf-attach.cs COM9 30      # COM9, 30s poll
 
 **Caveat:** `ExecutionMode` from this CLI path is misleading — see the comment block at the top of `nf-attach.cs`. Use VS breakpoints for crash diagnosis, not this tool's `GetExecutionMode()` reading.
 
-## check-deploy-size.cs — guard against the nf-interpreter deploy ceiling
+## check-deploy-size.cs — OBSOLETE (deploy ceiling resolved 2026-05-05)
 
-Sums every `.pe` in the bin directory and bails non-zero if the total exceeds the empirical ~289 KB wire-protocol deploy ceiling we hit on this fork of nf-interpreter. The wire-protocol overhead adds ~55 KB on top of the local .pe sum, so the local-side guard is at 235 KB.
+This guard sums every `.pe` in the bin directory and once bailed when the total exceeded the empirical ~290 KB wire-protocol deploy ceiling we hit on this fork of nf-interpreter. **That ceiling was resolved 2026-05-05** - the full 2.94 MB managed-deploy partition is usable now (a 387 KB set deployed cleanly 2026-06-25). The guard is no longer required and is kept only for historical reference; you do not need to run it before `nf-deploy.cs`.
 
 ```bash
-dotnet run tools/check-deploy-size.cs SpawnWear/bin/Debug
-# exit 0 = under ceiling; exit 1 = over ceiling (DO NOT DEPLOY)
+dotnet run tools/check-deploy-size.cs SpawnWear/bin/Debug   # historical guard; ceiling resolved
 ```
 
-Run this BEFORE every `nf-deploy.cs` invocation. If you ignore it and deploy past the ceiling, the watch's flash assembly table gets silently corrupted starting at SpawnWear.pe — `nf-attach.cs` will show garbled assembly names like `__StaticArrayInitTypeSize=10` instead of `SpawnWear`. Recovery requires deploying a smaller config + power-cycling the watch.
+Background investigation in `feedback_nf_deploy_ceiling_298kb.md` (in agent memory). The original corruption symptom (garbled flash assembly names like `__StaticArrayInitTypeSize=10` past `SpawnWear.pe`) was the missing-mmap-cache-invalidation bug in nf-interpreter's `Esp32FlashDriver_Write`, since fixed.
 
-Background investigation in `feedback_nf_deploy_ceiling_298kb.md` (in agent memory) — fix is needed in nf-interpreter's `Esp32FlashDriver_Write` (likely missing mmap cache invalidation).
+## nf-screenshot.cs — reassemble a live watch screenshot from the debug stream
+
+Reads stdin (piped from `nf-deploy.cs` / `nf-attach.cs`), watches for the `[SCREENSHOT_BEGIN]` / `[SCREENSHOT_CHUNK]` / `[SCREENSHOT_END]` markers that `SpawnWear.UI.Screenshot.Capture()` emits over `Debug.WriteLine`, and writes the reassembled PNG to `screenshots/screenshot-<timestamp>.png`. Each **BOOT-button press** on the watch drops a fresh capture. This is the current screen-capture path - it replaces the retired HTTP `/screenshot.bin` endpoint.
+
+```bash
+# port varies by machine/cable (COM3 this session)
+dotnet run tools/nf-deploy.cs SpawnWear/bin/Debug COM9 120 | dotnet run tools/nf-screenshot.cs
+```
 
 ## ble-scan.cs — BLE advertisement scanner
 

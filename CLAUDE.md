@@ -56,7 +56,7 @@ These are the things that bit somebody else first. Don't be the second.
 - **F5 in VS is the everyday dev loop. Bootloader mode is NOT.** Once the runtime is on the chip, `Visual Studio 2022 + nanoFramework extension + F5` deploys the SpawnWear app over the wire protocol on COM9 (runtime mode). NO bootloader dance, NO `nf-flash-full.bat`, NO power-cycle, NO esptool. ~10 seconds per cycle. Use the bootloader dance ONLY for: first-time install on a virgin watch, runtime version updates, custom nf-interpreter rebuilds, or recovery after `nanoff --deploy` E2002. Burning ~90 seconds per code-change cycle by going through bootloader is the trap. See `Notes/flashing.md` → "Daily app development".
 - **`ExecutionMode = ProgramExited` from custom debugger scripts is NOT proof the app crashed.** `nanoFramework.Tools.Debugger.Net`'s `GetExecutionMode()` will return that value while VS-attached breakpoints hit on the same build. Use VS breakpoints + the Exception popup for crash diagnosis, not custom CLI probes.
 - **PWR button is on the AXP2101 (EXIO6 over I²C), not a GPIO.** The button reading is an I²C register read on the PMIC, not a `GpioPin.Read()`. Don't waste an hour wiring it as if it were direct GPIO.
-- **Display is QSPI, not SPI.** nanoFramework's existing display drivers don't drive CO5300. Phase 5 has an open research question — don't promise display in earlier phases.
+- **Display is QSPI, not SPI.** Stock nanoFramework display drivers don't drive the CO5300 - the working path is the LostBeard `nanoFramework.Graphics` fork + `Co5300` driver on the `feature/qspi-display-driver` firmware. The 410x502 AMOLED is up and rendering on hardware (launcher, watch face, loadable apps); this is no longer an open research question.
 - **Backlight control is over QSPI register 0x51 on the CO5300**, not a separate PWM-able GPIO. There is no backlight pin to PWM.
 - **Hold PWR > 6 s = power off.** During testing, don't hold it down. Single-click to wake from soft-off.
 - **BOOT (GPIO0) doubles as a user button** during normal operation. Hold during power-on for download mode; releasable click during runtime is fine.
@@ -77,7 +77,7 @@ These are the things that bit somebody else first. Don't be the second.
 This project is **Riker's lane** for now (consuming-project work, BLE plumbing, PWA UI). If a SpawnDev library needs a fix to support the watch:
 - BLE / WiFi / Web Bluetooth → SpawnDev.BlazorJS or upstream nanoFramework — Riker
 - WebRTC integration (Phase 7) → SpawnDev.RTC — Riker
-- Display QSPI / CO5300 driver path (Phase 5 research) → coordinate with Captain before any cross-lane fix
+- Display QSPI / CO5300 driver path (LostBeard `nanoFramework.Graphics` fork - working on hardware) → coordinate with Captain before any cross-lane fix
 
 ## Vendor References
 

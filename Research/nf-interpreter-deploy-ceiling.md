@@ -1,5 +1,7 @@
 # nf-interpreter ESP32-S3 Deploy Ceiling
 
+> **RESOLVED 2026-06-25.** There is NO permanent deploy ceiling. The original corruption was fixed by a firmware rebuild (2026-05-05); the full **2.94 MB** deploy partition is usable, and a **387 KB** managed deploy went clean on 2026-06-25. The 2026-06-21 "Bug A 358,896-byte reset" and "Bug B CryptoSelfTest boot hang" are both closed. The `DeployCeilingBytes` / `~290 KB` / `~235 KB` figures below are HISTORICAL — kept as a record of the investigation, not as a current constraint. Read the rest of this file as a debugging journal, not a live limit.
+
 When the total wire-protocol deploy size approaches **~290 KB**, the LostBeard nf-interpreter fork on ESP32-S3 silently corrupts the on-flash assembly table. nf-deploy reports `100% complete` and `Done.`, but `nf-attach` then shows garbled assembly names starting at the consuming app's `.pe` and continuing through every later entry. The corrupted runtime keeps running, so the network stack stays alive (the watch still pings), but the application never reaches `Main()` and TCP connect succeeds while HTTP request handlers never fire.
 
 Discovered 2026-05-04 during SpawnWear bring-up.

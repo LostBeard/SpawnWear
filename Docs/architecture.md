@@ -44,10 +44,13 @@ Drivers DO NOT own state shared with apps. Drivers are I/O - they read and write
 
 Singletons started at boot. Each owns exactly one piece of hardware and exposes an interface that apps consume. Today:
 - `Drivers/Wifi/WifiService.cs` - WiFi connect via `WifiNetworkHelper.ConnectDhcp`, exposes `IsConnected` + `IpAddress`
-- `Services/HttpServer.cs` - raw socket on port 8080 serving `/screenshot.bin` and an index page
+- `Services/ServiceHost.cs` - the Phase 3 service host (`IServiceHost` over Power / RTC / WiFi / Logger), shipped 2026-05-05
+- `Services/AppRepositoryService.cs` - enumerates the SD-card app library (`D:\apps`, dir-per-app loose files) and backs the launcher tiles
+- `Services/WebRtcTransportService.cs` - autonomous WebRTC transport to the Companion PWA (authenticated + multiplexed bus; see `transport.md`)
 - `Services/EventLoop.cs` - the host event loop that drives Tick + sleep state machine
+- `Services/HttpServer.cs` - **RETIRED.** Formerly a raw socket on port 8080 serving `/screenshot.bin` + `/loadapp`; the firmware no longer starts an HTTP server. Screenshots are pulled over USB via `tools/nf-screenshot.cs` (BOOT-button triggered); apps install to the SD card; telemetry/app traffic runs over the WebRTC bus.
 
-The full Phase 3 service host (singletons with lifecycle and inter-service events) is still TODO; today services are top-level statics in `Program.cs`.
+The Phase 3 service host (singletons with lifecycle, exposed through `IServiceHost`) shipped 2026-05-05; Phase 3 (system services) was completed 2026-06-20.
 
 **Rule: one owner per resource.** The display backlight, BLE radio, audio output, AXP2101 — each has exactly one system service that owns it. Apps ask through the service. Two apps grabbing the speaker simultaneously is a service-design failure, not an "apps fight it out" feature.
 
@@ -63,11 +66,11 @@ Drawing primitives, navigation stack, input dispatch, and system widgets. Today:
 - `UI/StatsScreen.cs`, `UI/SettingsScreen.cs` - example app screens
 - `UI/IScreen.cs` + `UI/ScreenNavigator.cs` - screen interface and rotation logic
 
-Phase 2's full lifecycle (`OnCreate` / `OnResume` / `OnPause` / `OnDestroy`) is partly implemented as `OnResume` / `OnPause` on `IScreen`. Phase 8 will extend it to per-app sandboxes for SD-card-loadable apps.
+Phase 2's full lifecycle (`OnCreate` / `OnResume` / `OnPause` / `OnDestroy`) is partly implemented as `OnResume` / `OnPause` on `IScreen`. SD-card-loadable apps ship today (loose `.pe` files under `D:\apps`, loaded via `Assembly.Load(byte[])` and wrapped by `LoadedAppScreen`).
 
 ### Apps
 
-Managed C# classes implementing the screen lifecycle. Run in-process under the SpawnWear app host. Built-ins are compiled into the firmware initially; Phase 8 adds SD-card-loadable apps.
+Managed C# classes implementing the screen lifecycle. Run in-process under the SpawnWear app host. Core screens are compiled into the firmware; loadable apps live as loose `.pe` files on the SD card under `D:\apps` (dir-per-app), enumerated by `AppRepositoryService` and surfaced as live launcher tiles.
 
 **Rule: lifecycle discipline.** Apps must implement `OnPause` / `OnResume` correctly. Anything an app starts (timer, BLE notify subscription, sensor stream, audio session) it must stop in `OnPause` and restart in `OnResume`. Background services keep ticking through pause / resume.
 
@@ -79,7 +82,7 @@ Managed C# classes implementing the screen lifecycle. Run in-process under the S
 2. **Touch** - reset FT3168, probe for a valid device id, hook the INT pin
 3. **WiFi** - construct `WifiService`, attempt connect against stored credentials in `Config/WifiCredentials.cs` (gitignored - file contains real password)
 4. **Display** - `DisplayControl.Initialize`, allocate framebuffer (411 KB at 410x502 RGB565)
-5. **HTTP server** - if WiFi is up, bind port 8080 and start the listener thread
+5. **Transport** - bring up BLE (pairing) + the autonomous `WebRtcTransportService` (telemetry + app bus). (The old HTTP server on port 8080 is retired and no longer started.)
 6. **Status bar + screens** - build `StatusBar` + `Watchface` + `StatsScreen` + `SettingsScreen` + `LauncherScreen`
 7. **Navigator** - construct `ScreenNavigator` with the screens; set initial active = launcher (index 0)
 8. **First paint** - call `_nav.Current.OnResume()` to paint the boot screen (without this call the launcher's tiles never paint until the user navigates away and back - see commit `f63cfb6`)
@@ -99,14 +102,14 @@ Apps don't talk to GATT directly; they talk to the BLE system service. Advertisi
 
 The PWA half of the architecture mirrors every BLE channel the watch emits. Two .NET projects in this repo:
 
-- **`SpawnWear.Bridge/`** - Razor Class Library (net10.0, browser platform). Holds the watch-interaction code: `ITransport` abstraction, `BleTransport` (Web Bluetooth via SpawnDev.BlazorJS), `WebRtcTransport` (SpawnDev.RTC peer, Phase 7), `BridgeClient` with strongly-typed events (`BatteryChanged` / `ImuSampleReceived` / `RtcTimeReceived` / `ButtonEventReceived` / `WifiStatusChanged` / `WifiScanResultsReceived` / `DebugLogReceived`), `BleUuids` mirror, `ChannelIds` constants.
-- **`SpawnWear.Companion/`** - Blazor WebAssembly PWA (net10.0). References Bridge. Six pages: `Home`, `Stats` (telemetry dashboard), `WiFi` (setup + scan), `Mirror` (HTTP screenshot canvas), `Apps` (drop `.pe` to `/loadapp`), `Console` (live debug log + command bar). Persistent `StatusBar` across all pages.
+- **`SpawnWear.Bridge/`** - Razor Class Library (net10.0, browser platform). Holds the watch-interaction code: `ITransport` abstraction, `BleTransport` (Web Bluetooth via SpawnDev.BlazorJS), `WebRtcTransport` (SpawnDev.RTC peer, live - Phase 7 transport proven end to end 2026-06-23, see [`transport.md`](transport.md)), `BridgeClient` with strongly-typed events (`BatteryChanged` / `ImuSampleReceived` / `RtcTimeReceived` / `ButtonEventReceived` / `WifiStatusChanged` / `WifiScanResultsReceived` / `DebugLogReceived`), `BleUuids` mirror, `ChannelIds` constants.
+- **`SpawnWear.Companion/`** - Blazor WebAssembly PWA (net10.0). References Bridge. Pages include `Home`, `Stats` (telemetry dashboard), `WiFi` (setup + scan), `Console` (live debug log + command bar). Persistent `StatusBar` across all pages. (The old `Mirror` HTTP-screenshot page and `Apps` drop-`.pe`-to-`/loadapp` page used the retired HTTP path; live screen capture is now done over USB via `tools/nf-screenshot.cs`, and apps install to the SD card.)
 
 Drift between firmware-side BLE schemas and Bridge-side decoders is locked by `SpawnWear.Bridge.Tests`:
 - 24 wire-format regression tests for every channel decoder (Battery, IMU, RTC, Button, WifiStatus, WifiScan, DebugLog).
 - `BleUuidsParityTest` reads `SpawnWear/BleUuids.cs` (firmware) and `SpawnWear.Bridge/BleUuids.cs` (bridge) at test time and asserts byte-for-byte parity. If either file changes a UUID without mirroring it, the test fails immediately.
 
-A future `SpawnWear.Bridge.Desktop` crate (Phase 7+) targets `net10.0` (no browser) and exposes the same `ITransport` surface for non-browser .NET consumers using SpawnDev.RTC for WebRTC + a desktop BLE adapter.
+`SpawnWear.Bridge.Desktop` (in the repo, `net10.0`, no browser) exposes the same `ITransport` surface for non-browser .NET consumers using SpawnDev.RTC for WebRTC. It currently ships a working two-peer WebRTC self-test (`Program.cs`) that rendezvous + authenticates + exchanges data through the real hub.
 
 Full plan: [`Plans/companion-pwa.md`](../Plans/companion-pwa.md).
 
@@ -128,6 +131,6 @@ Tick budget:
 
 - **Apps are not fixed.** The launcher hosts a list of apps; built-in ones are compiled into the firmware initially, but the long-term aim is OTA-installable app payloads.
 - **Services are background daemons,** consumed by apps via interfaces. Only one PMIC, one BLE stack, one display backlight - the system service owns it, apps ask politely.
-- **Lifecycle is Android-flavored.** Apps have `OnCreate` / `OnResume` / `OnPause` / `OnDestroy` (partial today; full at Phase 8). The launcher decides what's foregrounded. Background services keep ticking through pause / resume.
+- **Lifecycle is Android-flavored.** Apps have `OnCreate` / `OnResume` / `OnPause` / `OnDestroy` (SD-loaded apps run the full lifecycle via `LoadedAppScreen`). The launcher decides what's foregrounded. Background services keep ticking through pause / resume.
 - **Resource budgets are explicit.** PSRAM (8 MB), heap, flash slots, BLE MTU, WiFi airtime. Apps that hog get killed.
 - **Power-aware by default.** AXP2101 + display-rail control + WiFi/BLE radio gating are first-class system concerns, not afterthoughts.

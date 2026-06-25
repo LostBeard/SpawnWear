@@ -26,4 +26,6 @@ ESP32-S3 2.06inch AMOLED Touch Watch Development Board, 32-bit LX7 Dual-core Pro
 ## Some ideas
 I want a WebRTC client that can run on the ESP32-S3 to allow video streaming and peer-to-peer conection wit hweb apps. SpawnDev.RTC may be leveraged for this.
 
+> Update: this shipped. The watch runs an authenticated, multiplexed WebRTC data-channel transport to the Companion PWA (proven end to end 2026-06-23). See [`Docs/transport.md`](Docs/transport.md).
+
 

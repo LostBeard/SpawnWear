@@ -34,7 +34,7 @@ This is the canonical roadmap. The README's Status / Milestones table tracks wha
 - [x] HTTP server: port 8080 raw socket, `/screenshot.bin` (RGB565 BE) + index page for live framebuffer capture
 - [ ] Service host: singletons, lifecycle, inter-service events (currently each service is a top-level static in Program.cs)
 - [ ] QMI8658 IMU driver: accel + gyro + step-count
-- [ ] Storage service: TF/microSD mount + simple key-value store in internal flash for settings persistence
+- [x] Storage service: TF/microSD mount (SDSPI on SPI3_HOST; clock raised 400 kHz->4 MHz 2026-06-20) + simple key-value store in internal flash for settings persistence — SD read/write hardware-verified 2026-06-24 (`sys.files` over WebRTC, chunked)
 - [ ] Logger service: ring buffer + USB-CDC sink + BLE notify sink
 
 ## Phase 4 - Settings app
@@ -66,7 +66,7 @@ This is the canonical roadmap. The README's Status / Milestones table tracks wha
 
 ## Phase 7 - WebRTC service + AI Assistant app (flagship)
 
-- [ ] WebRTC peer service: SpawnDev.RTC integration; signaling via the companion PWA or a small HTTP signaling relay; ICE / SDP plumbing
+- [x] WebRTC peer service: **LIVE 2026-06-24.** Watch-side WebRTC over the libpeer LostBeard fork (`spawnwear` branch); authenticated (mutual Ed25519) multiplexed channel bus; DTLS answerer-role blocker resolved 2026-06-24 (SipSorcery 10.0.7 / RTC 1.1.11), hardware-verified. As-built reference: `Docs/transport.md`. (Original line: SpawnDev.RTC integration; signaling via the companion PWA or a small HTTP signaling relay; ICE / SDP plumbing.)
 - [ ] **AI Assistant app**: push-to-talk button, on-screen keyboard for text, live transcript display, TTS playback through speaker, conversation history persisted to TF
 - [ ] PC-side counterpart: a small Blazor / .NET host on TJ's PC that the watch dials, runs the assistant model, returns audio + text
 
@@ -74,7 +74,7 @@ This is the canonical roadmap. The README's Status / Milestones table tracks wha
 
 - [ ] OTA firmware update path (nanoFramework standard)
 - [ ] Page: **About → Update** - pull URL field, "Check for update" button, download + reboot flow
-- [ ] **SD-card-loadable apps** - manifest + payload format, launcher reads SD root for installed-app metadata, registers tile + icon at boot. See `sd-card-apps.md`.
+- [x] **SD-card-loadable apps** - SHIPPED + hardware-verified 2026-06-25. Apps load from `D:\apps` loose-file dirs (dir-per-app model); launcher shows a tile per app (DiceApp, CounterApp, HelloWorldApp, PaintApp). See `sd-card-apps.md`. (Original line: manifest + payload format, launcher reads SD root for installed-app metadata, registers tile + icon at boot.)
 - [ ] App lifecycle: full Android-style `OnCreate` / `OnResume` / `OnPause` / `OnDestroy` (Phase 2 only does enter/exit on screen switch)
 
 ## Phase 9 - Activity app + later
@@ -97,6 +97,6 @@ See `companion-pwa.md`.
 
 ## Open blockers
 
-- **nf-interpreter deploy ceiling** (~290 KB wire-protocol). Restoring BLE + adding more system services pushes us past it. Fix path documented in `Research/nf-interpreter-deploy-ceiling.md`. Until that lands, every new feature has to fit in remaining headroom (~50 KB at 2026-05-04).
+- ~~**nf-interpreter deploy ceiling** (~290 KB wire-protocol).~~ **RESOLVED 2026-06-25** — no ceiling; firmware rebuild cleared it; full 2.94 MB partition usable (387 KB deployed clean). See `Research/nf-interpreter-deploy-ceiling.md`.
 - **`nanoFramework.Hardware.Esp32` I²S surface incomplete.** Audio (Phase 6) needs it; tracked as an upstream contribution alongside the QSPI work.
-- **WebRTC on ESP32-S3.** SpawnDev.RTC is a Blazor library; porting the peer logic to nanoFramework is the largest unknown in Phase 7.
+- ~~**WebRTC on ESP32-S3.**~~ **RESOLVED 2026-06-24** — watch-side WebRTC is live on the libpeer LostBeard fork (`spawnwear` branch), mutual-Ed25519 authenticated, hardware-verified. DTLS answerer-role blocker fixed (SipSorcery 10.0.7 / RTC 1.1.11). As-built reference: `Docs/transport.md`.

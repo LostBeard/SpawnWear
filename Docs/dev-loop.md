@@ -6,7 +6,7 @@ Two paths: F5 in Visual Studio (everyday code iteration) and CLI via `tools/nf-d
 
 Open `SpawnWear.slnx` in Visual Studio 2022 with the [.NET nanoFramework extension](https://marketplace.visualstudio.com/items?itemName=nanoframework.nanoFramework-VS2022-Extension) installed and press **F5**.
 
-The watch must already have the nanoFramework runtime flashed (first-time install: see `Notes/flashing.md`). For routine app development, the watch is in **runtime mode** on COM9. NO bootloader-mode dance is needed.
+The watch must already have the nanoFramework runtime flashed (first-time install: see `Notes/flashing.md`). For routine app development, the watch is in **runtime mode**. NO bootloader-mode dance is needed. The COM port varies by machine/cable (often COM9, but it was COM3 this session) - use your actual runtime port; `nanoff --listports` lists them.
 
 Cycle time: ~10 seconds build → deploy → app running with breakpoints active.
 
@@ -43,8 +43,10 @@ Each tool is a `.NET 10` single-file C# script. Run with `dotnet run path/to/scr
 |---|---|
 | `tools/nf-deploy.cs` | Deploy + capture from CLI (the daily CLI loop) |
 | `tools/nf-attach.cs` | Read-only inspection of a running runtime (assemblies, ExecutionMode) |
-| `tools/check-deploy-size.cs` | Pre-flight ceiling check; bails if total `.pe` >= 290 KB. See `Research/nf-interpreter-deploy-ceiling.md` |
-| `tools/bin-to-png.cs` | Convert `/screenshot.bin` HTTP response (RGB565 BE) to PNG |
+| `tools/check-deploy-size.cs` | Historical pre-flight ceiling check (the ~290 KB nf-interpreter wire-protocol bug it guarded was **resolved 2026-05-05**; full 2.94 MB partition is usable now, `nf-deploy.cs` keeps a 2 MB sanity guard). See `Research/nf-interpreter-deploy-ceiling.md` |
+| `tools/nf-screenshot.cs` | Reassemble a PNG from the `[SCREENSHOT_*]` Debug markers (pipe a deploy/attach session in; BOOT-button triggered) |
+| `tools/serial-mon.cs` | Read-only raw serial monitor (DTR/RTS off, no reset) - catches ESP-IDF panic backtraces |
+| `tools/bin-to-png.cs` | Convert a raw RGB565-BE framebuffer dump to PNG |
 | `tools/nf-graphics-repack.cs` | Rebuild the three local-feed graphics nupkgs in one shot |
 | `tools/nf-flash-full.bat` | Bootloader-mode full reflash via esptool. Recovery / first install only |
 | `tools/nf-build.bat` | Old wrapper around the MSBuild command above |
@@ -88,21 +90,16 @@ Hot-reload works for `.razor` and `.css` edits. `BridgeClient` event subscriptio
 
 If you change a wire format in `SpawnWear/BleUuids.cs` or any firmware-side `Notify*` producer, run `dotnet test SpawnWear.Bridge.Tests` first. The `BleUuidsParityTest` will fail until you mirror the change to `SpawnWear.Bridge/BleUuids.cs`. The channel decoder tests will fail until you update both the firmware schema and the Bridge decoder.
 
-## Live screen capture over WiFi
+## Live screen capture
 
-When WiFi is up + HTTP server is listening (port 8080 by default):
+The watch's HTTP server is **retired** (its real surface is BLE + WebRTC, neither needs HTTP), so the old `http://<watch-ip>:8080/screenshot.bin` path no longer exists. Screen capture now rides the wire-protocol Debug stream: `SpawnWear.UI.Screenshot.Capture()` emits `[SCREENSHOT_BEGIN]/[SCREENSHOT_CHUNK]/[SCREENSHOT_END]` markers, and `tools/nf-screenshot.cs` reassembles them into a PNG. Pipe a deploy (or attach) session into it and press the **BOOT** button on the watch to drop each capture into `screenshots/`:
 
 ```bash
-# Fetch raw RGB565 BE framebuffer
-curl -s -o screenshot.bin http://192.168.1.171:8080/screenshot.bin
-
-# Convert to PNG
-dotnet run tools/bin-to-png.cs screenshot.bin screenshot.png
-
-# Or visit http://192.168.1.171:8080/ in a browser for the JS-driven canvas viewer
+dotnet run tools/nf-deploy.cs SpawnWear/bin/Debug COM3 120 | dotnet run tools/nf-screenshot.cs
+# press BOOT on the watch for each screenshot -> screenshots/screenshot-<timestamp>.png
 ```
 
-This replaces the older BOOT-button-base64-over-Debug.WriteLine path. WiFi credentials live in `SpawnWear/Config/WifiCredentials.cs` (gitignored).
+WiFi credentials live in `SpawnWear/Config/WifiCredentials.cs` (gitignored).
 
 ## Build flags + version compatibility
 

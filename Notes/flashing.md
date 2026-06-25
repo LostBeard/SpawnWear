@@ -19,6 +19,8 @@ The ESP32-S3 has native USB. Depending on which mode it is in, **Windows assigns
 
 **The port number can flip every time the firmware reboots into a different state.** This is normal, not a fault. Re-run `nanoff --listports` whenever a `Could not find file 'COMx'` error appears.
 
+> **COM9 / COM10 below are examples only - the actual port numbers vary by machine and USB cable** (e.g. this watch enumerated on COM3 on one machine). Always confirm with `nanoff --listports`; treat every COM9/COM10 in this doc as "the runtime port" / "the bootloader port" respectively, not as literal numbers.
+
 ```
 > nanoff --listports
 Available COM ports:
@@ -357,7 +359,7 @@ When this repo was first scaffolded:
 
 ## Recovery - if the watch becomes unresponsive
 
-Same as above: hold BOOT + tap RESET to force ROM bootloader mode, then re-flash.
+This watch has **no separate RESET button** (see "Buttons on this watch" above). To force ROM bootloader mode, use the BOOT-held-during-PWR-cold-boot procedure documented in "To enter the bootloader (download mode)" above: power fully off by holding PWR 6+ seconds, hold BOOT, tap PWR to power back on, then release BOOT once the screen stays black. Then re-flash.
 
 ## Recipe summary (copy / paste)
 

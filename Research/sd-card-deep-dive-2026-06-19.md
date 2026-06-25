@@ -1,5 +1,7 @@
 # SD Card Deep Dive — 2026-06-19/20 (Riker)
 
+> **SUPERSEDED 2026-06-20 → RESOLVED.** Two conclusions in this 2026-06-19 record were reversed the next day: (1) "**Note on SPI mode (dead end on this board)**" is WRONG — **SDSPI is the shipped solution.** SD now mounts over SDSPI on SPI3_HOST (clock later raised 400 kHz→4 MHz, 2026-06-20), hardware-verified, with SD read/write over WebRTC (`sys.files`) and SD-card-loadable apps live. (2) "ROOT CAUSE #2 (NOT solved) / PLAN FOR TOMORROW = bisect+fix SDMMC" is obsolete — the SDMMC dead-clock root cause was abandoned (it no longer blocks anything) once SDSPI shipped. The ALDO1-only power fix (ROOT CAUSE #1) is still correct and kept. See `Research/sd-card-nanoframework-dead-clock-investigation.md` (rev 2, SOLVED) for the as-shipped SDSPI write-up. The rest of this file is the historical investigation log.
+
 Full record of the SD-card investigation on the Waveshare ESP32-S3-Touch-AMOLED-2.06
 watch under .NET nanoFramework. Read this top-to-bottom before resuming.
 
@@ -163,7 +165,9 @@ quality; GPIO17; `SetPinFunction`; pin-hold (`gpio_reset`); SPI-vs-SDMMC; displa
 or other peripheral *runtime* bus conflict; every sdkconfig knob (PM, tickless, CPU,
 PSRAM, flags, pins); the CLR runtime tasks + USB-OTG.
 
-### Note on SPI mode (dead end on this board)
+### Note on SPI mode (~~dead end on this board~~ — REVERSED 2026-06-20, SDSPI IS THE PATH)
+> **This conclusion was WRONG.** On 2026-06-20 the "garbage read" was traced to the *specific small/old card's* flaky SPI-mode bulk read, not the board: a 128 GB card read a clean `55aa` boot sector over SDSPI. SD now SHIPS over SDSPI. See the banner at the top of this file and `sd-card-nanoframework-dead-clock-investigation.md` §11/§14. Original (incorrect) note kept below for the record.
+
 ESP-IDF's `sdspi` (SD-over-SPI) returns **deterministic garbage** on a 512-byte block
 read on this watch (card inits, CSD/CID correct, but the boot-sector bytes are wrong and
 identical across a clean raw bus init) — even standalone. The references that work use

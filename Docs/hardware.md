@@ -99,7 +99,7 @@ Authoritative source: vendor `pin_config.h` and the schematic PDF above.
 
 ### TF / microSD card (SDSPI - SD in SPI mode)
 
-The card runs in **SPI mode (SDSPI)** under nanoFramework: the board's SDMMC controller never clocks commands out in nf (root cause unlocated after an exhaustive register-level investigation), so the SD is driven over the SPI peripheral instead. Managed `SDCardSpiParameters` with `spiBus = 2` maps to native **SPI3_HOST** - the CO5300 display owns `SPI2_HOST` (QSPI), so the two buses never collide. Clock is clamped to a conservative 400 kHz (SD "SPI mode" is optional/finicky on this SDMMC-wired slot); exFAT + FAT32 both mount. The slot's physical signals map onto SPI as below. See [`Research/sd-card-deep-dive-2026-06-19.md`](../Research/sd-card-deep-dive-2026-06-19.md).
+The card runs in **SPI mode (SDSPI)** under nanoFramework: the board's SDMMC controller never clocks commands out in nf (root cause unlocated after an exhaustive register-level investigation), so the SD is driven over the SPI peripheral instead. Managed `SDCardSpiParameters` with `spiBus = 2` maps to native **SPI3_HOST** - the CO5300 display owns `SPI2_HOST` (QSPI), so the two buses never collide. SDSPI clock is **4 MHz** (raised from the original conservative 400 kHz on 2026-06-20 for ~10x throughput, with an internal warm-up retry in `Storage_MountSpi` covering the flaky first-init); exFAT + FAT32 both mount. The slot's physical signals map onto SPI as below. See [`Research/sd-card-deep-dive-2026-06-19.md`](../Research/sd-card-deep-dive-2026-06-19.md).
 
 | Slot signal | GPIO | SPI-mode role |
 |---|---|---|
@@ -142,7 +142,7 @@ USB-C, **native USB-OTG** off the ESP32-S3 (CDC + JTAG via the same port). Auto-
 | deploy (managed code) | data, 0x84 | 0x1B0000 | 0x2E0000 (2944 KB) |
 | config (network, certs, user data) | data, littlefs | 0x490000 | 0x300000 (3 MB) |
 
-Active deploy budget is constrained well below the 2.94 MB partition by an nf-interpreter wire-protocol bug at ~290 KB; see `Research/nf-interpreter-deploy-ceiling.md`.
+The deploy region is the full **2.94 MB** partition. (An earlier nf-interpreter wire-protocol bug capped managed deploys at ~290 KB; **resolved 2026-05-05** by a firmware rebuild - 387 KB deployed clean on 2026-06-25. `tools/nf-deploy.cs` keeps a 2 MB sanity guard. History in `Research/nf-interpreter-deploy-ceiling.md`.)
 
 ### RAM (managed heap)
 

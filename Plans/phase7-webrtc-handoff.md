@@ -1,8 +1,10 @@
 # Phase 7 — BLE pairing → Ed25519 trust → WebRTC always-on
 
+> **SHIPPED 2026-06-24 — this design is now built.** The watch-side WebRTC transport is LIVE: authenticated (mutual Ed25519), multiplexed channel bus, on the **libpeer LostBeard fork (`spawnwear` branch)**. The DTLS answerer-role blocker was resolved 2026-06-24 (SipSorcery 10.0.7 / RTC 1.1.11) and the path is hardware-verified. Watch-side Ed25519 = Monocypher (resolved option (c) — native intrinsic in the nf-interpreter fork). **As-built reference: `Docs/transport.md`.** The text below is the original design doc, kept for the rationale + wire-format record; treat "not implemented yet" / open-question framing as historical.
+
 The watch and a Companion (Blazor WASM PWA OR a future SpawnWear.Bridge.Desktop consumer) pair **once** over BLE. After that, they reach each other through `hub.spawndev.com` over WebRTC for as long as both have internet — same network, different network, doesn't matter. Bluetooth is only needed for the initial trust bootstrap.
 
-This document captures the design. Nothing in here is implemented yet beyond the BLE pairing primitives that already shipped on 2026-05-05.
+This document captures the design. (HISTORICAL as of writing — "Nothing in here is implemented yet beyond the BLE pairing primitives that already shipped on 2026-05-05." The full WebRTC transport shipped 2026-06-24; see banner above.)
 
 ## Mental model
 
@@ -211,6 +213,8 @@ Phase 7 is a multi-week build, not a single-session push. Today's 2026-05-05 shi
 - Open question 7 (watch-side WebRTC stack) flipped back to "REVISIT" pending TJ review of the libpeer research (memory `project_phase7b_libdatachannel_research_finding_2026_05_05.md`).
 
 ## Open questions (for design review before any code lands)
+
+> **RESOLVED items (2026-06-24):** Q3 (watch-side Ed25519) → **Monocypher** native intrinsic in the nf-interpreter fork (option c). Q7 (watch-side WebRTC Stack B) → **`sepfy/libpeer`** on the LostBeard fork `spawnwear` branch, shipped + hardware-verified; DTLS answerer-role blocker fixed (SipSorcery 10.0.7 / RTC 1.1.11). Q8 (managed crypto wrapping) → Monocypher Ed25519 exposed via native interop. See `Docs/transport.md`. Remaining questions (MTU, room-key derivation, hub discovery, video track, TURN creds) stand as written.
 
 1. **MTU bump strategy.** Default ATT MTU is 23 bytes; we need ~116 for the pairing handshake. Web Bluetooth doesn't expose MTU control. Either (a) chunk the handshake into multiple writes on a single characteristic, or (b) split the handshake across two sequential writes.
 2. **Room key derivation.** `RoomKey.Random()` (simple) vs `RoomKey.FromString(SHA256(companionPub || watchPub))` (deterministic; lets a re-pairing client recover the room key from just the pubkeys; lower coordination risk).

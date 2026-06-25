@@ -98,6 +98,8 @@ Each built-in app gets a corresponding PWA page that drives its UI remotely. Set
 
 ### Phase 7 - BLE pairing → Ed25519 trust → WebRTC always-on
 
+> **SHIPPED 2026-06-24.** The watch-side WebRTC transport is LIVE: authenticated (mutual Ed25519), multiplexed channel bus, on the **libpeer LostBeard fork (`spawnwear` branch)**. DTLS answerer-role blocker resolved 2026-06-24 (SipSorcery 10.0.7 / RTC 1.1.11), hardware-verified. As-built reference: `Docs/transport.md`.
+
 Pair once over BLE, exchange Ed25519 keypairs, agree on a room id. From then on the watch and Companion meet at `hub.spawndev.com`, mutually verify with signed challenges, and talk over a WebRTC data channel regardless of which network either side is on. Bluetooth becomes the recovery / re-pair path, not the everyday transport.
 
 Full design: [`Plans/phase7-webrtc-handoff.md`](phase7-webrtc-handoff.md).

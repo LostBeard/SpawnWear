@@ -1,5 +1,7 @@
 # SD-card-loadable Apps
 
+> **SHIPPED + hardware-verified 2026-06-25.** SD-card-loadable apps now work end-to-end: apps load from loose-file directories and the launcher shows a tile per app (DiceApp, CounterApp, HelloWorldApp, PaintApp). NOTE: the real on-device path is **`D:\apps`** (one dir per app, loose files), NOT the `/sd/apps/` path sketched throughout this design doc. SD read/write itself ships over WebRTC (`sys.files`, chunked, hardware-verified 2026-06-24) and runs on SDSPI (SPI3_HOST). The rest of this file is the original design sketch — kept for the runtime-constraint research it captured; treat path/manifest specifics as the design intent, not the as-built layout.
+
 The 32 GB microSD slot on the Waveshare watch makes "user-installable apps" a viable feature. **nanoFramework DOES support runtime assembly loading** via `Assembly.Load(byte[])` - I was wrong about this in an earlier draft of this file. The native impl is at `targets/.../src/CLR/CorLib/corlib_native_System_Reflection_Assembly.cpp:277` and it does the full pipeline: parse the .pe header, link into the type system (`g_CLR_RT_TypeSystem.Link`), resolve references (`ResolveAll`), prepare for execution, and spawn static constructors.
 
 **The one caveat**: if the loaded assembly has `CLR_RECORD_ASSEMBLY::c_Flags_NeedReboot` set in its header (line 983 of `nanoCLR_Types.h`), the load returns `CLR_E_BUSY` - those assemblies require a reboot to register. The flag is set on assemblies that contain native (non-managed) entry points - i.e. anything that calls into a hand-rolled C++ method via the native-stubs path. Pure managed code from a `.nfproj` should NOT have this flag set, so app assemblies that consume system services through the public managed surface (which is what we want anyway) load cleanly.
@@ -23,7 +25,7 @@ Built-in apps are hard-coded today in `Program.cs`. SD-card apps would arrive at
 
 Inspired by TJ's 2026-05-04 design conversation with Gemini:
 
-**Core firmware (internal flash, ~290 KB headroom under the deploy ceiling):**
+**Core firmware (internal flash; ~~~290 KB headroom under the deploy ceiling~~ — deploy ceiling RESOLVED 2026-06-25, full 2.94 MB partition usable):**
 - HAL / drivers (CO5300, FT3168, AXP2101, PCF85063, etc.) - nothing leaves
 - System services (Power, WiFi, BLE, RTC, Audio, Storage, Logger, App Loader)
 - UI Framework (drawing primitives, navigation, system widgets)
@@ -159,8 +161,8 @@ This confirms the architectural assumptions:
 
 **Phase 8 is unblocked.** The full app loader can be built on top of this foundation with confidence the foundation is real.
 
-What remains untested:
+What remains untested (as of the 2026-05-05 validation):
 - Assembly unload + heap reclaim across many load cycles (Gemini's "metadata never reclaimed" claim - needs a 100x load test)
 - Cross-assembly interface calls (loaded app implementing `ISpawnApp` from the firmware-deployed AppContracts)
 - Same-name+version collision behavior on a real load attempt
-- Loading from SD card (FileSystem package not yet on the firmware)
+- ~~Loading from SD card (FileSystem package not yet on the firmware)~~ **DONE 2026-06-25** — apps load from `D:\apps` loose-file dirs; SD read/write hardware-verified 2026-06-24. Launcher shows a tile per app (DiceApp / CounterApp / HelloWorldApp / PaintApp).

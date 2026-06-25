@@ -1,5 +1,7 @@
 # nf-interpreter Deploy Ceiling — Live Investigation 2026-05-05
 
+> **RESOLVED 2026-06-25.** This 2026-05-05 investigation concluded "rebuild fixes it" and raised the guards to 2 MB — correct, but it predates a 2026-06-21 re-occurrence (see the sibling `nf-interpreter-deploy-ceiling.md`, which then proved the "ceiling" was two unrelated size-specific bugs, not an architectural limit). Final state: NO deploy ceiling, full 2.94 MB partition usable, 387 KB deployed clean on 2026-06-25. Treat this file and its sibling together as the closed record.
+
 Companion to `nf-interpreter-deploy-ceiling.md`. That file documented the symptom; this file is the live investigation log as we trace the actual cause.
 
 ## Hypothesis

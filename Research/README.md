@@ -4,7 +4,7 @@ Investigation notes, root-cause findings, and reverse-engineering work that's gr
 
 ## Index
 
-- **[nf-interpreter-deploy-ceiling.md](nf-interpreter-deploy-ceiling.md)** — `nf-deploy` silently corrupts the on-flash assembly table when total wire-protocol deploy >= ~290 KB. Reports 100% / Done; subsequent `nf-attach` shows garbled assembly names. Likely root cause: missing mmap cache invalidation in `Esp32FlashDriver_Write`. `tools/nf-deploy.cs` has a pre-flight guard.
+- **[nf-interpreter-deploy-ceiling.md](nf-interpreter-deploy-ceiling.md)** — **RESOLVED 2026-06-25 (no ceiling; full 2.94 MB partition usable, 387 KB deployed clean).** HISTORICAL symptom: `nf-deploy` silently corrupts the on-flash assembly table when total wire-protocol deploy >= ~290 KB; reports 100% / Done; subsequent `nf-attach` shows garbled assembly names. Originally blamed on missing mmap cache invalidation in `Esp32FlashDriver_Write`; that hypothesis was disproven — the corruption was firmware-version-specific and cleared by a rebuild. Kept as a debugging-journal record, not a live constraint.
 - **[esp32s3-wifi-router-compatibility.md](esp32s3-wifi-router-compatibility.md)** — nanoFramework WiFi on ESP32-S3 fails to authenticate against modern routers running 802.11 b/g/n/ax mixed mode + auto 20/40 MHz channel width, even with correct credentials. Switch the AP to b/g/n only + 20 MHz to fix. The fix is in the router, not the watch.
 - **[ft3168-burst-read-layout.md](ft3168-burst-read-layout.md)** — The FT3168 touch controller's burst-read layout starting at register 0x02 has NO reserved gap byte after FingerNum, contrary to many `FT5xxx` vendor samples. Use offsets `[1,2]` for X and `[3,4]` for Y, not `[2,3]` / `[4,5]`.
 

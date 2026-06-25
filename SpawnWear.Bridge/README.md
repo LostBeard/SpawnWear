@@ -1,6 +1,6 @@
 # SpawnWear.Bridge
 
-Razor Class Library that bridges Blazor WebAssembly apps to a [SpawnWear](https://github.com/LostBeard/SpawnWear) watch (Waveshare ESP32-S3-Touch-AMOLED-2.06 running .NET nanoFramework). Provides a typed `BridgeClient` that pairs over Web Bluetooth and surfaces watch state - battery, IMU, RTC, button events, WiFi status / scan results, and the live debug log - through ordinary C# events. WebRTC peer-to-peer transport is wired in as a stub for Phase 7 (works in both browser and .NET desktop via [SpawnDev.RTC](https://github.com/LostBeard/SpawnDev.RTC)).
+Razor Class Library that bridges Blazor WebAssembly apps to a [SpawnWear](https://github.com/LostBeard/SpawnWear) watch (Waveshare ESP32-S3-Touch-AMOLED-2.06 running .NET nanoFramework). Provides a typed `BridgeClient` that pairs over Web Bluetooth and surfaces watch state - battery, IMU, RTC, button events, WiFi status / scan results, and the live debug log - through ordinary C# events. WebRTC peer-to-peer transport is live (Phase 7, proven end to end 2026-06-23 - see [`Docs/transport.md`](../Docs/transport.md)): an authenticated, multiplexed data-channel bus over [SpawnDev.RTC](https://github.com/LostBeard/SpawnDev.RTC), working in both browser and .NET desktop.
 
 No raw JavaScript. No `IJSRuntime`. All interop goes through [SpawnDev.BlazorJS](https://github.com/LostBeard/SpawnDev.BlazorJS) typed wrappers.
 
@@ -71,21 +71,12 @@ The first `ConnectAsync` triggers the browser's Web Bluetooth picker. The Bridge
 | `WifiScanResultsReceived` | `WifiScanResult[]` | `WifiScan` | Array of `(Ssid, RssiDbm)`. |
 | `DebugLogReceived` | `string` | `DebugLog` | UTF-8 decoded line from the watch's `Debug.WriteLine`. |
 
-## HTTP-side (when WiFi is up)
+## HTTP-side — RETIRED
 
-`WatchHttp` is registered in the same DI container; inject and call:
+The watch no longer runs an HTTP server, so the old `WatchHttp` helper (`GetScreenshotAsync` / `PostAppAsync` against `http://<watch-ip>:8080/`) is retired. Replacements:
 
-```csharp
-@inject WatchHttp WatchHttp
-
-// Live framebuffer as RGBA8 (already decoded from RGB565 BE)
-var shot = await WatchHttp.GetScreenshotAsync("http://192.168.1.171");
-// shot.Width, shot.Height, shot.Rgba ready for canvas ImageData
-
-// Drop a SpawnWear app .pe onto the watch
-var reply = await WatchHttp.PostAppAsync("http://192.168.1.171", peBytes);
-// "OK: COUNTER" or HttpRequestException with the watch's error text
-```
+- **Live screen capture** is pulled over USB with `tools/nf-screenshot.cs` (BOOT-button triggered), not over HTTP.
+- **App install** is loose `.pe` files on the SD card under `D:\apps\<AppName>\` (enumerated by the firmware's `AppRepositoryService`), pushed over the WebRTC `sys.files` lane or copied with the card out.
 
 ## Sending commands
 
@@ -118,7 +109,7 @@ Your Blazor WASM page
         ▼                     ▼
 ┌────────────────┐    ┌────────────────────────┐
 │ BleTransport   │    │ WebRtcTransport        │
-│ (Web Bluetooth │    │ (SpawnDev.RTC, Phase 7;│
+│ (Web Bluetooth │    │ (SpawnDev.RTC, LIVE;   │
 │  via SpawnDev. │    │  signals over BLE so   │
 │  BlazorJS)     │    │  no shared network     │
 │                │    │  needed)               │
@@ -159,6 +150,6 @@ Same as the parent SpawnWear repository.
 
 - **LostBeard** (Todd Tanner) - Captain, library author, keeper of the vision
 - **Riker** (Claude CLI) - First Officer, implementation lead on consuming projects
-- **Data**, **Tuvok**, **Geordi** - Crew on adjacent SpawnDev libraries
+- **Data**, **Tuvok**, **Geordi**, **Seven** - Crew on adjacent SpawnDev libraries
 
 Live long and prosper. 🖖

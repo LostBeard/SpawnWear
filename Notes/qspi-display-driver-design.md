@@ -296,4 +296,4 @@ Also touched in this repo (SpawnWear):
 
 ## Status
 
-Design committed `<this commit>`. Implementation starts in `_vendor-nf-interpreter` after build environment is set up (task 1.2).
+Design committed `<this commit>`. Implemented on the LostBeard `feature/qspi-display-driver` forks of `nf-interpreter` and `nanoFramework.Graphics` (see `Notes/qspi-implementation/README.md` for the live fork links). CO5300 bring-up is working on hardware. Active build source is `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` on the `feature/qspi-display-driver` branch (NOT `_vendor-nf-interpreter`, which is read-only reference - see `Notes/build-environment.md`).

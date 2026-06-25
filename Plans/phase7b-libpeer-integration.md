@@ -1,5 +1,7 @@
 # Phase 7b - Watch WebRTC via libpeer (integration plan)
 
+> **SHIPPED 2026-06-24 — all milestones complete, DTLS blocker resolved.** The DTLS `handshake_failure(40)` was root-caused to the answerer DTLS role (two DTLS clients): fixed in the SipSorcery fork so the answerer mirrors the offer's setup role per RFC 4145/5763. Shipped to nuget.org (SipSorcery 10.0.7 / RTC 1.1.11), hardware-verified (console connected to a physical watch). libpeer↔SipSorcery interop is now PROVEN. The watch-side WebRTC transport is LIVE (mutual Ed25519, multiplexed channel bus). **As-built reference: `Docs/transport.md`.** The "last blocker" framing below is HISTORICAL.
+
 ## CURRENT STATE (2026-06-23) - milestones 1-5 REACHED; DTLS handshake is the last blocker
 The pipeline works end-to-end: libpeer builds+links into nf, a `PeerConnection` constructs, the
 watch self-produces an offer with candidates, the hand-rolled tracker-WS transport connects through

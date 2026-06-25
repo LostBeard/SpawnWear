@@ -3,7 +3,9 @@
 The watch talks to the Blazor Companion PWA (and, ultimately, the AI Assistant backend) over **one
 authenticated WebRTC data channel**, shared by the OS and all loadable apps through a **multiplexed
 channel bus**. This is the foundation the flagship AI Assistant is built on. Status: live and proven
-end to end as of 2026-06-23 (Phase 7).
+end to end as of 2026-06-23 (Phase 7). The `sys.files` lane (chunked SD read/write over this link)
+was hardware-verified 2026-06-24. The watch-as-answerer DTLS-role fix shipped the same day in
+**SpawnDev.SIPSorcery 10.0.7** + **SpawnDev.RTC 1.1.11**.
 
 ## Layers
 

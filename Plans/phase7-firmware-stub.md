@@ -1,5 +1,7 @@
 # Phase 7 — Watch firmware pairing stub
 
+> **SHIPPED / SUPERSEDED 2026-06-24.** The watch-side WebRTC transport is LIVE: authenticated (mutual Ed25519), multiplexed channel bus, on the **libpeer LostBeard fork (`spawnwear` branch)** — NOT the libdatachannel path this doc's §"WebRTC peer integration" plans (that section is superseded by `Plans/phase7b-libpeer-integration.md`). DTLS answerer-role blocker resolved 2026-06-24 (SipSorcery 10.0.7 / RTC 1.1.11), hardware-verified. Watch-side Ed25519 = Monocypher native intrinsic. **As-built reference: `Docs/transport.md`.** The PairingService sketch below shipped; read this file as the design record.
+
 The Companion side of Phase 7 is functionally complete (see [`Plans/phase7-webrtc-handoff.md`](phase7-webrtc-handoff.md) for the full design). To make the "Establish trust (Phase 7)" button on the Companion's Home page actually succeed, the watch firmware needs to ship two new BLE characteristics + a small in-firmware PairingService. This doc sketches what that looks like in terms of nanoFramework code so the next firmware session has a clear starting point.
 
 This is the **pairing-only** subset. Watch-side WebRTC peer is a separate, bigger problem ([`Plans/phase7-webrtc-handoff.md`](phase7-webrtc-handoff.md) §"Watch-side options for Stack B").
@@ -184,7 +186,9 @@ Properties of `I:`:
 
 `PairingService.cs` writes a 116-byte file at `I:\spawnwear-pair.bin` containing `[ourPub:32][ourPriv:32][peerPub:32][roomKey:20]`. Reload-on-boot + re-save-on-pair both verified live.
 
-## SD card status (BLOCKED on runtime fix, 2026-05-05)
+## SD card status (~~BLOCKED on runtime fix, 2026-05-05~~ — RESOLVED 2026-06-24)
+
+> **RESOLVED 2026-06-24.** SD now works: it runs on **SDSPI (SPI3_HOST)** (the SDMMC controller never clocked commands out under nanoFramework — see `Research/sd-card-nanoframework-dead-clock-investigation.md`), clock later raised 400 kHz->4 MHz (2026-06-20). SD read/write is hardware-verified over WebRTC (`sys.files`, chunked), and SD-card-loadable apps ship (apps load from `D:\apps`). The `CLR_E_VOLUME_NOT_FOUND` table below is the historical pre-SDSPI failure record.
 
 The Waveshare 2.06 watch has a microSD slot (FAT32 1GB inserted, MOSI=GPIO1, SCK=GPIO2, MISO=GPIO3, SDCS=GPIO17 per the vendor wiki). The vendor's Arduino `07_LVGL_SD_Test.ino` reads it via `SD_MMC.setPins` + `SD_MMC.begin` — so the hardware is sound.
 
@@ -208,9 +212,11 @@ Build artifacts ready:
 
 Next: TJ does bootloader-mode dance, runs `tools/nf-flash-full.bat COM10`, PMIC power-cycles, then `dotnet run tools/nf-deploy.cs SpawnWear/bin/Debug COM9 25` surfaces the actual ESP-IDF error. Real fix follows from there.
 
-Until that lands, `I:\` remains the working storage path for keypair + small persistent state. SD-card-sized features (app loading >1MB, screenshot archives) are blocked on this fix.
+Until that lands, `I:\` remains the working storage path for keypair + small persistent state. SD-card-sized features (app loading >1MB, screenshot archives) are blocked on this fix. (HISTORICAL — SD is now working over SDSPI as of 2026-06-24; see the banner at the top of this section.)
 
 ## WebRTC peer integration (Stack B)
+
+> **SUPERSEDED 2026-06-24.** This section plans **libdatachannel** as the watch-side stack. The chosen + shipped stack is **`sepfy/libpeer`** — see `Plans/phase7b-libpeer-integration.md` and `Docs/transport.md`. Kept for the integration-research record.
 
 **Chosen path (TJ 2026-05-05):** [libdatachannel](https://github.com/paullouisageneau/libdatachannel) + ESP-IDF mbedtls, integrated into the LostBeard nf-interpreter fork as a native component, exposed to managed code through nanoCLR primitives.
 
@@ -240,7 +246,7 @@ Until that lands, `I:\` remains the working storage path for keypair + small per
 
 ### Build-side concerns
 
-- **Flash budget.** libdatachannel + mbedtls + usrsctp adds estimated ~400-700 KB of code + rodata. Fits the 32 MB flash but pushes us further toward the deploy ceiling for the managed app (the documented ~290 KB budget — see `Research/nf-interpreter-deploy-ceiling.md`). The deploy ceiling is per-managed-deploy, not total firmware, so this is OK.
+- **Flash budget.** libdatachannel + mbedtls + usrsctp adds estimated ~400-700 KB of code + rodata. Fits the 32 MB flash. ~~the documented ~290 KB managed-deploy budget~~ **— the deploy ceiling was RESOLVED 2026-06-25 (no ceiling; full 2.94 MB partition usable); see `Research/nf-interpreter-deploy-ceiling.md`.** Either way native firmware code is separate from the managed deploy, so this is OK.
 - **PSRAM usage.** WebRTC peer state + DTLS handshake buffers + per-channel SCTP state = ~50-100 KB per active connection. PSRAM (8 MB) handles this easily. Watch out for fragmentation if multiple peers connect simultaneously (rare but possible: laptop + phone Companions both online).
 - **CPU.** DTLS handshake is the spike — 100s of milliseconds on ESP32-S3 with mbedtls's ECDSA-P256. Once the channel is open, SRTP per-packet overhead is small (AES-GCM in hardware via `mbedtls_aes_setkey_enc` + ESP32-S3's hardware AES accelerator). Audio / video tracks would change this calculus; data-channel-only is comfortable.
 - **Power.** WebRTC peer connection idle is ~0 mA — DTLS keepalive is per-minute, SCTP HEARTBEAT is per-30s. Active throughput pushes the WiFi radio at full duty, similar power profile to a sustained HTTP fetch. The AXP2101 already handles WiFi-active power; no new rail issues expected.

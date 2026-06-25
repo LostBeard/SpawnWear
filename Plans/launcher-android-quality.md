@@ -27,14 +27,14 @@ Concrete checklist, drawn from the Pixel launcher reference TJ shared on 2026-05
 - **No 3rd-party graphics primitives.** We render via `nanoFramework.Graphics.Bitmap.FillRectangle` only. No font library, no curve primitive, no alpha compositing. Anti-aliasing has to come from font bitmaps with intermediate gray values, not from a runtime AA engine.
 - **AMOLED-friendly black background.** Solid black uses ~0 mA per off pixel; gradients and white text are fine but a fully-white screen at full brightness costs significant battery.
 - **Partial flush over full flush.** The CO5300 alignment quirks are baked into the firmware (every `Bitmap.Flush(x, y, w, h)` rounds for free), so partial flush is the default. Animations should target dirty rectangles, not full-screen redraws.
-- **Wire-protocol deploy budget.** Per `Research/nf-interpreter-deploy-ceiling.md`, total .pe is capped around 235 KB. Every visual feature has to fit in remaining headroom. Big bitmap fonts are expensive; procedural rendering via FillRectangle is the dominant pattern.
+- **Wire-protocol deploy budget.** ~~Per `Research/nf-interpreter-deploy-ceiling.md`, total .pe is capped around 235 KB.~~ **RESOLVED 2026-06-25 — there is NO deploy ceiling; the full 2.94 MB partition is usable (387 KB deployed clean). See `Research/nf-interpreter-deploy-ceiling.md`.** The historical advice still holds on its own merits: procedural rendering via FillRectangle stays cheaper than big bitmap fonts, but it's a quality/perf choice now, not a hard size cap.
 
 ## Iteration order (by visual impact + safety)
 
 1. **Anti-aliased font** - likely the single biggest perceptual jump. Two options: (a) a custom 8x10 bitmap font with 2-bit gray values stored as packed nibbles; (b) a simple grayscale lookup that draws each pixel of the existing 5x7 font as 2x2 with row/column anti-aliasing. (a) is bigger but cleaner. **Watch the .pe budget.**
 2. **Smooth screen transitions** - slide-left/slide-right when navigating between launcher screens. Implementable as N intermediate full-frame draws over ~150 ms. Does NOT need new graphics primitives. Costs CPU during the transition only.
 3. **Touch ripple** - a 200 ms expanding-circle animation centered on the tap point. One new primitive needed: filled circle approximation via FillRectangle scanlines, similar to the corner-mask staircase already in `LauncherScreen`.
-4. **Vertical scroll for >9 tiles** - blocked by needing more apps; keep designed but defer until SD-card apps land (Plans/sd-card-apps.md).
+4. **Vertical scroll for >9 tiles** - UNBLOCKED 2026-06-25: SD-card apps have landed (DiceApp / CounterApp / HelloWorldApp / PaintApp load from `D:\apps`), so the home screen can now push past 9 tiles. Build the scroll. (Plans/sd-card-apps.md.)
 5. **Per-tile accent color from icon** - blocked on having actual icons (not procedural rectangles). Real icons are PNG decoded onto the framebuffer; nanoFramework.Graphics has PNG decode but I haven't measured its memory cost yet.
 
 ## Anti-goals (things that look good but aren't worth it)

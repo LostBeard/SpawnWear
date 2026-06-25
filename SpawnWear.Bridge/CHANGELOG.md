@@ -4,6 +4,17 @@ All notable changes to `SpawnWear.Bridge` are recorded here. Format follows [Kee
 
 ## [Unreleased]
 
+### Transport — WebRTC bus is live (2026-06-23 → 2026-06-25 — Riker)
+
+`WebRtcTransport` is no longer a stub. The watch ↔ Companion link is a live, authenticated, multiplexed WebRTC data-channel bus over SpawnDev.RTC, proven end to end 2026-06-23 (Phase 7). Highlights:
+
+- Mutual Ed25519 challenge at channel open against the BLE-paired identities.
+- Multiplexed `TransportBus`: OS `sys.*` lanes (battery/imu compact binary) + scoped `app.<id>.*` lanes (MessagePack).
+- `sys.files` lane: chunked SD card read/write over the link (hardware-verified 2026-06-24).
+- Watch-as-answerer DTLS-role fix shipped 2026-06-24 in **SpawnDev.SIPSorcery 10.0.7** + **SpawnDev.RTC 1.1.11**.
+- `SpawnWear.Bridge.Desktop` ships a working two-peer WebRTC self-test (`Program.cs`) over the real hub.
+- HTTP-side `WatchHttp` (screenshot / `/loadapp`) retired - the firmware no longer runs an HTTP server. Architecture reference: [`Docs/transport.md`](../Docs/transport.md).
+
 ### Tests (2026-05-04 — Riker)
 
 Three new unit-test files in `SpawnWear.Bridge.Tests` driving real production code paths via real `TransportMessage` bytes through `FakeTransport` / `HookedFakeTransport`. No mocks beyond the wire-stub transports. Bridge.Tests grew 82 → 113 tests (31 new).

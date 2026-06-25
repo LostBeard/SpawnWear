@@ -22,7 +22,7 @@ Starter scaffold for writing a SpawnWear app. Apps are pure-managed C# assemblie
 
    `flags = 0x00000000  no flags set` means it's loadable. If you see `c_Flags_NeedReboot SET`, your app references native interop the running firmware doesn't have — strip the offending reference.
 
-7. Drop the `.pe` onto `http://<watch-ip>:8080/` in a browser. The watch picks it up, instantiates your class, and runs it.
+7. Install the `.pe` on the watch's SD card under `D:\apps\YourApp\` - either copy it from a desktop with the card out, or push it over the WebRTC `sys.files` lane (see [`Docs/transport.md`](../../Docs/transport.md)). On the next mount/reboot the launcher shows a tile for your app; tap it to run. (The old `http://<watch-ip>:8080/` drop-zone is retired - the firmware no longer runs an HTTP server.)
 
 ## What lives in `MyApp.cs`
 

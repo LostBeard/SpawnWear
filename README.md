@@ -35,12 +35,14 @@ Constrained by the silicon: ESP32-S3R8 with 8 MB PSRAM and 32 MB flash. Everythi
 - ✅ **Phase 1** Display + touch + input substrate. Complete 2026-05-03.
 - ✅ **Phase 2** UI Framework + Launcher. Largely complete 2026-05-04.
 - ✅ **Phase 3** System Services. AXP2101 + PCF85063 + WiFi + HTTP + service host + Storage (microSD SDSPI + exFAT) + QMI8658 IMU + Logger. Complete 2026-06-20.
-- 🚧 **Phase 4** Settings + apps. Settings screen live: brightness, **BLE + WiFi on/off toggles**, live IMU motion, sleep, build. Clock / Audio / AI Assistant apps ahead.
+- 🚧 **Phase 4** Settings + apps. Settings screen live: brightness, **BLE + WiFi on/off toggles**, live IMU motion, sleep, build. **Apps now load from the SD card** (`D:\apps`, dir-per-app) with a live launcher tile each - CounterApp / DiceApp / HelloWorldApp / PaintApp. Clock / Audio / AI Assistant apps ahead.
 - 🚧 **Phase 7** AI Assistant **transport** (the flagship's foundation). The watch ↔ Companion-PWA **WebRTC link is live**: authenticated (mutual Ed25519, BLE-paired identities), persistent + self-healing (autonomous reconnect, graceful + keepalive disconnect), and carrying a **multiplexed channel bus** - OS `sys` lanes (battery/imu, compact binary) and app `app.*` lanes (MessagePack) over one encrypted link, isolated. Lock-free native interop keeps the UI smooth under streaming. **App-channel + MessagePack proven end to end.** The assistant app (voice/text I/O) builds on this template. (2026-06-23)
-- ⏭ **Phases 5, 6, 8, 9** Clock, Audio, OTA + SD-card apps, Activity.
+- ⏭ **Phases 5, 6, 8, 9** Clock, Audio, OTA, Activity. (SD-card app **loading** already landed in Phase 4; Phase 8 is the remaining OTA + install/distribution story.)
 
 ## Recent highlights (full history in [`Docs/milestones.md`](Docs/milestones.md))
 
+- **2026-06-25** **The 26s UI freeze is closed - WebRTC + SD apps run together, smooth.** The recurring 26s-freeze/3s-run that had gated the WebRTC transport was root-caused to an unlocked shared I²C bus contended by three threads (main-loop StatusBar, the WebRTC telemetry thread's 5 Hz IMU/battery reads, and the touch interrupt); fixed by serializing every driver transaction behind `BoardSetup.I2cLock`. Verified on hardware over two single-variable rounds - the SD app-repo enabled (Dice + Counter tiles), then WebRTC enabled, clock ticking smooth for minutes with no stall. A scare where a managed deploy "failed" turned out to be a transient wire-protocol session, not a firmware bug - the full 387 KB image deploys clean. SpawnWear `7a8b191`, `4b044e7`.
+- **2026-06-24** **Apps load from the SD card, and the watch's SD is browsable over WebRTC.** Apps moved to a dir-per-app model on the card (`D:\apps`, loose files per app), enumerated at boot by `AppRepositoryService` so the launcher renders a live tile per installed app - the HTTP `/loadapp` upload path is retired. `sys.files` exposes the card for chunked read/write over the WebRTC link (verified on hardware, byte-identical round-trips). The WebRTC answerer DTLS-role fix shipped to nuget.org as **SpawnDev.SIPSorcery 10.0.7 + SpawnDev.RTC 1.1.11**.
 - **2026-06-23** **Phase 7 transport - the watch ↔ Companion WebRTC link is live, authenticated, and multiplexed.** A full day taking an ESP32-S3 somewhere few have: a real application transport over WebRTC. The watch (libpeer, nanoFramework) connects to the Blazor Companion PWA (SpawnDev.RTC, native browser WebRTC) through the public hub, and the two **mutually authenticate with their BLE-paired Ed25519 identities** before any app data flows. Hard-won pieces: the watch is the **DTLS client** (so it sends a small ClientHello that Chrome doesn't fragment past mbedTLS's server-side reassembly limit), ECDSA cert + mbedTLS 3.6 hostname opt-out, RFC 8832 SCTP stream parity, and a **lock-free native interop** (TX/RX rings, volatile-read state) so the cooperatively-scheduled CLR never stalls - the UI stays smooth while streaming. On top sits a **multiplexed channel bus**: the OS owns `sys` lanes (battery/imu in compact binary) and loadable apps get scoped, isolated `app.<id>.*` lanes (MessagePack via a hand-rolled nanoFramework encoder that round-trips to MessagePack-CSharp). Proven end to end - live telemetry **and** a MessagePack app message flowing simultaneously over one link, with a Companion-link status icon and graceful + keepalive disconnect detection. The connection is autonomous and self-healing (no HTTP scaffold). libpeer is now the open **[`LostBeard/libpeer`](https://github.com/LostBeard/libpeer)** fork (`spawnwear` branch) so this all builds from source. **The AI Assistant flagship now has its entire foundation.** SpawnWear `0b2948b..1af398b`; nf-interpreter `feature/qspi-display-driver`; SpawnDev.RTC `d34cca5`.
 - **2026-06-21** **Phase 4 Settings - functional BLE + WiFi toggles.** The Settings screen now drives real hardware: BLE advertising on/off (`GattServiceProvider` Start/StopAdvertising) and WiFi on/off. WiFi reconnect was a fight - nanoFramework's `WifiNetworkHelper` can't live-reconnect (ConnectDhcp is one-shot, the helper's `Reconnect()` returns false on ESP32, `ResetInstance` is not exposed), so the toggle drives the low-level `WifiAdapter` directly (`Connect(ssid, ...)` + a DHCP-IP poll), which reconnects cleanly. Both verified on hardware (off -> on cycles re-acquire the DHCP lease). SpawnWear `d19be57`.
 - **2026-06-20** **Phase 3 system services complete: IMU + Logger; SD at 4 MHz; live motion in Settings.** QMI8658 6-axis IMU driver (`Drivers/Imu`, register map + sensitivity scales taken from the vendor SensorLib source; verified on hardware - accel gravity magnitude ~1.02 g, gyro + die-temp read correctly). Logger system service (`Services/LoggerService`) - ring buffer for backfill + Debug.WriteLine mirror + BLE debug-log notify sink, replacing the throwaway DebugLogger shim. Raised the SDSPI clock 400 kHz -> **4 MHz** (10x throughput, headroom for the Media Player; the 128 GB card lists its full directory tree clean) with an internal warm-up retry in `Storage_MountSpi` so the flaky first-init no longer logs a scary "mount failed". The Settings screen gained a live **MOTION** row (dominant-axis orientation from the IMU). With Power / RTC / WiFi / HTTP / Storage already shipped, **Phase 3 (system services) is complete.** SpawnWear `0dbd260..c9f7022`; nf-interpreter `feature/qspi-display-driver` `cc4f5658..ce4a7fc1`.
@@ -87,6 +89,8 @@ Full layer diagram + boot sequence + BLE GATT layout + power model in **[`Docs/a
 | **Voice Recorder** | Capture mic to TF, listen back, share over WiFi |
 | **Activity** | IMU-driven step count, motion log |
 
+Beyond the built-ins, **loadable apps** live on the SD card under `D:\apps` (one directory per app) and the launcher renders a live tile for each. Shipped demo apps: **CounterApp, DiceApp, HelloWorldApp, PaintApp** (start from `Apps/AppTemplate/`). They implement the `ISpawnApp` lifecycle against `SpawnWear.AppContracts` - no HTTP upload, the firmware enumerates the card at boot.
+
 The PWA companion mirrors every one over Web Bluetooth + WiFi. See **[`Plans/companion-pwa.md`](Plans/companion-pwa.md)**.
 
 ## Repository Layout
@@ -97,22 +101,27 @@ SpawnWear/                              <- REPO ROOT (this folder)
 ├── CLAUDE.md                           <- agent instructions for this project
 ├── SpawnWear.slnx                      <- .NET nanoFramework solution
 ├── SpawnWear/                          <- firmware project (.nfproj)
+├── SpawnWear.AppContracts/             <- shared app contracts (ISpawnApp / IServiceHost / IDisplayBuffer)
+├── Apps/                               <- loadable apps (CounterApp, DiceApp, HelloWorldApp, PaintApp, AppTemplate)
+├── SpawnWear.Companion/                <- companion Blazor WASM PWA (+ SpawnWear.Companion.Tests)
+├── SpawnWear.Bridge/                   <- Razor Class Library: watch-talking guts (+ .Bridge.Tests)
+├── SpawnWear.Bridge.Desktop/           <- desktop WebRTC self-test / transport host
+├── SpawnWear.Console/                  <- desktop console bridge (sys.files over WebRTC, etc.)
+├── SpawnDev.Crypto/ + SpawnDev.WebRTC/ <- firmware-side crypto + WebRTC shims
 ├── packages/                           <- NuGet packages (committed for offline builds)
 ├── screenshots/                        <- live framebuffer captures (README hero shot lives here)
-├── tools/                              <- .NET 10 CLI scripts (deploy, attach, screenshot, size guard)
+├── tools/                              <- .NET 10 CLI scripts (deploy, attach, screenshot, serial-mon)
 ├── Docs/                               <- reference material
 ├── Plans/                              <- forward-looking design
 ├── Research/                           <- investigations + findings
-├── Notes/                              <- operational know-how
-├── BlazorWasmSpawnWear/                <- companion Blazor WASM PWA (TBD)
-└── SpawnWear.Tests/                    <- Playwright + smoke tests for the PWA (TBD)
+└── Notes/                              <- operational know-how
 ```
 
 Outside the repo, in the parent folder: vendor clones (`_vendor-waveshare-demo/`, `_vendor-rust-watch/`, `_vendor-nf-interpreter/`, `_vendor-nanoframework-iot/`, `_vendor-nanoframework-hardware-esp32/`) and the decoded Waveshare wiki dump (`_wiki-decoded.html` / `_wiki-decoded.txt`). These are read-only reference - everything we learn from them gets documented inside `Notes/` so the repo stays self-contained.
 
 ## Building
 
-Daily dev loop is **F5 in Visual Studio 2022** with the [.NET nanoFramework extension](https://marketplace.visualstudio.com/items?itemName=nanoframework.nanoFramework-VS2022-Extension) installed. Watch must be in runtime mode (COM9). Cycle time: ~10 seconds. NO bootloader-mode dance for routine code changes.
+Daily dev loop is **F5 in Visual Studio 2022** with the [.NET nanoFramework extension](https://marketplace.visualstudio.com/items?itemName=nanoframework.nanoFramework-VS2022-Extension) installed. Watch must be in runtime mode (the COM port varies by machine - `nanoff --listports`). Cycle time: ~10 seconds. NO bootloader-mode dance for routine code changes.
 
 CLI alternative for headless / agent work: `dotnet run tools/nf-deploy.cs`.
 
