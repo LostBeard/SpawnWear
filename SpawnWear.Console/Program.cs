@@ -55,18 +55,10 @@ var crypto = new DotNetCrypto();
 var opts = new BridgeWebRtcOptions();
 var factory = new WebRtcTransportFactory(opts, crypto, RandomPeerId());
 var record = WebRtcSelfTestPairing.CompanionRecord() with { RoomKey = Encoding.ASCII.GetBytes(room) };
-await using var peer = factory.CreateTransport(record);
-
 // Stop-and-wait reply plumbing: one outstanding request per channel at a time.
 var pending = new Dictionary<string, TaskCompletionSource<byte[]>>();
 var pendingLock = new object();
-peer.MessageReceived += m =>
-{
-    TaskCompletionSource<byte[]>? tcs = null;
-    lock (pendingLock) { if (pending.TryGetValue(m.ChannelId, out tcs)) pending.Remove(m.ChannelId); }
-    tcs?.TrySetResult(m.Payload);
-};
-peer.ConnectionChanged += c => Console.WriteLine($"[console] connection changed: connected={c}");
+WebRtcTransport peer = null;
 
 async Task<byte[]> SendRecv(string channel, byte[] payload, int timeoutMs = 15000)
 {
@@ -76,11 +68,40 @@ async Task<byte[]> SendRecv(string channel, byte[] payload, int timeoutMs = 1500
     return await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
 }
 
+// Connect with retry: the watch's constrained ICE is flaky (~50% per attempt); a fresh transport
+// usually connects within a couple of tries. A failed attempt is disposed and replaced - important
+// for multi-step ops (installpkg/getpkg) that do everything over one connection.
+bool connected = false;
+for (int attempt = 1; attempt <= 3 && !connected; attempt++)
+{
+    peer = factory.CreateTransport(record);
+    peer.MessageReceived += m =>
+    {
+        TaskCompletionSource<byte[]>? tcs = null;
+        lock (pendingLock) { if (pending.TryGetValue(m.ChannelId, out tcs)) pending.Remove(m.ChannelId); }
+        tcs?.TrySetResult(m.Payload);
+    };
+    peer.ConnectionChanged += c => Console.WriteLine($"[console] connection changed: connected={c}");
+    try
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        Console.WriteLine($"[console] connecting to watch (room='{room}', attempt {attempt}/3)...");
+        await peer.ConnectAsync(cts.Token);
+        connected = true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[console] connect attempt {attempt} failed: {ex.GetType().Name}");
+        try { await peer.DisposeAsync(); } catch { }
+        peer = null;
+        lock (pendingLock) { pending.Clear(); }
+        if (attempt < 3) await Task.Delay(2000);
+    }
+}
+if (!connected || peer == null) { Console.WriteLine("[console] FAIL - could not connect after retries"); return 1; }
+
 try
 {
-    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-    Console.WriteLine($"[console] connecting to watch (room='{room}')...");
-    await peer.ConnectAsync(cts.Token);
     Console.WriteLine($"[console] connected + verified; running '{cmd}'...");
 
     switch (cmd)
@@ -118,10 +139,18 @@ try
             if (pos.Count < 3) { Usage(); return 1; }
             if (!File.Exists(pos[1])) { Console.WriteLine($"[console] file not found: {pos[1]}"); return 1; }
             await PutFile(pos[1], pos[2]); break;
+        case "installpkg":
+            if (pos.Count < 2) { Usage(); return 1; }
+            if (!Directory.Exists(pos[1])) { Console.WriteLine($"[console] dir not found: {pos[1]}"); return 1; }
+            await InstallPkg(pos[1], pos.Count > 2 ? pos[2] : Path.GetFileName(pos[1].TrimEnd('\\', '/'))); break;
+        case "getpkg":
+            if (pos.Count < 3) { Usage(); return 1; }
+            await GetPkg(pos[1], pos[2]); break;
         default: Usage(); return 1;
     }
 
     await peer.DisconnectAsync();
+    await peer.DisposeAsync();
     return 0;
 }
 catch (Exception ex)
@@ -168,13 +197,15 @@ async Task PutFile(string local, string remote)
     Console.WriteLine($"[console] put {offset} bytes -> {remote}");
 }
 
-async Task ListDir(string path)
+// Page through a directory listing, returning every entry (name, isDir, size).
+async Task<List<(string name, bool isDir, uint size)>> ListDirEntries(string path)
 {
-    int startIdx = 0, total = 0;
+    var entries = new List<(string, bool, uint)>();
+    int startIdx = 0;
     while (true)
     {
         byte[] r = await SendRecv("sys.files", BuildListDir(path, startIdx));
-        if (r.Length < 5 || r[0] != 1 || r[1] != 1) { PrintText(r); return; }
+        if (r.Length < 5 || r[0] != 1 || r[1] != 1) break; // error / not a dir -> stop
         byte more = r[2];
         int count = r[3] | (r[4] << 8);
         int o = 5;
@@ -184,13 +215,60 @@ async Task ListDir(string path)
             string name = Encoding.UTF8.GetString(r, o, nl); o += nl;
             bool isDir = r[o++] != 0;
             uint sz = (uint)(r[o] | (r[o + 1] << 8) | (r[o + 2] << 16) | (r[o + 3] << 24)); o += 4;
-            Console.WriteLine(isDir ? $"  {name}/" : $"  {name}  ({sz} bytes)");
-            total++;
+            entries.Add((name, isDir, sz));
         }
         startIdx += count;
         if (more == 0 || count == 0) break;
     }
-    Console.WriteLine($"[console] {total} entr{(total == 1 ? "y" : "ies")} in {(path.Length == 0 ? "D:\\" : path)}");
+    return entries;
+}
+
+async Task ListDir(string path)
+{
+    var entries = await ListDirEntries(path);
+    foreach (var (name, isDir, size) in entries)
+        Console.WriteLine(isDir ? $"  {name}/" : $"  {name}  ({size} bytes)");
+    Console.WriteLine($"[console] {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")} in {(path.Length == 0 ? "D:\\" : path)}");
+}
+
+// Install a whole app PACKAGE: upload a local directory tree to D:\apps\<id>\ over sys.files
+// (mkdir + chunked put per file). The package is loose files (app.pe + manifest.json + icon +
+// assets), so the watch ends up with exactly the dir-per-app layout.
+async Task InstallPkg(string localDir, string id)
+{
+    string baseRemote = "apps/" + id;
+    await SendRecv("sys.files", BuildFileOp(6, baseRemote)); // mkdir the app dir
+    string[] files = Directory.GetFiles(localDir, "*", SearchOption.AllDirectories);
+    int n = 0; long bytes = 0;
+    foreach (string f in files)
+    {
+        string rel = Path.GetRelativePath(localDir, f).Replace('\\', '/');
+        string remote = baseRemote + "/" + rel;
+        int slash = remote.LastIndexOf('/');
+        string parent = remote.Substring(0, slash);
+        if (parent != baseRemote) await SendRecv("sys.files", BuildFileOp(6, parent)); // nested asset dir
+        bytes += new FileInfo(f).Length;
+        await PutFile(f, remote);
+        n++;
+    }
+    Console.WriteLine($"[console] installed package '{id}': {n} file(s), {bytes} bytes -> {baseRemote}");
+}
+
+// Download a whole app package: recursively pull D:\apps\<id>\ to a local directory.
+async Task GetPkg(string id, string localDir)
+{
+    await GetDirRecursive("apps/" + id, localDir);
+    Console.WriteLine($"[console] downloaded package '{id}' -> {localDir}");
+}
+
+async Task GetDirRecursive(string remoteDir, string localDir)
+{
+    Directory.CreateDirectory(localDir);
+    foreach (var (name, isDir, size) in await ListDirEntries(remoteDir))
+    {
+        if (isDir) await GetDirRecursive(remoteDir + "/" + name, Path.Combine(localDir, name));
+        else await GetFile(remoteDir + "/" + name, Path.Combine(localDir, name));
+    }
 }
 
 // ---- request builders ----
@@ -336,5 +414,8 @@ static void Usage()
     Console.WriteLine("  rm <path>                     delete a file or directory");
     Console.WriteLine("  mkdir <path>                  create a directory");
     Console.WriteLine("  mv <old> <new>                rename/move a file or directory");
+    Console.WriteLine("App packages (dir of loose files under D:\\apps\\<id>):");
+    Console.WriteLine("  installpkg <localDir> [id]    upload a local app folder as a package");
+    Console.WriteLine("  getpkg <id> <localDir>        download an installed app package");
     Console.WriteLine("  [--room <ascii>] [--verbose]");
 }
