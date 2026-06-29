@@ -1488,8 +1488,22 @@ namespace SpawnWear
                     tr.AnnounceOffer(room, pid, oid, offer);
                     ConnectStatus = "announcing (try " + attempt + ")";
                     LogSd("announce try " + attempt);
-                    string inOfferSdp, inPeerId, inOfferId;
-                    int kind = tr.WaitForAnswerOrOffer(oid, 5000, out answer, out inOfferSdp, out inPeerId, out inOfferId);
+                    string inOfferSdp = null, inPeerId = null, inOfferId = null;
+                    int kind;
+                    if (EnableAnswerMode)
+                    {
+                        kind = tr.WaitForAnswerOrOffer(oid, 5000, out answer, out inOfferSdp, out inPeerId, out inOfferId);
+                    }
+                    else
+                    {
+                        // Offer-only: use the proven answer-only reader, which IGNORES incoming offers
+                        // INTERNALLY and keeps reading for OUR answer up to the full timeout. Routing offers
+                        // up to a caller that discards them made the announce loop short-circuit on every
+                        // incoming offer (the peer announces several), burning all 12 attempts in a fraction
+                        // of a second and never waiting long enough to catch the answer to our own offer.
+                        answer = tr.WaitForAnswer(oid, 5000);
+                        kind = answer != null ? 1 : 0;
+                    }
                     if (EnableAnswerMode && kind == 2)
                     {
                         // A joining peer offered first -> ANSWER it. Our offerer PC (h) carries a local
