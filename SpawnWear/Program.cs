@@ -60,6 +60,12 @@ namespace SpawnWear
         // WebRTC is the remaining freeze suspect. If the 26s freeze stays gone with the I2cLock in place,
         // the freeze is closed and watch-answers-offers can resume.
         const bool EnableWebRtcTransport = true;
+        // watch-answers-offers ANSWERER branch (dual-mode kind==2 in WebRtcConnectRun). OFF by default:
+        // offer-only is the proven-stable path. The answerer path needs the native libpeer answerer-role
+        // (SERVER->CLIENT) AND its own isolated hardware verification before it can be enabled - the
+        // 2026-06-29 attempt to flash it (bundled with a SW_TX_MSG_MAX bump) FROZE WebRTC. See feedback
+        // memory feedback-no-nonessential-native-bumps-batched-with-feature-flash.
+        const bool EnableAnswerMode = false;
         // 2026-06-25: AppRepo RE-ENABLED as the first single-variable freeze test after the watch recovered.
         // The AppRepositoryService.Initialize CreateDirectory try/catch fix is in, and the SD now mounts
         // clean (D:\ with 13 dirs + 8 files incl D:\apps). If the 26s freeze does NOT return with AppRepo on
@@ -1484,7 +1490,7 @@ namespace SpawnWear
                     LogSd("announce try " + attempt);
                     string inOfferSdp, inPeerId, inOfferId;
                     int kind = tr.WaitForAnswerOrOffer(oid, 5000, out answer, out inOfferSdp, out inPeerId, out inOfferId);
-                    if (kind == 2)
+                    if (EnableAnswerMode && kind == 2)
                     {
                         // A joining peer offered first -> ANSWER it. Our offerer PC (h) carries a local
                         // offer already, so it can't answer; tear it down and build a fresh PC. libpeer
