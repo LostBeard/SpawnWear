@@ -1466,31 +1466,76 @@ namespace SpawnWear
                 LogSd("offer-ready len=" + len);
                 tr = new SwTrackerSignaling();
                 if (!tr.Connect()) { ConnectStatus = "ws-connect-failed"; return; }
-                // Phase 7d: ROBUST announce. A single announce-and-hope is brittle - it only works if
-                // the companion happens to be in the tracker pool at that exact instant. Instead,
-                // re-announce our offer every ~5s for up to ~60s. The companion re-announces on the
-                // hub's interval, so once it's in the pool our next re-announce reaches it and it
-                // answers. WaitForAnswer reads the live socket and discards non-answers, so looping it
-                // between re-announces just keeps reading.
+                // Phase 7d + watch-answers-offers: ROBUST DUAL-MODE announce. A single announce-and-hope
+                // is brittle - it only works if the companion happens to be in the tracker pool at that
+                // exact instant. Instead, re-announce our offer every ~5s for up to ~60s AND, on the same
+                // socket, watch for an INCOMING offer from a joining peer. Whichever lands first wins:
+                //   - an ANSWER to our offer  -> we stay the OFFERER (the original path, h unchanged)
+                //   - an incoming OFFER        -> we become the ANSWERER: tear down our offerer PC, build a
+                //     fresh one, SetRemoteDescription(offer) + CreateAnswer, relay the answer back.
+                // WaitForAnswerOrOffer is a single read pump (one socket can't be split across the two
+                // wait primitives - each would drain and discard the other's message).
                 string answer = null;
-                for (int attempt = 1; attempt <= 12 && answer == null; attempt++)
+                bool watchIsAnswerer = false;
+                for (int attempt = 1; attempt <= 12 && answer == null && !watchIsAnswerer; attempt++)
                 {
                     tr.AnnounceOffer(room, pid, oid, offer);
                     ConnectStatus = "announcing (try " + attempt + ")";
                     LogSd("announce try " + attempt);
-                    answer = tr.WaitForAnswer(oid, 5000);
+                    string inOfferSdp, inPeerId, inOfferId;
+                    int kind = tr.WaitForAnswerOrOffer(oid, 5000, out answer, out inOfferSdp, out inPeerId, out inOfferId);
+                    if (kind == 2)
+                    {
+                        // A joining peer offered first -> ANSWER it. Our offerer PC (h) carries a local
+                        // offer already, so it can't answer; tear it down and build a fresh PC. libpeer
+                        // generates the answer once we SetRemoteDescription(offer) + CreateAnswer, then
+                        // we read it back the same way the offerer reads its offer SDP.
+                        LogSd("incoming offer from peer (answerer path) pid-len=" + (inPeerId == null ? -1 : inPeerId.Length));
+                        ConnectStatus = "answering incoming offer";
+                        try { if (h >= 0) SpawnDev.WebRTC.PeerConnection.Close(h); } catch { }
+                        h = SpawnDev.WebRTC.PeerConnection.Create();
+                        if (h < 0) { ConnectStatus = "answerer create-failed"; return; }
+                        SpawnDev.WebRTC.PeerConnection.SetRemoteDescription(h, inOfferSdp, SpawnDev.WebRTC.PeerConnection.SdpTypeOffer);
+                        SpawnDev.WebRTC.PeerConnection.CreateAnswer(h);
+                        int alen = 0;
+                        for (int i = 0; i < 120 && alen == 0; i++)
+                        {
+                            System.Threading.Thread.Sleep(50);
+                            alen = SpawnDev.WebRTC.PeerConnection.GetLocalSdpLength(h);
+                        }
+                        if (alen == 0) { ConnectStatus = "no-answer-sdp"; return; }
+                        byte[] abuf = new byte[alen];
+                        SpawnDev.WebRTC.PeerConnection.GetLocalSdp(h, abuf);
+                        string ourAnswer = new string(System.Text.Encoding.UTF8.GetChars(abuf));
+                        tr.SendAnswer(room, pid, inPeerId, inOfferId, ourAnswer);
+                        LogSd("sent answer to peer (len=" + alen + ")");
+                        watchIsAnswerer = true;
+                    }
                 }
-                if (answer == null) { ConnectStatus = "no-answer (after re-announces)"; return; }
-                ConnectStatus = "answered len=" + answer.Length;
+                if (!watchIsAnswerer)
+                {
+                    if (answer == null) { ConnectStatus = "no-answer (after re-announces)"; return; }
+                    ConnectStatus = "answered len=" + answer.Length;
+                }
 
                 // Free the WebSocket + its TLS (mbedtls) BEFORE the DTLS handshake (also mbedtls)
-                // to cut peak memory - a likely cause of the reboot during DTLS. We already have
-                // the answer; the signaling socket isn't needed for this non-trickle connection.
+                // to cut peak memory - a likely cause of the reboot during DTLS. We already have what we
+                // need (the peer's answer as offerer, or the remote offer already applied as answerer).
                 try { tr.Dispose(); } catch { }
                 tr = null;
-                LogSd("answered, ws-freed, about to SetRemoteDescription");
 
-                SpawnDev.WebRTC.PeerConnection.SetRemoteDescription(h, answer, SpawnDev.WebRTC.PeerConnection.SdpTypeAnswer);
+                if (!watchIsAnswerer)
+                {
+                    LogSd("answered, ws-freed, about to SetRemoteDescription");
+                    SpawnDev.WebRTC.PeerConnection.SetRemoteDescription(h, answer, SpawnDev.WebRTC.PeerConnection.SdpTypeAnswer);
+                }
+                else
+                {
+                    // Answerer: the remote offer is already applied and our answer relayed; nothing more
+                    // to set. (DTLS completes only once the native libpeer answerer-role fix ships so the
+                    // watch acts as DTLS CLIENT - see the watch-answers-offers plan. HARDWARE-VERIFY then.)
+                    LogSd("answerer: remote offer already applied, ws-freed");
+                }
                 LogSd("remote-set ok, dtls handshake starting (poll)");
                 // Wait for StateCompleted (4 = DTLS + SCTP done, data channel OPEN). State 3
                 // (Connected) is only ICE - don't stop there or we'd Close before DTLS finishes.
@@ -1513,8 +1558,18 @@ namespace SpawnWear
                     // Phase 7b: SCTP is connected now - open the DCEP data channel. This sends a
                     // DATA_CHANNEL_OPEN on our DTLS-server odd stream; SipSorcery (DTLS client) then
                     // fires ondatachannel + ACKs, establishing the channel. Give it a moment to land.
-                    SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
-                    LogSd("opened DCEP data channel (post-SCTP)");
+                    // ANSWERER mode: the watch is the DTLS CLIENT, so the remote OFFERER opens the
+                    // channel and we just receive it - opening here would collide. (HARDWARE-VERIFY
+                    // once the native answerer-role fix ships; until then this branch can't run.)
+                    if (!watchIsAnswerer)
+                    {
+                        SpawnDev.WebRTC.PeerConnection.CreateDataChannel(h, "data");
+                        LogSd("opened DCEP data channel (post-SCTP)");
+                    }
+                    else
+                    {
+                        LogSd("answerer: awaiting remote-opened DCEP data channel");
+                    }
                     System.Threading.Thread.Sleep(500);
 
                     // Phase 7c: Ed25519 MUTUAL CHALLENGE over the data channel - mirrors

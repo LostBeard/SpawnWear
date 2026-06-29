@@ -64,6 +64,60 @@ namespace SpawnWear.Services
             return null;
         }
 
+        /// <summary>Dual-mode read for watch-answers-offers: ONE read pump on the shared socket
+        /// classifies each tracker message as EITHER an answer to our own offer (matching
+        /// <paramref name="ourOfferId"/>) OR an incoming offer from a joining peer that wants us to
+        /// answer. Returns 1 = answer (answerSdp set), 2 = incoming offer (offerSdp + offererPeerId +
+        /// incomingOfferId set, ready for <see cref="SendAnswer"/>), 0 = timeout. Whichever role lands
+        /// first wins - a single socket can't be split across <see cref="WaitForAnswer"/> +
+        /// <see cref="WaitForOffer"/> (each would drain and discard the other's message).</summary>
+        public int WaitForAnswerOrOffer(byte[] ourOfferId, int timeoutMs,
+            out string answerSdp,
+            out string offerSdp, out string offererPeerId, out string incomingOfferId)
+        {
+            answerSdp = null;
+            offerSdp = null;
+            offererPeerId = null;
+            incomingOfferId = null;
+            string ourOfferIdStr = BinaryToString(ourOfferId);
+            string ourOfferIdJson = JsonEscape(ourOfferIdStr);
+            long deadline = DateTime.UtcNow.Ticks + (long)timeoutMs * 10000;
+            while (DateTime.UtcNow.Ticks < deadline)
+            {
+                string msg = _ws.ReceiveText(timeoutMs);
+                if (msg == null)
+                    continue;
+                bool hasAnswer = msg.IndexOf("\"answer\"") >= 0;
+                bool hasOffer = msg.IndexOf("\"offer\"") >= 0;
+                // 1) An answer to OUR offer (carries our offer_id) -> we stay the offerer.
+                if (hasAnswer && (msg.IndexOf(ourOfferIdJson) >= 0 || msg.IndexOf(ourOfferIdStr) >= 0))
+                {
+                    string sdp = ExtractSdpAfter(msg, "\"answer\"");
+                    if (sdp != null)
+                    {
+                        answerSdp = sdp;
+                        return 1;
+                    }
+                    continue;
+                }
+                // 2) An incoming OFFER from a joining peer (and not an answer) -> we become the answerer.
+                if (hasOffer && !hasAnswer)
+                {
+                    string sdp = ExtractSdpAfter(msg, "\"offer\"");
+                    string pid = ExtractField(msg, "peer_id");
+                    string oid = ExtractField(msg, "offer_id");
+                    if (sdp != null && pid != null && oid != null)
+                    {
+                        offerSdp = sdp;
+                        offererPeerId = pid;
+                        incomingOfferId = oid;
+                        return 2;
+                    }
+                }
+            }
+            return 0;
+        }
+
         /// <summary>Read tracker messages until one carries an OFFER from a remote peer (a peer
         /// offering to connect to us), and return its SDP. Outs the offerer's peer_id and the
         /// offer_id (raw latin1 strings) so the caller can address an answer back. Null on timeout.</summary>
