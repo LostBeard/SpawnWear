@@ -76,14 +76,16 @@ namespace SpawnWear.UI
 
             const int TileH = 96;
 
-            _wifi = new UITile { Text = "WIFI", Toggled = setWifi };
-            _ble = new UITile { Text = "BLUETOOTH", Toggled = setBle };
+            _wifi = new UITile { Text = "WIFI", Icon = UiIcon.Wifi, Toggled = setWifi };
+            _ble = new UITile { Text = "BLUETOOTH", Icon = UiIcon.Bluetooth, Toggled = setBle };
             var row1 = new UIRow { Height = TileH, Spacing = t.Gap };
             row1.Add(_wifi);
             row1.Add(_ble);
 
-            _companion = new UITile { Text = "COMPANION", Toggled = setCompanion };
-            _http = new UITile { Text = "HTTP", Toggled = setHttp };
+            _companion = new UITile { Text = "COMPANION", Icon = UiIcon.Companion, Toggled = setCompanion };
+            _http = new UITile { Text = "HTTP", Icon = UiIcon.Http, Toggled = setHttp };
+            // TODO (TJ 2026-07-02): add a VOLUME control here once the audio service (ES8311) exists -
+            // most likely a second full-width UISlider beside BRIGHT, or a 5th tile.
             var row2 = new UIRow { Height = TileH, Spacing = t.Gap };
             row2.Add(_companion);
             row2.Add(_http);

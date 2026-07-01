@@ -326,6 +326,7 @@ namespace SpawnDev.UI
         public string Text = "";
         public int Scale = Theme.Current.BodyScale;
         public bool On;
+        public UiIcon Icon = UiIcon.None;
         public ToggleHandler Toggled;
 
         public UITile() { Height = 96; }
@@ -337,13 +338,22 @@ namespace SpawnDev.UI
             Color bg = On ? t.Accent : t.Surface;
             Color fg = On ? t.OnAccent : t.Muted;
             Shapes.RoundedRect(s, X, Y, Width, Height, t.Radius, bg);
-            // Small state pip top-right so on/off reads even at a glance (filled when on).
-            int pip = 16;
-            Shapes.RoundedRect(s, X + Width - pip - t.CornerInset - 8, Y + t.CornerInset + 8, pip, pip, pip / 2,
-                On ? t.OnAccent : t.Divider);
-            int tw = s.MeasureText(Text, Scale);
+
             int th = s.TextHeight(Scale);
-            s.DrawText(Text, X + (Width - tw) / 2, Y + (Height - th) / 2, Scale, fg);
+            if (Icon != UiIcon.None)
+            {
+                // Icon in the upper area, label in the lower - Android quick-tile layout. The accent fill
+                // already signals on/off, so no separate pip.
+                int iconSize = (Height * 44) / 100;
+                Icons.Draw(s, Icon, X + (Width - iconSize) / 2, Y + Height / 8, iconSize, fg, bg);
+                int tw = s.MeasureText(Text, Scale);
+                s.DrawText(Text, X + (Width - tw) / 2, Y + Height - th - Height / 10, Scale, fg);
+            }
+            else
+            {
+                int tw = s.MeasureText(Text, Scale);
+                s.DrawText(Text, X + (Width - tw) / 2, Y + (Height - th) / 2, Scale, fg);
+            }
         }
 
         public override bool OnTap(int px, int py)
