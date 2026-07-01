@@ -33,9 +33,9 @@ namespace SpawnDev.UI
         private bool _releaseRequested; // finger lifted; clear the press once it has been visible a bit
         private const int MinPressVisibleMs = 90;
 
-        /// <summary>True while a press release is pending - the event loop keeps ticking fast so the
-        /// pressed state stays visible briefly even on a very quick tap (otherwise the finger lifts
-        /// before the loop ever renders the pressed frame, and no animation is seen).</summary>
+        /// <summary>True while a press release is pending - the event loop keeps ticking fast (16ms) so the
+        /// pressed state stays visible briefly even on a very quick tap. (Screen-to-screen slide
+        /// transitions are owned by the navigator, not the screen.)</summary>
         public bool IsAnimating { get { return _pressShowing && _releaseRequested; } }
 
         /// <summary>Request a repaint on the next Tick. Rendering is DEFERRED to the event loop rather
@@ -51,6 +51,19 @@ namespace SpawnDev.UI
             Root.Layout();
             Root.Draw(Surface);
             Surface.FlushAll();                      // no-arg whole-bitmap flush
+        }
+
+        /// <summary>Draw the tree to the framebuffer WITHOUT flushing it to the display. The navigator
+        /// uses this to capture the screen into an off-display buffer for a slide transition, so the raw
+        /// screen never flashes on-screen before the animation. Clears the deferred-render flag since the
+        /// tree is now painted.</summary>
+        public void RenderNoFlush()
+        {
+            if (Root == null) return;
+            Surface.Clear(Theme.Current.Background);
+            Root.Layout();
+            Root.Draw(Surface);
+            _needsRender = false;
         }
 
         public virtual void OnResume() { _needsRender = true; }

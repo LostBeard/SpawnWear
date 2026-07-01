@@ -274,6 +274,7 @@ namespace SpawnWear
                     BuildLauncherTiles, ActivateLauncherTile);
 
                 _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
+                _nav.SetFramebuffer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight); // enable snapshot slide transitions
                 // Full app-manager wiring: loaded-app slot + navigator + slot index
                 // (so /apps/launch can switch to the app) + the SD app library.
                 // Also gives the navigator to /touch so the Mirror remote works.
@@ -367,7 +368,7 @@ namespace SpawnWear
                 {
                     if (kind == 1)
                     {
-                        if (_nav.StackDepth > 0) _nav.Pop();
+                        if (_nav.StackDepth > 0) _nav.RequestBack(); // animated back (slide-out if supported)
                         else if (_nav.CurrentIndex != 0) _nav.GoHome();
                     }
                     else
@@ -400,11 +401,18 @@ namespace SpawnWear
 
                 if (_screenState != ScreenState.Sleep)
                 {
-                    // Refresh the Companion-link icon from the live transport state. Cheap: the status
-                    // bar only repaints when the value actually changes (change-detection cache).
-                    if (_statusBar != null && _webrtc != null)
-                        _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
-                    _nav.Current.Tick();
+                    if (_nav.IsTransitioning)
+                    {
+                        _nav.TickTransition(); // animating a slide - composite frame, skip the screen tick
+                    }
+                    else
+                    {
+                        // Refresh the Companion-link icon from the live transport state. Cheap: the status
+                        // bar only repaints when the value actually changes (change-detection cache).
+                        if (_statusBar != null && _webrtc != null)
+                            _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
+                        _nav.Current.Tick();
+                    }
                 }
             }
             catch (Exception ex)
@@ -414,6 +422,7 @@ namespace SpawnWear
 
             // Keep ticking fast while a widget screen is mid press-release animation, so the pressed
             // state stays visible briefly even on a very quick tap (finger lifts before a slow tick).
+            if (_nav != null && _nav.IsTransitioning) return 16; // keep slide transitions smooth
             var animWs = _nav != null ? _nav.Current as SpawnDev.UI.WidgetScreen : null;
             if (animWs != null && animWs.IsAnimating) return 16;
             if (_fingerDown) return 16;
@@ -641,7 +650,7 @@ namespace SpawnWear
                     QsGetHttp, QsSetHttp,
                     QsGetBrightness, QsSetBrightness);
             }
-            _nav.Push(_quickSettings);
+            _nav.PushAnimated(_quickSettings); // slide down over the current screen
         }
 
         static bool QsGetWifi() { return _wifi != null && _wifi.IsConnected; }
@@ -870,9 +879,12 @@ namespace SpawnWear
                 // GraphicsDriver.GetSize returns GetWidthInWords(w) * h * 4 = 410*502*2 = 411,640
                 // bytes (16bpp PAL bitmap, row-aligned to 4-byte words). The DisplayControl
                 // IsFullScreenBufferAvailable check uses w*h*3/8 = 77KB which is bogus - the
-                // actual native Bitmap allocation needs ~412KB. Request 512KB so FullScreen
-                // can allocate with headroom for fonts/glyphs.
-                uint maxBuffer = DisplayControl.Initialize(spi, screen, 512 * 1024);
+                // actual native Bitmap allocation needs ~412KB. This graphics-memory region is
+                // PSRAM-backed (8MB available), so request 2MB: enough for FullScreen (~412KB) PLUS
+                // two full-screen compositing buffers (~412KB each) that the ScreenNavigator uses for
+                // slide transitions, with headroom for fonts/glyphs/icon bitmaps. (Was 512KB, which
+                // fit only FullScreen - a second Bitmap for a screen-to-screen transition then failed.)
+                uint maxBuffer = DisplayControl.Initialize(spi, screen, 2 * 1024 * 1024);
                 Debug.WriteLine("[Display] D4 - Initialize returned, maxBuffer=" + maxBuffer);
                 _displayStatus = "F";
 

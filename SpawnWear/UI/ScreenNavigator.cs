@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using nanoFramework.UI;
 
 namespace SpawnWear.UI
 {
@@ -28,6 +29,56 @@ namespace SpawnWear.UI
         private readonly IScreen[] _stack = new IScreen[8];
         private int _depth;
 
+        // ---- Slide transitions (snapshot-composited so BOTH the outgoing and incoming screens are
+        // visible at once). The navigator snapshots the framebuffer before/after a Push/Pop, then each
+        // frame blits the static screen as the base and the moving (overlay) screen at a rising/falling
+        // y offset. Falls back to an instant Push/Pop if the framebuffer isn't set or a snapshot fails.
+        private Bitmap _fb;
+        private int _w, _h;
+        // Two PERSISTENT full-screen buffers allocated once at boot (heap is clean/contiguous then) and
+        // reused for every transition - a per-transition `new Bitmap` fails once the heap is fragmented.
+        private Bitmap _snapUnder;     // the screen BENEATH the overlay (captured at open, reused at close)
+        private Bitmap _snapOver;      // the overlay screen
+        private bool _canTransition;   // false if the boot allocation failed -> instant Push/Pop
+        private bool _animOpen;        // current overlay was opened via PushAnimated -> _snapUnder is valid
+        private bool _popOnDone;       // pop the overlay when the current (close) transition finishes
+        private Bitmap _transStatic;   // the screen that stays put (drawn as the base each frame)
+        private Bitmap _transMoving;   // the overlay that slides
+        private int _transOffset;      // moving layer's current y offset
+        private int _transTarget;      // final offset (0 = fully covering, -_h = fully off the top)
+        private int _transStep;        // signed per-frame delta
+        private bool _transitioning;
+        private const int SlideStepPx = 90; // per-frame slide distance (30=slow .. 60=2x .. 90=3x .. 120=4x)
+
+        /// <summary>Give the navigator the shared framebuffer and pre-allocate the two transition buffers
+        /// while the heap is still clean. If the allocation fails, Push/Pop stay instant.</summary>
+        public void SetFramebuffer(Bitmap fb, int w, int h)
+        {
+            _fb = fb; _w = w; _h = h;
+            string diag;
+            try
+            {
+                _snapUnder = new Bitmap(w, h);
+                _snapOver = new Bitmap(w, h);
+                _canTransition = true;
+                diag = "canTransition=True (2 x " + (w * h * 2) + " bytes allocated)";
+            }
+            catch (System.Exception ex)
+            {
+                _snapUnder = null; _snapOver = null; _canTransition = false;
+                diag = "canTransition=False FAILED: " + ex.GetType().Name + " " + ex.Message;
+            }
+            Debug.WriteLine("[Nav] " + diag);
+            // Self-diagnostic readable without any user gesture: get transdiag.txt over the console.
+            try { System.IO.File.WriteAllText("D:\\transdiag.txt", diag); } catch { }
+        }
+
+        /// <summary>True while a slide transition is animating; the main loop calls
+        /// <see cref="TickTransition"/> each frame instead of the current screen's Tick.</summary>
+        public bool IsTransitioning => _transitioning;
+
+        private void CaptureInto(Bitmap dst) => dst.DrawImage(new System.Drawing.Point(0, 0), _fb);
+
         public ScreenNavigator(IScreen[] screens)
         {
             _screens = screens;
@@ -53,6 +104,7 @@ namespace SpawnWear.UI
         public void Push(IScreen screen)
         {
             if (screen == null || _depth >= _stack.Length) return;
+            _animOpen = false; // a plain (unanimated) push - no captured "beneath" to reuse on close
             SafePause(Current);
             _stack[_depth++] = screen;
             Debug.WriteLine("[Nav] Push -> depth " + _depth);
@@ -66,11 +118,90 @@ namespace SpawnWear.UI
         public bool Pop()
         {
             if (_depth == 0) return false;
+            _animOpen = false;
             SafePause(_stack[_depth - 1]);
             _stack[--_depth] = null;
             Debug.WriteLine("[Nav] Pop -> depth " + _depth);
             SafeResume(Current);
             return true;
+        }
+
+        /// <summary>Finalizes an animated close WITHOUT forcing the beneath screen's full repaint. The
+        /// slide already ended on a complete image of the beneath (the reused <c>_snapUnder</c> snapshot),
+        /// so a full OnResume/Invalidate would only re-clear-and-redraw it - flashing a black top strip
+        /// for one frame before the status bar redraws. Instead we pause the overlay and let the beneath's
+        /// normal Tick refresh live content (status bar clock etc.) via its change-detection partial
+        /// flushes. Safe because a quick-settings overlay is modal - the screen beneath doesn't change
+        /// while it's open.</summary>
+        private void SoftPop()
+        {
+            if (_depth == 0) return;
+            _animOpen = false;
+            SafePause(_stack[_depth - 1]);
+            _stack[--_depth] = null;
+            Debug.WriteLine("[Nav] SoftPop -> depth " + _depth);
+        }
+
+        /// <summary>Animated open of a sub-page overlay: the new screen slides DOWN from the top over the
+        /// screen beneath, which stays visible. The overlay is rendered into an OFF-DISPLAY buffer (no
+        /// flush) so its raw frame never flashes on-screen before the slide. Requires the pushed screen to
+        /// be a WidgetScreen (which can render without flushing); otherwise falls back to instant Push.</summary>
+        public void PushAnimated(IScreen screen)
+        {
+            if (screen == null || _depth >= _stack.Length) return;
+            var ws = screen as SpawnDev.UI.WidgetScreen;
+            if (!_canTransition || _transitioning || ws == null) { Push(screen); return; }
+            CaptureInto(_snapUnder);   // the screen beneath (currently displayed) - no flash
+            Push(screen);              // WidgetScreen OnResume only marks dirty - no draw/flush yet
+            ws.RenderNoFlush();        // draw the overlay into the framebuffer WITHOUT flushing to display
+            CaptureInto(_snapOver);    // capture the overlay; the display still shows "beneath"
+            _animOpen = true;          // keep _snapUnder for the eventual animated close
+            _popOnDone = false;
+            BeginTransition(_snapUnder, _snapOver, -_h, 0, SlideStepPx); // overlay slides down over beneath
+        }
+
+        /// <summary>Animated back: the overlay slides UP off the top, revealing the screen beneath. The
+        /// beneath image captured at open is reused as the static base (no re-render, so no flash), and
+        /// the real Pop is DEFERRED until the slide finishes. Only animates when the overlay was opened
+        /// via <see cref="PushAnimated"/>; otherwise instant <see cref="Pop"/>.</summary>
+        public void RequestBack()
+        {
+            if (_depth == 0) return;
+            if (!_canTransition || _transitioning || !_animOpen) { Pop(); return; }
+            CaptureInto(_snapOver);    // the overlay (currently displayed) - fresh, no flash
+            _popOnDone = true;         // pop (resume the beneath fresh) once the slide completes
+            BeginTransition(_snapUnder, _snapOver, 0, -_h, -SlideStepPx); // overlay slides up off the beneath
+        }
+
+        private void BeginTransition(Bitmap staticSnap, Bitmap movingSnap, int fromOffset, int toOffset, int step)
+        {
+            _transStatic = staticSnap;
+            _transMoving = movingSnap;
+            _transOffset = fromOffset;
+            _transTarget = toOffset;
+            _transStep = step;
+            _transitioning = true;
+        }
+
+        /// <summary>Advance the slide one frame: blit the static base then the moving overlay at the
+        /// current offset; free the snapshots when it reaches the target.</summary>
+        public void TickTransition()
+        {
+            if (!_transitioning) return;
+            _transOffset += _transStep;
+            bool done = _transStep > 0 ? _transOffset >= _transTarget : _transOffset <= _transTarget;
+            if (done) _transOffset = _transTarget;
+            _fb.DrawImage(new System.Drawing.Point(0, 0), _transStatic);
+            _fb.DrawImage(new System.Drawing.Point(0, _transOffset), _transMoving);
+            _fb.Flush();
+            if (done)
+            {
+                _transitioning = false;
+                // Animated CLOSE: the overlay is still on the stack; finalize the pop WITHOUT forcing the
+                // beneath to full-repaint (which flashes a black top strip for a frame). The slide already
+                // ended on a complete image of the beneath.
+                if (_popOnDone) { _popOnDone = false; SoftPop(); }
+            } // buffers are persistent - reused next transition, not freed
         }
 
         /// <summary>
@@ -142,7 +273,7 @@ namespace SpawnWear.UI
             catch (System.Exception ex) { Debug.WriteLine("[Nav] OnTap EX " + ex.Message); }
             Debug.WriteLine("[Nav] tap=(" + x + "," + y + ") consumed=" + consumed + " depth=" + _depth);
             if (consumed) return;
-            if (_depth > 0) Pop();
+            if (_depth > 0) RequestBack(); // animated back (slides out if the screen supports it)
             // Top-level paging is swipe-only now (removed: else Next()) - a stray tap no longer jumps
             // screens. Sub-pages still pop on an unconsumed tap; the BOOT button is the primary Back.
         }
