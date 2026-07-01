@@ -43,6 +43,9 @@ namespace SpawnWear.Services
         Socket _listener;
         Thread _thread;
         bool _running;
+        /// <summary>True while the accept loop is serving (between Start and Stop). Lets the quick-settings
+        /// panel show and toggle the server's live state.</summary>
+        public bool IsRunning => _running;
         LoadedAppScreen _appLoader;
         ScreenNavigator _navigator;
         int _appLoaderScreenIndex = -1;

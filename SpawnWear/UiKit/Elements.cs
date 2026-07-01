@@ -217,4 +217,141 @@ namespace SpawnDev.UI
             return true;
         }
     }
+
+    /// <summary>A labelled value slider (themed): a full-width rounded track that fills with the accent
+    /// color up to <see cref="Value"/> (percent of the [<see cref="Min"/>,<see cref="Max"/>] range), with
+    /// the label on the left and the value on the right, both drawn over the bar. Tapping (or, once the
+    /// gesture layer reports moves, dragging) anywhere on the track sets the value to that position and
+    /// fires <see cref="Changed"/>. Used for brightness in the quick-settings panel.</summary>
+    public class UISlider : UIElement
+    {
+        public delegate void ChangeHandler(int value);
+
+        public string Text = "";
+        public int Scale = 4;
+        public int Min = 0;
+        public int Max = 100;
+        public int Value = 50;
+        public ChangeHandler Changed;
+
+        public UISlider() { Height = Theme.Current.RowHeight; }
+
+        // Map an absolute x within the track to a clamped value in [Min,Max].
+        private int ValueForX(int px)
+        {
+            int rel = px - X;
+            if (rel < 0) rel = 0;
+            if (rel > Width) rel = Width;
+            if (Width <= 0) return Min;
+            return Min + (rel * (Max - Min)) / Width;
+        }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            var t = Theme.Current;
+            int range = Max - Min; if (range <= 0) range = 1;
+            int v = Value; if (v < Min) v = Min; if (v > Max) v = Max;
+
+            // Track then accent fill up to the value. The fill is at least a rounded-cap wide so its left
+            // end matches the track's rounded corner; a pill-shaped fill reads as the filled portion.
+            Shapes.RoundedRect(s, X, Y, Width, Height, t.Radius, t.Surface);
+            int fillW = ((v - Min) * Width) / range;
+            if (fillW < Height) fillW = fillW > 0 ? Height : 0; // avoid a sliver; 0 stays empty
+            if (fillW > 0) Shapes.RoundedRect(s, X, Y, fillW, Height, t.Radius, t.Accent);
+
+            int th = s.TextHeight(Scale);
+            int ty = Y + (Height - th) / 2;
+            s.DrawText(Text, X + t.CornerInset + 14, ty, Scale, t.OnSurface);
+            string val = v.ToString() + "%";
+            int vw = s.MeasureText(val, Scale);
+            s.DrawText(val, X + Width - vw - t.CornerInset - 14, ty, Scale, t.OnSurface);
+        }
+
+        public override bool OnTap(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            Value = ValueForX(px);
+            if (Changed != null) Changed(Value);
+            return true;
+        }
+
+        // Pressing on the track sets the value immediately (so a press-drag, once the gesture layer
+        // reports moves, reads naturally); returns true to claim the press.
+        public override bool OnPress(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            Value = ValueForX(px);
+            if (Changed != null) Changed(Value);
+            return true;
+        }
+    }
+
+    /// <summary>Horizontal stack layout: places its visible children left-to-right within its own bounds,
+    /// each stretched to an equal share of the width (minus <see cref="Spacing"/>) and to the row's Height.
+    /// Pair with <see cref="UIColumn"/> to build a grid (a column of rows).</summary>
+    public class UIRow : UIElement
+    {
+        public int Spacing = 10;
+
+        public override void Layout()
+        {
+            int n = 0;
+            for (int i = 0; i < Children.Count; i++) if (((UIElement)Children[i]).Visible) n++;
+            if (n == 0) return;
+            int cw = (Width - (n - 1) * Spacing) / n;
+            int x = X;
+            for (int i = 0; i < Children.Count; i++)
+            {
+                var c = (UIElement)Children[i];
+                if (!c.Visible) continue;
+                c.X = x;
+                c.Y = Y;
+                c.Width = cw;
+                c.Height = Height;
+                c.Layout();
+                x += cw + Spacing;
+            }
+        }
+    }
+
+    /// <summary>Android-quick-settings-style toggle tile: a rounded tile that lights up (accent fill) when
+    /// <see cref="On"/> and sits dark (surface fill) when off, with a centered label. Tapping flips
+    /// <see cref="On"/> and fires <see cref="Toggled"/>. Grid these with <see cref="UIRow"/> +
+    /// <see cref="UIColumn"/> for the drop-down panel.</summary>
+    public class UITile : UIElement
+    {
+        public delegate void ToggleHandler(bool on);
+
+        public string Text = "";
+        public int Scale = Theme.Current.BodyScale;
+        public bool On;
+        public ToggleHandler Toggled;
+
+        public UITile() { Height = 96; }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            var t = Theme.Current;
+            Color bg = On ? t.Accent : t.Surface;
+            Color fg = On ? t.OnAccent : t.Muted;
+            Shapes.RoundedRect(s, X, Y, Width, Height, t.Radius, bg);
+            // Small state pip top-right so on/off reads even at a glance (filled when on).
+            int pip = 16;
+            Shapes.RoundedRect(s, X + Width - pip - t.CornerInset - 8, Y + t.CornerInset + 8, pip, pip, pip / 2,
+                On ? t.OnAccent : t.Divider);
+            int tw = s.MeasureText(Text, Scale);
+            int th = s.TextHeight(Scale);
+            s.DrawText(Text, X + (Width - tw) / 2, Y + (Height - th) / 2, Scale, fg);
+        }
+
+        public override bool OnTap(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            On = !On;
+            if (Toggled != null) Toggled(On);
+            return true;
+        }
+    }
 }

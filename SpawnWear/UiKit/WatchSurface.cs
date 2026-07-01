@@ -25,6 +25,14 @@ namespace SpawnDev.UI
         public int Width => _w;
         public int Height => _h;
 
+        // The UI library speaks in SmallFont "scale" units (5x7 glyphs x N). Map that to the two shared
+        // proportional faces so widget screens match the rest of the UI: big face (~h36) for title-sized
+        // text (scale >= 5), small face (~h24) for body/rows. If the SD fonts didn't load, every call
+        // falls back to the 5x7 SmallFont at the requested scale - identical to the old behavior.
+        private const int TitleScaleThreshold = 5;
+        private static NativeFont PickFont(int scale) =>
+            scale >= TitleScaleThreshold ? NativeFont.Shared : NativeFont.SharedSmall;
+
         public void Clear(Color color)
         {
             _fb.Clear();
@@ -33,12 +41,24 @@ namespace SpawnDev.UI
 
         public void DrawRect(int x, int y, int w, int h, Color color) => _fb.FillRectangle(x, y, w, h, color);
 
-        public void DrawText(string text, int x, int y, int scale, Color color) =>
-            SmallFont.DrawString(_fb, text, x, y, scale, color);
+        public void DrawText(string text, int x, int y, int scale, Color color)
+        {
+            NativeFont f = PickFont(scale);
+            if (f != null && f.IsValid) f.Draw(_fb, text, x, y, color);
+            else SmallFont.DrawString(_fb, text, x, y, scale, color);
+        }
 
-        public int MeasureText(string text, int scale) => SmallFont.MeasureString(text, scale);
+        public int MeasureText(string text, int scale)
+        {
+            NativeFont f = PickFont(scale);
+            return (f != null && f.IsValid) ? f.Measure(text) : SmallFont.MeasureString(text, scale);
+        }
 
-        public int TextHeight(int scale) => SmallFont.GlyphHeight * scale;
+        public int TextHeight(int scale)
+        {
+            NativeFont f = PickFont(scale);
+            return (f != null && f.IsValid) ? f.Height : SmallFont.GlyphHeight * scale;
+        }
 
         public void Flush(int x, int y, int w, int h) => _fb.Flush(x, y, w, h);
 

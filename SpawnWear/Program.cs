@@ -53,6 +53,9 @@ namespace SpawnWear
         static WebRtcTransportService _webrtc;  // autonomous WebRTC transport (replaces the HTTP trigger)
         static StatusBar _statusBar;        // shared status bar; OnTick refreshes the Companion-link icon
         static Bitmap _fb; // shared framebuffer reference for screenshots
+        static QuickSettingsScreen _quickSettings; // lazy quick-settings drop-down overlay (swipe down from status bar)
+        static bool _companionEnabled = EnableWebRtcTransport; // quick-settings Companion toggle intent
+        static byte _activeBrightness = BrightnessActive;      // user-adjustable active brightness (quick settings slider)
         // FREEZE ROOT-CAUSED 2026-06-23: unlocked shared I2C bus across 3 threads (main loop StatusBar
         // AXP/RTC, WebRTC thread IMU+battery telemetry, touch interrupt). Concurrent transactions wedged
         // the bus -> a native read blocked -> cooperative CLR froze. Was masked until WebRTC's thread
@@ -620,6 +623,61 @@ namespace SpawnWear
             return _wifi != null && _wifi.IsConnected;
         }
 
+        // ---- Quick-settings drop-down (opened by a downward swipe from the status-bar band) ----
+        // Built lazily then pushed as an overlay (BOOT button / tap-out pops it). The panel is decoupled
+        // from the services: these Qs* getters read live state on open and the Qs* setters drive the real
+        // toggles (mirrors the SettingsScreen delegate-injection pattern).
+        static void OpenQuickSettings()
+        {
+            if (_nav == null || _fb == null) return;
+            if (_quickSettings != null && _nav.Current == _quickSettings) return; // already open - don't double-push
+            if (_quickSettings == null)
+            {
+                _quickSettings = new QuickSettingsScreen(
+                    _fb, BoardPins.LcdWidth, BoardPins.LcdHeight,
+                    QsGetWifi, QsSetWifi,
+                    QsGetBle, QsSetBle,
+                    QsGetCompanion, QsSetCompanion,
+                    QsGetHttp, QsSetHttp,
+                    QsGetBrightness, QsSetBrightness);
+            }
+            _nav.Push(_quickSettings);
+        }
+
+        static bool QsGetWifi() { return _wifi != null && _wifi.IsConnected; }
+        static void QsSetWifi(bool on) { ToggleWifiFromUi(on); }
+
+        static bool QsGetBle() { return _bleAdvertising; }
+        static void QsSetBle(bool on) { ToggleBleFromUi(on); }
+
+        static bool QsGetCompanion() { return _companionEnabled; }
+        static void QsSetCompanion(bool on)
+        {
+            _companionEnabled = on;
+            try { if (_webrtc != null) { if (on) _webrtc.Start(); else _webrtc.Stop(); } } catch { }
+            if (_logger != null) _logger.Info("[Quick] Companion " + (on ? "ON" : "OFF"));
+        }
+
+        static bool QsGetHttp() { return _http != null && _http.IsRunning; }
+        static void QsSetHttp(bool on)
+        {
+            try { if (_http != null) { if (on) _http.Start(); else _http.Stop(); } } catch { }
+            if (_logger != null) _logger.Info("[Quick] HTTP server " + (on ? "ON" : "OFF"));
+        }
+
+        // Brightness is a byte (0x00..0xFF) with no read-back; track it in _activeBrightness so the wake
+        // path and the slider agree. Map slider percent <-> byte, clamped so the slider never fully darkens.
+        static int QsGetBrightness() { return (_activeBrightness * 100) / 255; }
+        static void QsSetBrightness(int percent)
+        {
+            if (percent < 0) percent = 0;
+            if (percent > 100) percent = 100;
+            int b = (percent * 255) / 100;
+            if (b < 0x20) b = 0x20; // keep a floor so the screen stays visible
+            _activeBrightness = (byte)b;
+            try { if (_screenState == ScreenState.Active) DisplayControl.SetBrightness(_activeBrightness); } catch { }
+        }
+
         static void TransitionTo(ScreenState desired)
         {
             ScreenState prev = _screenState;
@@ -634,7 +692,7 @@ namespace SpawnWear
                         DisplayControl.Wake();
                         _nav.Current.Invalidate();
                     }
-                    DisplayControl.SetBrightness(BrightnessActive);
+                    DisplayControl.SetBrightness(_activeBrightness);
                     break;
                 case ScreenState.Dim:
                     DisplayControl.SetBrightness(BrightnessDim);
@@ -1919,7 +1977,11 @@ namespace SpawnWear
                         int adx = dx < 0 ? -dx : dx;
                         int ady = dy < 0 ? -dy : dy;
                         bool isSwipe = !stayedPut && elapsedMs < SwipeMaxMs && adx >= SwipeMinDist && adx > ady;
-                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress + " swipe=" + isSwipe);
+                        // Downward swipe that STARTED in the top status-bar band -> Android-style quick
+                        // settings drop-down. Dominant-vertical (ady > adx), downward (dy > 0), from the bar.
+                        bool isSwipeDown = !stayedPut && elapsedMs < SwipeMaxMs && dy > 0 && ady >= SwipeMinDist
+                                           && ady > adx && _fingerDownY < StatusBar.ReservedHeight;
+                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress + " swipe=" + isSwipe + " down=" + isSwipeDown);
                         // Wake-tap consumption: any gesture whose finger-DOWN happened while
                         // the screen was asleep is consumed by the wake itself, not dispatched
                         // to the UI.
@@ -1929,6 +1991,7 @@ namespace SpawnWear
                             var pressUp = _nav.Current as SpawnDev.UI.IPressable;
                             if (pressUp != null) pressUp.OnRelease();
                             if (isLongPress) _nav.GoHome();
+                            else if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
                             else if (isSwipe)
                             {
                                 if (dx < 0) _nav.Next();  // swipe left -> next screen
