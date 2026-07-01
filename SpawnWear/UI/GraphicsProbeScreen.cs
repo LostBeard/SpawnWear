@@ -62,8 +62,7 @@ namespace SpawnWear.UI
 
             int top = _statusBar != null ? StatusBar.ReservedHeight : 0;
             const string title = "GFX PROBE";
-            int titleW = SmallFont.MeasureString(title, 3);
-            SmallFont.DrawString(_fb, title, (_panelWidth - titleW) / 2, top + 8, 3, Color.White);
+            NativeFont.DrawCentered(NativeFont.Shared, _fb, title, _panelWidth, top + 8, Color.White, 3);
 
             // Vertical list of primitive tests. Box on the right, label on the left, status
             // pip far right. Rows sit inside the safe band (below title, above bottom corner).
@@ -80,6 +79,22 @@ namespace SpawnWear.UI
             RunCell(labelX, boxX, ref rowY, stride, boxW, boxH, "Gradient", DrawGradient);
             RunCell(labelX, boxX, ref rowY, stride, boxW, boxH, "DrawImage", DrawImageCell);
             RunCell(labelX, boxX, ref rowY, stride, boxW, boxH, "SetPixel", DrawSetPixel);
+
+            // Native-font sample loaded from SD (D:\spawnsans.tinyfnt): proves the whole
+            // .tinyfnt -> NativeText -> BMP -> DrawImage path. Compared against the 5x7 SmallFont.
+            int fy = rowY + 4;
+            NativeFont nativeFont = NativeFont.Shared;
+            if (nativeFont != null && nativeFont.IsValid)
+            {
+                SmallFont.DrawString(_fb, "5x7", 30, fy + 4, 2, LabelC);
+                SmallFont.DrawString(_fb, "SpawnWear 0123", 88, fy + 4, 2, Color.White);
+                SmallFont.DrawString(_fb, "TTF", 30, fy + 30, 2, LabelC);
+                nativeFont.Draw(_fb, "SpawnWear 0123", 88, fy + 26, Accent);
+            }
+            else
+            {
+                SmallFont.DrawString(_fb, "native font: no SD file / load failed", 30, fy + 4, 2, ErrC);
+            }
 
             if (_pageDotCount > 1)
                 PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);

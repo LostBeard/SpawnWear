@@ -74,17 +74,17 @@ namespace SpawnWear.UI
             int iconX = (_panelWidth - iconBoxSize) / 2;
             DrawBigSignalBars(iconX, iconY, iconBoxSize, connected ? 4 : 0);
 
-            // Status string under the icon.
+            // Status string under the icon. Proportional font when available, else 5x7.
+            NativeFont uiFont = NativeFont.SharedSmall;
+            int lineH = (uiFont != null && uiFont.IsValid) ? uiFont.Height : SmallFont.GlyphHeight * LabelScale;
             string status = connected ? "CONNECTED" : "DISCONNECTED";
             Color statusColor = connected ? Color.LimeGreen : Color.FromArgb(180, 70, 70);
-            int statusW = SmallFont.MeasureString(status, LabelScale);
             int statusY = iconY + iconBoxSize + 12;
-            SmallFont.DrawString(_fb, status, (_panelWidth - statusW) / 2, statusY, LabelScale, statusColor);
+            NativeFont.DrawCentered(uiFont, _fb, status, _panelWidth, statusY, statusColor, LabelScale);
 
             // Detail rows below.
-            int rowsTop = statusY + SmallFont.GlyphHeight * LabelScale + 32;
-            int rowH = SmallFont.GlyphHeight * LabelScale;
-            int rowStride = rowH + RowGap;
+            int rowsTop = statusY + lineH + 32;
+            int rowStride = lineH + RowGap;
 
             DrawRow(MarginX, rowsTop, "SSID", ssid);
             DrawRow(MarginX, rowsTop + rowStride, "IP", ip);
@@ -101,8 +101,18 @@ namespace SpawnWear.UI
 
         void DrawRow(int x, int y, string label, string value)
         {
-            SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
-            SmallFont.DrawString(_fb, value == null ? "" : value, x + LabelColW, y, LabelScale, Color.White);
+            string val = value == null ? "" : value;
+            NativeFont f = NativeFont.SharedSmall;
+            if (f != null && f.IsValid)
+            {
+                f.Draw(_fb, label, x, y, Color.FromArgb(170, 170, 170));
+                f.Draw(_fb, val, x + LabelColW, y, Color.White);
+            }
+            else
+            {
+                SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
+                SmallFont.DrawString(_fb, val, x + LabelColW, y, LabelScale, Color.White);
+            }
         }
 
         void DrawBigSignalBars(int x, int y, int size, int bars)

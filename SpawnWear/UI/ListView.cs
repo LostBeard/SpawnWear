@@ -126,17 +126,29 @@ namespace SpawnWear.UI
                 _fb.FillRectangle(alignedX, alignedY, 4, alignedH, Color.White);
             }
 
-            // Label - left-aligned, 8px from the start (after the selection bar).
-            int textY = rowY + (_rowHeight - SmallFont.GlyphHeight * _scale) / 2;
+            // Rows draw in the large proportional font when the SD .tinyfnt loaded, else the 5x7
+            // SmallFont at the configured scale. NativeFont.Draw keys out the black glyph background,
+            // so text composites cleanly over the black row the FillRectangle above just cleared.
+            // ListView is used by short-value screens (Settings/Companion) whose rows are tall
+            // enough (39/54px) for the big face; long-value info screens (About/WiFi) keep their
+            // own small-font rows so wide values don't overflow.
+            NativeFont rowFont = NativeFont.Shared;
+            bool useNative = rowFont != null && rowFont.IsValid;
+            int fontH = useNative ? rowFont.Height : SmallFont.GlyphHeight * _scale;
+
+            // Label - left-aligned, 12px from the start (after the selection bar).
+            int textY = rowY + (_rowHeight - fontH) / 2;
             int labelX = _x + 12;
-            SmallFont.DrawString(_fb, _rows[idx].Label, labelX, textY, _scale, Color.White);
+            if (useNative) rowFont.Draw(_fb, _rows[idx].Label, labelX, textY, Color.White);
+            else SmallFont.DrawString(_fb, _rows[idx].Label, labelX, textY, _scale, Color.White);
 
             // Value - right-aligned with 8px right padding.
             if (!string.IsNullOrEmpty(value))
             {
-                int valueWidth = SmallFont.MeasureString(value, _scale);
+                int valueWidth = useNative ? rowFont.Measure(value) : SmallFont.MeasureString(value, _scale);
                 int valueX = _x + _width - valueWidth - 8;
-                SmallFont.DrawString(_fb, value, valueX, textY, _scale, Color.White);
+                if (useNative) rowFont.Draw(_fb, value, valueX, textY, Color.White);
+                else SmallFont.DrawString(_fb, value, valueX, textY, _scale, Color.White);
             }
         }
 

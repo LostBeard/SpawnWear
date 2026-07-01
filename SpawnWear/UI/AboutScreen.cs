@@ -69,7 +69,10 @@ namespace SpawnWear.UI
             var wifi = _services != null ? _services.GetWifi() : null;
             var power = _services != null ? _services.GetPower() : null;
             int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
-            int rowH = SmallFont.GlyphHeight * LabelScale;
+            // Row stride tracks whichever font actually draws the rows so the packed info list
+            // never overlaps when the taller proportional font is in use.
+            NativeFont rowFont = NativeFont.SharedSmall;
+            int rowH = (rowFont != null && rowFont.IsValid) ? rowFont.Height : SmallFont.GlyphHeight * LabelScale;
             int rowStride = rowH + RowGap;
 
             _fb.Clear();
@@ -97,8 +100,18 @@ namespace SpawnWear.UI
         void DrawRow(int x, int y, string label, string value)
         {
             const int LabelColW = 110;
-            SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
-            SmallFont.DrawString(_fb, value == null ? "" : value, x + LabelColW, y, LabelScale, Color.White);
+            string val = value == null ? "" : value;
+            NativeFont f = NativeFont.SharedSmall;
+            if (f != null && f.IsValid)
+            {
+                f.Draw(_fb, label, x, y, Color.FromArgb(170, 170, 170));
+                f.Draw(_fb, val, x + LabelColW, y, Color.White);
+            }
+            else
+            {
+                SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
+                SmallFont.DrawString(_fb, val, x + LabelColW, y, LabelScale, Color.White);
+            }
         }
 
         string FormatBattery()

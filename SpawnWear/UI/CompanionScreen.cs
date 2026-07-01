@@ -62,9 +62,7 @@ namespace SpawnWear.UI
 
             int statusBarHeight = _statusBar != null ? StatusBar.ReservedHeight : 0;
             const string title = "COMPANION";
-            int titleScale = 4;
-            int titleWidth = SmallFont.MeasureString(title, titleScale);
-            SmallFont.DrawString(_fb, title, (_panelWidth - titleWidth) / 2, statusBarHeight + 16, titleScale, Color.White);
+            NativeFont.DrawCentered(NativeFont.Shared, _fb, title, _panelWidth, statusBarHeight + 16, Color.White, 4);
 
             // Instruction line (centered -> always inside the round screen).
             const string hint = "ENTER CODE IN COMPANION";

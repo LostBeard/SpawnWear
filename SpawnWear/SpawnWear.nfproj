@@ -49,6 +49,7 @@
     <Compile Include="UI\CompanionScreen.cs" />
     <Compile Include="UI\UiKitDemoScreen.cs" />
     <Compile Include="UI\GraphicsProbeScreen.cs" />
+    <Compile Include="UI\NativeFont.cs" />
     <Compile Include="UiKit\IUiSurface.cs" />
     <Compile Include="UiKit\WatchSurface.cs" />
     <Compile Include="UiKit\Elements.cs" />

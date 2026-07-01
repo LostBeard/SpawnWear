@@ -165,11 +165,8 @@ namespace SpawnWear.UI
             // Header. Sits below the status bar.
             int statusBarHeight = _statusBar != null ? StatusBar.ReservedHeight : 0;
             const string title = "SETTINGS";
-            int scale = 5;
-            int titleWidth = SmallFont.MeasureString(title, scale);
-            int titleX = (_panelWidth - titleWidth) / 2;
             int titleY = statusBarHeight + 16;
-            SmallFont.DrawString(_fb, title, titleX, titleY, scale, Color.White);
+            NativeFont.DrawCentered(NativeFont.Shared, _fb, title, _panelWidth, titleY, Color.White, 5);
 
             // Footer hint - drawn ABOVE the page-dots row.
             const string footer = "TAP OUTSIDE TO BACK";

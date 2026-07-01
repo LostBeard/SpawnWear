@@ -216,9 +216,12 @@ namespace SpawnWear.UI
 
             // Layout INSIDE the tile: icon in the top ~65%, label in the bottom ~25%
             // with a small gap between them. This matches the Android launcher
-            // shape and prevents labels from overflowing into the next row.
+            // shape and prevents labels from overflowing into the next row. The strip
+            // height tracks whichever font actually draws the label (small proportional
+            // font when the SD .tinyfnt loaded, else the 5x7 SmallFont).
+            NativeFont labelFont = NativeFont.SharedSmall;
             int labelScale = 2;
-            int labelH = SmallFont.GlyphHeight * labelScale;
+            int labelH = (labelFont != null && labelFont.IsValid) ? labelFont.Height : SmallFont.GlyphHeight * labelScale;
             int labelStripH = labelH + 6; // 3 px padding above + below
             int iconAreaH = _tileSize - labelStripH - 6; // 6 px top padding
             int iconBoxSize = iconAreaH < (_tileSize * 6) / 10 ? iconAreaH : (_tileSize * 6) / 10;
@@ -244,12 +247,20 @@ namespace SpawnWear.UI
                 DrawBadge(x + _tileSize - 22, y - 4, tile.BadgeCount);
             }
 
-            // Label inside the bottom strip of the tile.
-            int labelW = SmallFont.MeasureString(tile.Label, labelScale);
-            int labelX = x + (_tileSize - labelW) / 2;
+            // Label inside the bottom strip of the tile. Black glyph background is keyed out by
+            // NativeFont.Draw, so the colored text composites cleanly over the tile face.
             int labelY = y + _tileSize - labelStripH + 3;
             Color labelColor = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
-            SmallFont.DrawString(_fb, tile.Label, labelX, labelY, labelScale, labelColor);
+            if (labelFont != null && labelFont.IsValid)
+            {
+                int lw = labelFont.Measure(tile.Label);
+                labelFont.Draw(_fb, tile.Label, x + (_tileSize - lw) / 2, labelY, labelColor);
+            }
+            else
+            {
+                int labelW = SmallFont.MeasureString(tile.Label, labelScale);
+                SmallFont.DrawString(_fb, tile.Label, x + (_tileSize - labelW) / 2, labelY, labelScale, labelColor);
+            }
         }
 
         // Rounded red badge (pill/circle) with a small white digit; "9+" if count > 9.

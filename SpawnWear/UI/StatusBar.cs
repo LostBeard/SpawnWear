@@ -138,11 +138,23 @@ namespace SpawnWear.UI
             // Clear the bar region.
             _fb.FillRectangle(0, 0, _panelWidth, ReservedHeight, Color.Black);
 
-            // Time on the left, kept inside the corner-rounding safe area.
+            // Time on the left, kept inside the corner-rounding safe area. Rendered with the shared
+            // proportional font when the SD .tinyfnt loaded; otherwise the 5x7 SmallFont. The bar's
+            // region is flushed below, and the firmware Flush handler applies the CO5300 even/odd
+            // alignment automatically, so the DrawImage-based native glyphs need no special handling.
             string timeStr = TwoDigit(hour) + ":" + TwoDigit(minute);
             int timeX = CornerSafeInset;
-            int timeY = (ReservedHeight - SmallFont.GlyphHeight * TimeScale) / 2;
-            SmallFont.DrawString(_fb, timeStr, timeX, timeY, TimeScale, Color.White);
+            NativeFont clockFont = NativeFont.Shared;
+            if (clockFont != null && clockFont.IsValid)
+            {
+                int ty = (ReservedHeight - clockFont.Height) / 2;
+                clockFont.Draw(_fb, timeStr, timeX, ty, Color.White);
+            }
+            else
+            {
+                int timeY = (ReservedHeight - SmallFont.GlyphHeight * TimeScale) / 2;
+                SmallFont.DrawString(_fb, timeStr, timeX, timeY, TimeScale, Color.White);
+            }
 
             // Icons on the right, drawn right-to-left so we don't have to
             // measure their composite width up front. Right edge also
