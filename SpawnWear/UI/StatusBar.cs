@@ -3,9 +3,28 @@ using SpawnWear.Drivers.Power;
 using SpawnWear.Drivers.Rtc;
 using System;
 using System.Drawing;
+using SpawnDev.UI;
 
 namespace SpawnWear.UI
 {
+    /// <summary>Widget wrapper around the shared <see cref="StatusBar"/> so a WidgetScreen can include the
+    /// system status bar in its tree (and therefore in the navigator's off-display capture / slide). Draws
+    /// the bar into the framebuffer WITHOUT flushing - the screen's own tree flush pushes it. Screens still
+    /// call <c>StatusBar.Render(false)</c> each Tick for the cheap live-clock partial update.</summary>
+    public class UIStatusBar : UIElement
+    {
+        private readonly StatusBar _bar;
+        public UIStatusBar(StatusBar bar)
+        {
+            _bar = bar;
+            X = 0; Y = 0; Height = StatusBar.ReservedHeight;
+        }
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible || _bar == null) return;
+            _bar.Render(force: true, flush: false); // draws into the same framebuffer the surface wraps
+        }
+    }
     /// <summary>
     /// Android-style title bar that lives in the top 32 px of every screen.
     /// Shows HH:MM on the left, a row of small status icons on the right
@@ -95,7 +114,7 @@ namespace SpawnWear.UI
         /// need to be redrawn from scratch (the screen's <c>fb.Clear()</c> wiped
         /// them first).
         /// </summary>
-        public void Render(bool force = false)
+        public void Render(bool force = false, bool flush = true)
         {
             int hour = _lastHour;
             int minute = _lastMinute;
@@ -200,8 +219,9 @@ namespace SpawnWear.UI
             _fb.FillRectangle(0, ReservedHeight - 2, _panelWidth, 2, Color.White);
 
             // Partial flush of the bar region only - even/odd alignment is
-            // applied automatically by the firmware Bitmap.Flush handler.
-            _fb.Flush(0, 0, _panelWidth, ReservedHeight);
+            // applied automatically by the firmware Bitmap.Flush handler. Skipped when the bar is drawn
+            // as a UIStatusBar widget inside a WidgetScreen tree (the screen's own flush pushes it).
+            if (flush) _fb.Flush(0, 0, _panelWidth, ReservedHeight);
 
             _lastHour = hour;
             _lastMinute = minute;

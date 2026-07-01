@@ -2,117 +2,87 @@ using nanoFramework.UI;
 using SpawnWear.AppContracts;
 using System;
 using System.Drawing;
+using SpawnDev.UI;
 
 namespace SpawnWear.UI
 {
     /// <summary>
-    /// "About" screen - read-only system info page. Designed as the canonical
-    /// recovery surface that lives in the core firmware so the user always
-    /// has visibility into watch state even if the SD card is removed,
-    /// corrupted, or unmounted.
-    ///
-    /// Power model: full repaint only on Invalidate / OnResume. Per-tick
-    /// just refreshes the status bar (which itself only flushes when its
-    /// content changes). This avoids the visible status-bar flash the
-    /// earlier full-repaint-every-tick implementation produced.
+    /// "About" screen - read-only system info page, rebuilt on the SpawnDev.UI widget library
+    /// (WidgetScreen): a UIStatusBar + UIPageDots as chrome, a column of UIKeyValue info rows for the
+    /// live readouts. Being a WidgetScreen it renders in the proportional font and participates in the
+    /// navigator's horizontal slide when swiping between rotation screens.
     /// </summary>
-    public class AboutScreen : IScreen
+    public class AboutScreen : WidgetScreen
     {
-        readonly Bitmap _fb;
-        readonly int _panelWidth;
-        readonly int _panelHeight;
-        readonly IServiceHost _services;
-        readonly DateTime _bootTime;
-
+        private readonly IServiceHost _services;
+        private readonly DateTime _bootTime;
         const string BuildDate = "2026-05-05";
-        const int LabelScale = 2;
-        const int RowGap = 6;
-        const int MarginX = 28;
 
-        int _pageDotIndex = -1;
-        int _pageDotCount = 0;
-        public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
-        StatusBar _statusBar;
-        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
+        private readonly UIPanel _root;
+        private readonly UIKeyValue _build, _wifi, _ssid, _bat, _usb, _rtc, _heap, _uptime;
 
-        bool _needsRepaint = true;
-
-        public AboutScreen(Bitmap framebuffer, int panelWidth, int panelHeight, IServiceHost services)
+        public AboutScreen(Bitmap fb, int panelWidth, int panelHeight, IServiceHost services)
+            : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
-            _fb = framebuffer;
-            _panelWidth = panelWidth;
-            _panelHeight = panelHeight;
             _services = services;
             _bootTime = DateTime.UtcNow;
-        }
+            var t = Theme.Current;
 
-        public void Invalidate() { _needsRepaint = true; }
-        public void OnResume() => Invalidate();
-        public void OnPause() { }
-        public bool OnTap(int x, int y) => false;
+            _root = new UIPanel { X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background };
 
-        public void Tick()
-        {
-            if (_needsRepaint)
+            _root.Add(new UILabel
             {
-                FullRepaint();
-                _needsRepaint = false;
-                return;
-            }
-            // Per-tick just refreshes the status bar (which only flushes when
-            // its own content changes). The body of the screen stays put.
-            _statusBar?.Render(force: false);
+                X = 0, Y = StatusBar.ReservedHeight + 6, Width = panelWidth, Height = 40,
+                Text = "ABOUT", Scale = t.TitleScale, Center = true, Color = t.OnSurface,
+            });
+
+            var col = new UIColumn
+            {
+                X = SafeArea.EdgeInset + 10, Y = StatusBar.ReservedHeight + 56,
+                Width = panelWidth - 2 * (SafeArea.EdgeInset + 10), Height = 320, Spacing = 3,
+            };
+            _build = MakeRow("BUILD"); _wifi = MakeRow("WIFI"); _ssid = MakeRow("SSID"); _bat = MakeRow("BAT");
+            _usb = MakeRow("USB"); _rtc = MakeRow("RTC"); _heap = MakeRow("HEAP"); _uptime = MakeRow("UPTIME");
+            col.Add(_build); col.Add(_wifi); col.Add(_ssid); col.Add(_bat);
+            col.Add(_usb); col.Add(_rtc); col.Add(_heap); col.Add(_uptime);
+            _root.Add(col);
+
+            Root = _root;
         }
 
-        void FullRepaint()
+        private static UIKeyValue MakeRow(string label) => new UIKeyValue { Label = label, Value = "" };
+
+        // Chrome (status bar + page dots) is now the navigator's fixed overlay, not part of the page tree,
+        // so these uniform-wiring hooks are no-ops here (the navigator owns SetChrome + the rotation index).
+        public void SetPageDots(int index, int total) { }
+        public void SetStatusBar(StatusBar bar) { }
+
+        public override void OnResume() { RefreshValues(); base.OnResume(); }
+
+        public override void Tick()
+        {
+            if (RefreshValues()) Invalidate(); // a readout changed -> repaint the tree (chrome redrawn on top)
+            base.Tick();
+        }
+
+        // Returns true if any value string changed since the last refresh.
+        private bool RefreshValues()
         {
             var wifi = _services != null ? _services.GetWifi() : null;
             var power = _services != null ? _services.GetPower() : null;
-            int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
-            // Row stride tracks whichever font actually draws the rows so the packed info list
-            // never overlaps when the taller proportional font is in use.
-            NativeFont rowFont = NativeFont.SharedSmall;
-            int rowH = (rowFont != null && rowFont.IsValid) ? rowFont.Height : SmallFont.GlyphHeight * LabelScale;
-            int rowStride = rowH + RowGap;
-
-            _fb.Clear();
-            _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
-
-            int y = contentTop + 16;
-            DrawRow(MarginX, y, "BUILD",  BuildDate); y += rowStride;
-            DrawRow(MarginX, y, "WIFI",   wifi != null ? wifi.IpAddress : ""); y += rowStride;
-            DrawRow(MarginX, y, "SSID",   wifi != null ? wifi.ConnectedSsid : ""); y += rowStride;
-            DrawRow(MarginX, y, "BAT",    FormatBattery()); y += rowStride;
-            DrawRow(MarginX, y, "USB",    (power != null && power.IsVbusPresent) ? "IN" : "OUT"); y += rowStride;
-            DrawRow(MarginX, y, "RTC",    FormatRtc()); y += rowStride;
-            DrawRow(MarginX, y, "HEAP",   FormatHeap()); y += rowStride;
-            DrawRow(MarginX, y, "UPTIME", FormatUptime());
-
-            if (_pageDotCount > 1)
-            {
-                PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
-            }
-
-            _fb.Flush();
-            _statusBar?.Render(force: true);
+            bool changed = false;
+            if (Set(_build, BuildDate)) changed = true;
+            if (Set(_wifi, wifi != null ? wifi.IpAddress : "")) changed = true;
+            if (Set(_ssid, wifi != null ? wifi.ConnectedSsid : "")) changed = true;
+            if (Set(_bat, FormatBattery())) changed = true;
+            if (Set(_usb, (power != null && power.IsVbusPresent) ? "IN" : "OUT")) changed = true;
+            if (Set(_rtc, FormatRtc())) changed = true;
+            if (Set(_heap, FormatHeap())) changed = true;
+            if (Set(_uptime, FormatUptime())) changed = true;
+            return changed;
         }
 
-        void DrawRow(int x, int y, string label, string value)
-        {
-            const int LabelColW = 110;
-            string val = value == null ? "" : value;
-            NativeFont f = NativeFont.SharedSmall;
-            if (f != null && f.IsValid)
-            {
-                f.Draw(_fb, label, x, y, Color.FromArgb(170, 170, 170));
-                f.Draw(_fb, val, x + LabelColW, y, Color.White);
-            }
-            else
-            {
-                SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
-                SmallFont.DrawString(_fb, val, x + LabelColW, y, LabelScale, Color.White);
-            }
-        }
+        private static bool Set(UIKeyValue row, string v) { if (row.Value == v) return false; row.Value = v; return true; }
 
         string FormatBattery()
         {

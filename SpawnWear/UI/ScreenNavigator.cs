@@ -85,10 +85,40 @@ namespace SpawnWear.UI
 
         private void CaptureInto(Bitmap dst) => dst.DrawImage(new System.Drawing.Point(0, 0), _fb);
 
+        // ---- Fixed chrome (status bar + page dots) drawn over the page content. It does NOT slide: each
+        // rotation page's RenderNow draws it on top (via ChromeDrawer), the off-display snapshot excludes
+        // it, and the transition compositor redraws it static over the sliding content.
+        private StatusBar _chromeBar;
+        public void SetChrome(StatusBar bar) { _chromeBar = bar; }
+
+        /// <summary>Draw the fixed chrome into the framebuffer (no flush): status bar at top, page dots at
+        /// the bottom for the current rotation position (only at the rotation base - overlays hide it).</summary>
+        public void DrawChrome()
+        {
+            if (_chromeBar != null) _chromeBar.Render(force: true, flush: false);
+            if (_depth == 0 && _screens.Length > 1) PageDots.Render(_fb, _w, _h, _activeIndex, _screens.Length);
+        }
+
+        /// <summary>Cheap per-tick live update of the status-bar clock for a WidgetScreen rotation page
+        /// (partial flush, change-detection) - hand-rolled screens still do this themselves.</summary>
+        public void TickChrome()
+        {
+            if (_depth == 0 && _chromeBar != null && (Current as SpawnDev.UI.WidgetScreen) != null)
+                _chromeBar.Render(false, true);
+        }
+
         public ScreenNavigator(IScreen[] screens)
         {
             _screens = screens;
             _activeIndex = 0;
+            // Rotation pages that are WidgetScreens carry the fixed chrome (drawn on top of their content,
+            // never captured into the slide snapshot). Modal overlays (pushed later) leave ChromeDrawer
+            // null so they cover the full screen with no chrome.
+            for (int i = 0; i < screens.Length; i++)
+            {
+                var ws = screens[i] as SpawnDev.UI.WidgetScreen;
+                if (ws != null) ws.ChromeDrawer = DrawChrome;
+            }
             // First screen is implicitly active. Caller is responsible for
             // calling Invalidate / Tick on the first iteration.
         }
@@ -247,6 +277,8 @@ namespace SpawnWear.UI
                 _fb.DrawImage(new System.Drawing.Point(0, o1), _layer1);
                 _fb.DrawImage(new System.Drawing.Point(0, o2), _layer2);
             }
+            // Rotation (horizontal) pages carry the fixed chrome on top; modal overlays (vertical) don't.
+            if (_axisX) DrawChrome();
             _fb.Flush();
             if (done)
             {

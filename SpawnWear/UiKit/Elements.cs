@@ -287,6 +287,68 @@ namespace SpawnDev.UI
         }
     }
 
+    /// <summary>Bottom page-position indicator: one dot per rotation screen, the active one a wide pill.
+    /// Position it full-width where you want the dots' baseline; it centers the row horizontally.</summary>
+    public class UIPageDots : UIElement
+    {
+        public int ActiveIndex;
+        public int Total;
+
+        const int InactiveDotSize = 10;
+        const int ActiveDotWidth = 28;
+        const int ActiveDotHeight = 10;
+        const int DotGap = 12;
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible || Total <= 1) return;
+            var t = Theme.Current;
+            int totalWidth = (Total - 1) * InactiveDotSize + ActiveDotWidth + (Total - 1) * DotGap;
+            int cursor = X + (Width - totalWidth) / 2;
+            for (int i = 0; i < Total; i++)
+            {
+                if (i == ActiveIndex)
+                {
+                    Shapes.RoundedRect(s, cursor, Y, ActiveDotWidth, ActiveDotHeight, ActiveDotHeight / 2, t.OnSurface);
+                    cursor += ActiveDotWidth + DotGap;
+                }
+                else
+                {
+                    int dy = Y + (ActiveDotHeight - InactiveDotSize) / 2;
+                    Shapes.RoundedRect(s, cursor, dy, InactiveDotSize, InactiveDotSize, InactiveDotSize / 2, t.Divider);
+                    cursor += InactiveDotSize + DotGap;
+                }
+            }
+        }
+    }
+
+    /// <summary>A read-only info row: a label on the left and a value right-aligned, both on one line.
+    /// The staple of the About/WiFi/Stats-style screens. Mutate <see cref="Value"/> between ticks and
+    /// repaint to update live readouts.</summary>
+    public class UIKeyValue : UIElement
+    {
+        public string Label = "";
+        public string Value = "";
+        public int Scale = Theme.Current.SmallScale;
+        public Color LabelColor = Theme.Current.Muted;
+        public Color ValueColor = Theme.Current.OnSurface;
+
+        public UIKeyValue() { Height = 36; }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            int th = s.TextHeight(Scale);
+            int ty = Y + (Height - th) / 2;
+            if (Label != null && Label.Length > 0) s.DrawText(Label, X, ty, Scale, LabelColor);
+            if (Value != null && Value.Length > 0)
+            {
+                int vw = s.MeasureText(Value, Scale);
+                s.DrawText(Value, X + Width - vw, ty, Scale, ValueColor);
+            }
+        }
+    }
+
     /// <summary>Horizontal stack layout: places its visible children left-to-right within its own bounds,
     /// each stretched to an equal share of the width (minus <see cref="Spacing"/>) and to the row's Height.
     /// Pair with <see cref="UIColumn"/> to build a grid (a column of rows).</summary>

@@ -44,19 +44,27 @@ namespace SpawnDev.UI
         /// visible. Rendering on the next Tick lets the transition + touch handling settle first.</summary>
         protected void RequestRender() { _needsRender = true; }
 
+        /// <summary>Static chrome (status bar + page dots) drawn ON TOP of the page content, at fixed
+        /// screen positions. Set by the navigator on rotation pages; null on modal overlays. It is drawn
+        /// in <see cref="RenderNow"/> (so a normal repaint includes it) but NOT in
+        /// <see cref="RenderNoFlush"/> (so the off-display snapshot the slide captures is page-content
+        /// ONLY - the chrome therefore never slides; the navigator redraws it static over the slide).</summary>
+        public System.Action ChromeDrawer;
+
         private void RenderNow()
         {
             if (Root == null) return;
             Surface.Clear(Theme.Current.Background); // full clear (the launcher does this) before draw
             Root.Layout();
             Root.Draw(Surface);
+            if (ChromeDrawer != null) ChromeDrawer(); // fixed chrome on top (part of this flush = no flicker)
             Surface.FlushAll();                      // no-arg whole-bitmap flush
         }
 
-        /// <summary>Draw the tree to the framebuffer WITHOUT flushing it to the display. The navigator
-        /// uses this to capture the screen into an off-display buffer for a slide transition, so the raw
-        /// screen never flashes on-screen before the animation. Clears the deferred-render flag since the
-        /// tree is now painted.</summary>
+        /// <summary>Draw the tree to the framebuffer WITHOUT flushing it to the display, and WITHOUT the
+        /// chrome. The navigator captures this into an off-display buffer for a slide transition, so the
+        /// snapshot is page content only - the chrome stays fixed and is drawn separately over the slide.
+        /// Clears the deferred-render flag since the tree is now painted.</summary>
         public void RenderNoFlush()
         {
             if (Root == null) return;

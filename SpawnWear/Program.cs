@@ -275,6 +275,7 @@ namespace SpawnWear
 
                 _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
                 _nav.SetFramebuffer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight); // enable snapshot slide transitions
+                _nav.SetChrome(statusBar); // fixed chrome (status bar + page dots) over WidgetScreen pages
                 // Full app-manager wiring: loaded-app slot + navigator + slot index
                 // (so /apps/launch can switch to the app) + the SD app library.
                 // Also gives the navigator to /touch so the Mirror remote works.
@@ -412,6 +413,7 @@ namespace SpawnWear
                         if (_statusBar != null && _webrtc != null)
                             _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
                         _nav.Current.Tick();
+                        _nav.TickChrome(); // live status-bar clock for WidgetScreen rotation pages
                     }
                 }
             }
