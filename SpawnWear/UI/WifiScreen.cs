@@ -1,144 +1,89 @@
 using nanoFramework.UI;
 using SpawnWear.AppContracts;
 using System.Drawing;
+using SpawnDev.UI;
 
 namespace SpawnWear.UI
 {
     /// <summary>
-    /// WiFi status screen. Read-only V1; Phase 4 Settings → WiFi adds
-    /// connect / disconnect / SSID-list scan once an on-screen keyboard
-    /// exists.
-    ///
-    /// Power model: full repaint only on Invalidate / OnResume. Per-tick
-    /// just refreshes the status bar.
+    /// WiFi status screen, rebuilt on the SpawnDev.UI widget library (WidgetScreen): a big signal glyph,
+    /// a connected/disconnected status line, and SSID / IP / MODE info rows. Chrome (status bar + page
+    /// dots) is the navigator's fixed overlay, so swiping to/from it slides the content under it.
     /// </summary>
-    public class WifiScreen : IScreen
+    public class WifiScreen : WidgetScreen
     {
-        readonly Bitmap _fb;
-        readonly int _panelWidth;
-        readonly int _panelHeight;
-        readonly IServiceHost _services;
+        private readonly IServiceHost _services;
+        private readonly UIIcon _icon;
+        private readonly UILabel _status;
+        private readonly UIKeyValue _ssid, _ip, _mode;
 
-        int _pageDotIndex = -1;
-        int _pageDotCount = 0;
-        public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
-        StatusBar _statusBar;
-        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
-
-        bool _needsRepaint = true;
-
-        const int LabelScale = 3;
-        const int LabelColW = 110;
-        const int RowGap = 10;
-        const int MarginX = 28;
-
-        public WifiScreen(Bitmap framebuffer, int panelWidth, int panelHeight, IServiceHost services)
+        public WifiScreen(Bitmap fb, int panelWidth, int panelHeight, IServiceHost services)
+            : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
-            _fb = framebuffer;
-            _panelWidth = panelWidth;
-            _panelHeight = panelHeight;
             _services = services;
-        }
+            var t = Theme.Current;
 
-        public void Invalidate() { _needsRepaint = true; }
-        public void OnResume() => Invalidate();
-        public void OnPause() { }
-        public bool OnTap(int x, int y) => false;
-
-        public void Tick()
-        {
-            if (_needsRepaint)
+            var root = new UIPanel { X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background };
+            root.Add(new UILabel
             {
-                FullRepaint();
-                _needsRepaint = false;
-                return;
-            }
-            _statusBar?.Render(force: false);
+                X = 0, Y = StatusBar.ReservedHeight + 6, Width = panelWidth, Height = 40,
+                Text = "WIFI", Scale = t.TitleScale, Center = true, Color = t.OnSurface,
+            });
+
+            _icon = new UIIcon
+            {
+                X = (panelWidth - 96) / 2, Y = StatusBar.ReservedHeight + 54, Width = 96, Height = 96,
+                Icon = UiIcon.Wifi, Color = t.Muted,
+            };
+            root.Add(_icon);
+
+            _status = new UILabel
+            {
+                X = 0, Y = StatusBar.ReservedHeight + 158, Width = panelWidth, Height = 36,
+                Text = "", Scale = t.BodyScale, Center = true, Color = t.Muted,
+            };
+            root.Add(_status);
+
+            var col = new UIColumn
+            {
+                X = SafeArea.EdgeInset + 10, Y = StatusBar.ReservedHeight + 212,
+                Width = panelWidth - 2 * (SafeArea.EdgeInset + 10), Height = 140, Spacing = 6,
+            };
+            _ssid = MakeRow("SSID"); _ip = MakeRow("IP"); _mode = MakeRow("MODE");
+            col.Add(_ssid); col.Add(_ip); col.Add(_mode);
+            root.Add(col);
+
+            Root = root;
         }
 
-        void FullRepaint()
+        private static UIKeyValue MakeRow(string label) => new UIKeyValue { Label = label, Value = "" };
+
+        // Chrome is navigator-owned; these uniform-wiring hooks are no-ops here.
+        public void SetPageDots(int index, int total) { }
+        public void SetStatusBar(StatusBar bar) { }
+
+        public override void OnResume() { Refresh(); base.OnResume(); }
+        public override void Tick() { if (Refresh()) Invalidate(); base.Tick(); }
+
+        // Returns true if the displayed content changed.
+        private bool Refresh()
         {
             var wifi = _services != null ? _services.GetWifi() : null;
             bool connected = wifi != null && wifi.IsConnected;
-            string ssid = connected ? wifi.ConnectedSsid : "---";
-            string ip = connected ? wifi.IpAddress : "---";
+            var t = Theme.Current;
+            bool changed = false;
 
-            int contentTop = _statusBar != null ? StatusBar.ReservedHeight : 0;
+            string st = connected ? "CONNECTED" : "DISCONNECTED";
+            if (_status.Text != st) { _status.Text = st; changed = true; }
+            _status.Color = connected ? t.Good : t.Bad;   // cheap, set each refresh
+            _icon.Color = connected ? t.Accent : t.Muted;
 
-            _fb.Clear();
-            _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
-
-            // Centered big signal-bar glyph at the top of the content area.
-            int iconY = contentTop + 24;
-            int iconBoxSize = 96;
-            int iconX = (_panelWidth - iconBoxSize) / 2;
-            DrawBigSignalBars(iconX, iconY, iconBoxSize, connected ? 4 : 0);
-
-            // Status string under the icon. Proportional font when available, else 5x7.
-            NativeFont uiFont = NativeFont.SharedSmall;
-            int lineH = (uiFont != null && uiFont.IsValid) ? uiFont.Height : SmallFont.GlyphHeight * LabelScale;
-            string status = connected ? "CONNECTED" : "DISCONNECTED";
-            Color statusColor = connected ? Color.LimeGreen : Color.FromArgb(180, 70, 70);
-            int statusY = iconY + iconBoxSize + 12;
-            NativeFont.DrawCentered(uiFont, _fb, status, _panelWidth, statusY, statusColor, LabelScale);
-
-            // Detail rows below.
-            int rowsTop = statusY + lineH + 32;
-            int rowStride = lineH + RowGap;
-
-            DrawRow(MarginX, rowsTop, "SSID", ssid);
-            DrawRow(MarginX, rowsTop + rowStride, "IP", ip);
-            DrawRow(MarginX, rowsTop + 2 * rowStride, "MODE", "STATION");
-
-            if (_pageDotCount > 1)
-            {
-                PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
-            }
-
-            _fb.Flush();
-            _statusBar?.Render(force: true);
+            if (SetRow(_ssid, connected ? wifi.ConnectedSsid : "---")) changed = true;
+            if (SetRow(_ip, connected ? wifi.IpAddress : "---")) changed = true;
+            if (SetRow(_mode, "STATION")) changed = true;
+            return changed;
         }
 
-        void DrawRow(int x, int y, string label, string value)
-        {
-            string val = value == null ? "" : value;
-            NativeFont f = NativeFont.SharedSmall;
-            if (f != null && f.IsValid)
-            {
-                f.Draw(_fb, label, x, y, Color.FromArgb(170, 170, 170));
-                f.Draw(_fb, val, x + LabelColW, y, Color.White);
-            }
-            else
-            {
-                SmallFont.DrawString(_fb, label, x, y, LabelScale, Color.FromArgb(170, 170, 170));
-                SmallFont.DrawString(_fb, val, x + LabelColW, y, LabelScale, Color.White);
-            }
-        }
-
-        void DrawBigSignalBars(int x, int y, int size, int bars)
-        {
-            int gap = 8;
-            int barW = (size - 5 * gap) / 4;
-            int baseY = y + size - 4;
-            for (int i = 0; i < 4; i++)
-            {
-                int barH = ((i + 1) * (size - 12)) / 4;
-                int barX = x + gap + i * (barW + gap);
-                int barY = baseY - barH;
-                if (i < bars)
-                {
-                    _fb.FillRectangle(barX, barY, barW, barH, Color.White);
-                }
-                else
-                {
-                    int t = 2;
-                    Color outline = Color.FromArgb(70, 70, 70);
-                    _fb.FillRectangle(barX, barY, barW, t, outline);
-                    _fb.FillRectangle(barX, barY + barH - t, barW, t, outline);
-                    _fb.FillRectangle(barX, barY, t, barH, outline);
-                    _fb.FillRectangle(barX + barW - t, barY, t, barH, outline);
-                }
-            }
-        }
+        private static bool SetRow(UIKeyValue row, string v) { if (row.Value == v) return false; row.Value = v; return true; }
     }
 }

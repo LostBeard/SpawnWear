@@ -287,6 +287,21 @@ namespace SpawnDev.UI
         }
     }
 
+    /// <summary>Draws a single <see cref="UiIcon"/> centered + scaled to fit its bounds. For screen-scale
+    /// glyphs (e.g. the WiFi signal on the WiFi page) rather than tile-scale.</summary>
+    public class UIIcon : UIElement
+    {
+        public UiIcon Icon = UiIcon.None;
+        public Color Color = Theme.Current.OnSurface;
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible || Icon == UiIcon.None) return;
+            int size = Width < Height ? Width : Height;
+            Icons.Draw(s, Icon, X + (Width - size) / 2, Y + (Height - size) / 2, size, Color, Theme.Current.Background);
+        }
+    }
+
     /// <summary>Bottom page-position indicator: one dot per rotation screen, the active one a wide pill.
     /// Position it full-width where you want the dots' baseline; it centers the row horizontally.</summary>
     public class UIPageDots : UIElement
