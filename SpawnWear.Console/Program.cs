@@ -72,6 +72,7 @@ async Task<byte[]> SendRecv(string channel, byte[] payload, int timeoutMs = 1500
 // usually connects within a couple of tries. A failed attempt is disposed and replaced - important
 // for multi-step ops (installpkg/getpkg) that do everything over one connection.
 bool connected = false;
+var connectSw = System.Diagnostics.Stopwatch.StartNew();  // TIMING: wall-clock to a successful connect
 for (int attempt = 1; attempt <= 3 && !connected; attempt++)
 {
     peer = factory.CreateTransport(record);
@@ -88,6 +89,8 @@ for (int attempt = 1; attempt <= 3 && !connected; attempt++)
         Console.WriteLine($"[console] connecting to watch (room='{room}', attempt {attempt}/3)...");
         await peer.ConnectAsync(cts.Token);
         connected = true;
+        connectSw.Stop();
+        Console.WriteLine($"[console] CONNECT_MS={connectSw.ElapsedMilliseconds} attempts={attempt}");
     }
     catch (Exception ex)
     {
@@ -118,6 +121,17 @@ try
         case "launch":
             if (pos.Count < 2) { Usage(); return 1; }
             PrintText(await SendRecv("sys.apps", BuildNameOp(4, pos[1]))); break;
+
+        case "hold":
+            // Leak-hunt: hold the connection open N seconds so the watch streams SUSTAINED telemetry
+            // (imu/battery/demo) the whole time - the condition the ~1130B/session leak needs. The watch
+            // logs freeInt/freePsram at session start and post-close; the delta over a long hold reveals
+            // any duration-proportional leak that a quick list/get is too short to surface.
+            int holdSec = pos.Count > 1 ? int.Parse(pos[1]) : 60;
+            Console.WriteLine($"[console] holding connection {holdSec}s (watch streams telemetry)...");
+            await Task.Delay(holdSec * 1000);
+            Console.WriteLine("[console] hold complete, disconnecting");
+            break;
 
         case "ls": await ListDir(pos.Count > 1 ? pos[1] : ""); break;
         case "stat":
