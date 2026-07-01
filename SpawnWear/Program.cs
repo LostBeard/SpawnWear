@@ -35,6 +35,7 @@ namespace SpawnWear
         static PairingService _pairing;
         static CompanionScreen _companionScreen;
         static UiKitDemoScreen _uiDemoScreen;
+        static GraphicsProbeScreen _gfxProbeScreen;
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
@@ -232,10 +233,25 @@ namespace SpawnWear
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
                     ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage,
-                    OpenUiKitPage);
+                    OpenUiKitPage, OpenGfxProbePage);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+
+                // Dev: bring the HTTP server back up so GET /screenshot.bin serves the live
+                // framebuffer (RGB565 + a "w=W h=H" header) for self-service UI verification during
+                // the facelift, and drop the watch IP on the SD card so `console get ip.txt` can find
+                // it. Guarded: Start() only runs when WiFi is up; harmless otherwise.
+                try
+                {
+                    _http = new SpawnWear.Services.HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                    if (_wifi != null && _wifi.IsConnected)
+                    {
+                        _http.Start();
+                        try { System.IO.File.WriteAllText("D:\\ip.txt", _wifi.IpAddress + "\n"); } catch { }
+                    }
+                }
+                catch (Exception httpEx) { Debug.WriteLine("[SpawnWear] HTTP server start failed: " + httpEx.Message); }
 
                 // SD-backed app library (D:\apps). Apps installed via the Companion
                 // app-manager (/apps/install) persist here and survive a reboot;
@@ -412,10 +428,10 @@ namespace SpawnWear
         {
             var builtins = new LauncherScreen.Tile[]
             {
-                new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(40, 40, 80) },
-                new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(20, 60, 40) },
-                new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(60, 40, 20) },
-                new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(20, 60, 90) },
+                new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(58, 70, 128) },
+                new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(44, 104, 92) },
+                new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(128, 96, 52) },
+                new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(48, 100, 140) },
             };
 
             AppInfo[] apps = _appRepo != null ? _appRepo.ListInfo() : new AppInfo[0];
@@ -467,14 +483,26 @@ namespace SpawnWear
 
         // Stable dark tint derived from the app name, so each app tile has its
         // own colour without per-app config.
+        // Curated tonal palette (Material-on-black: desaturated, medium brightness, distinct hues -
+        // avoids the "optical vibration" saturated colors cause on AMOLED black). SD-app tiles pick
+        // a stable color from the app name's hash so a given app always gets the same tile color.
+        static readonly Color[] TonalPalette = new Color[]
+        {
+            Color.FromArgb(58, 70, 128),    // indigo
+            Color.FromArgb(44, 104, 92),    // teal
+            Color.FromArgb(128, 96, 52),    // amber
+            Color.FromArgb(112, 60, 104),   // plum
+            Color.FromArgb(122, 72, 64),    // terracotta
+            Color.FromArgb(72, 108, 60),    // moss
+            Color.FromArgb(146, 66, 92),    // rose
+            Color.FromArgb(96, 84, 44),     // olive
+        };
+
         static Color AppTileColor(string name)
         {
             int h = 17;
             for (int i = 0; i < name.Length; i++) h = (h * 31 + name[i]) & 0x7FFFFFFF;
-            int r = 25 + (h % 45);
-            int g = 25 + ((h / 45) % 45);
-            int b = 35 + ((h / 2025) % 45);
-            return Color.FromArgb(r, g, b);
+            return TonalPalette[h % TonalPalette.Length];
         }
 
         /// <summary>
@@ -515,6 +543,20 @@ namespace SpawnWear
                 _uiDemoScreen = new UiKitDemoScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
             }
             _nav.Push(_uiDemoScreen);
+        }
+
+        // Settings -> GFX PROBE: push the native-graphics-primitive probe. Decides the UI
+        // facelift approach - which of DrawImage/FillRoundRectangle/DrawEllipse/DrawLine/
+        // FillGradientRectangle actually render on this CO5300 nf-interpreter build.
+        static void OpenGfxProbePage()
+        {
+            if (_nav == null || _fb == null) return;
+            if (_gfxProbeScreen == null)
+            {
+                _gfxProbeScreen = new GraphicsProbeScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                _gfxProbeScreen.SetStatusBar(_statusBar);
+            }
+            _nav.Push(_gfxProbeScreen);
         }
 
         // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.

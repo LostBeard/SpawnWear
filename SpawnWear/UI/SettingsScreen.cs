@@ -43,6 +43,7 @@ namespace SpawnWear.UI
         private readonly ToggleAction _wifiToggle;
         private readonly OpenPage _openCompanion;
         private readonly OpenPage _openUiKit;
+        private readonly OpenPage _openGfxProbe;
         private bool _bleOn;
         private bool _wifiOn;
         private int _motionThrottle;
@@ -56,7 +57,7 @@ namespace SpawnWear.UI
 
         public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu,
             ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion,
-            OpenPage openUiKit)
+            OpenPage openUiKit, OpenPage openGfxProbe)
         {
             _fb = fb;
             _panelWidth = panelWidth;
@@ -69,6 +70,7 @@ namespace SpawnWear.UI
             _wifiOn = wifiOn;
             _openCompanion = openCompanion;
             _openUiKit = openUiKit;
+            _openGfxProbe = openGfxProbe;
 
             // 39px rows keep all 7 within the screen's safe band (below the title at
             // ~127, bottom ~400, clear of the ~100px rounded bottom corners at y~402).
@@ -120,6 +122,12 @@ namespace SpawnWear.UI
                     Label = "UI KIT",
                     Value = ">",
                     OnTap = OpenUiKit, // pushes the UI-library demo sub-page
+                },
+                new ListView.Row
+                {
+                    Label = "GFX PROBE",
+                    Value = ">",
+                    OnTap = OpenGfxProbe, // pushes the native-graphics-primitive probe sub-page
                 },
                 new ListView.Row
                 {
@@ -219,6 +227,11 @@ namespace SpawnWear.UI
         private void OpenUiKit()
         {
             if (_openUiKit != null) _openUiKit();
+        }
+
+        private void OpenGfxProbe()
+        {
+            if (_openGfxProbe != null) _openGfxProbe();
         }
 
         private void ToggleBle()

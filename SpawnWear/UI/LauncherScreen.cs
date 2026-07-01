@@ -200,50 +200,19 @@ namespace SpawnWear.UI
         {
             bool placeholder = tile.TargetScreenIndex < 0 && tile.AppName == null;
 
-            // Vertical gradient background drawn as horizontal slices. ~16 bands
-            // is enough to look smooth at 100-px tile size. We don't use
-            // FillGradientRectangle because the native ESP32 graphics driver in
-            // this nf-interpreter build doesn't implement that primitive.
-            int bands = 16;
-            int bandH = _tileSize / bands;
-            int topR = placeholder ? 70 : tile.Background.R;
-            int topG = placeholder ? 70 : tile.Background.G;
-            int topB = placeholder ? 70 : tile.Background.B;
-            int botR = placeholder ? 35 : (topR * 25) / 100;
-            int botG = placeholder ? 35 : (topG * 25) / 100;
-            int botB = placeholder ? 35 : (topB * 25) / 100;
-            for (int b = 0; b < bands; b++)
-            {
-                int rC = topR + ((botR - topR) * b) / (bands - 1);
-                int gC = topG + ((botG - topG) * b) / (bands - 1);
-                int bC = topB + ((botB - topB) * b) / (bands - 1);
-                Color bandColor = Color.FromArgb(rC, gC, bC);
-                int by = y + b * bandH;
-                int bh = (b == bands - 1) ? (_tileSize - b * bandH) : bandH;
-                _fb.FillRectangle(x, by, _tileSize, bh, bandColor);
-            }
-
-            // Stepped quarter-circle corner mask (8-px radius). For each corner,
-            // we paint black scanlines whose length tapers as we move away from
-            // the panel edge — visually approximates a rounded corner without
-            // needing polygon primitives. Pattern (top-left):
-            //   row 0: 8 px wide
-            //   row 1: 6 px
-            //   row 2: 4 px
-            //   row 3: 3 px
-            //   row 4: 2 px
-            //   row 5: 1 px
-            int[] cornerLens = new int[] { 8, 6, 4, 3, 2, 1 };
-            for (int i = 0; i < cornerLens.Length; i++)
-            {
-                int len = cornerLens[i];
-                // Top edge
-                _fb.FillRectangle(x, y + i, len, 1, Color.Black);
-                _fb.FillRectangle(x + _tileSize - len, y + i, len, 1, Color.Black);
-                // Bottom edge
-                _fb.FillRectangle(x, y + _tileSize - 1 - i, len, 1, Color.Black);
-                _fb.FillRectangle(x + _tileSize - len, y + _tileSize - 1 - i, len, 1, Color.Black);
-            }
+            // Native rounded tile. FillRoundRectangle is supported on this CO5300 nf-interpreter
+            // build (verified via the GFX PROBE screen 2026-06-30) - true smooth corners instead
+            // of the old FillRectangle staircase mask + 16-band gradient loop. Flat Material-style
+            // fill: clean, seam-free, and AMOLED-friendly. A subtle darker inner base under the
+            // face gives a hint of depth (the 2px offset reads as a soft bottom-right edge).
+            int radius = _tileSize / 6;
+            int faceR = placeholder ? 82 : tile.Background.R;
+            int faceG = placeholder ? 82 : tile.Background.G;
+            int faceB = placeholder ? 82 : tile.Background.B;
+            Color face = Color.FromArgb(faceR, faceG, faceB);
+            Color edge = Color.FromArgb((faceR * 55) / 100, (faceG * 55) / 100, (faceB * 55) / 100);
+            _fb.FillRoundRectangle(x, y, _tileSize, _tileSize, radius, radius, edge);
+            _fb.FillRoundRectangle(x, y, _tileSize, _tileSize - 3, radius, radius, face);
 
             // Layout INSIDE the tile: icon in the top ~65%, label in the bottom ~25%
             // with a small gap between them. This matches the Android launcher
@@ -283,18 +252,14 @@ namespace SpawnWear.UI
             SmallFont.DrawString(_fb, tile.Label, labelX, labelY, labelScale, labelColor);
         }
 
-        // Filled red badge with a small white digit; "9+" if count > 9.
+        // Rounded red badge (pill/circle) with a small white digit; "9+" if count > 9.
         void DrawBadge(int x, int y, int count)
         {
             int size = 22;
             Color badge = Color.Red;
             Color text = Color.White;
-            _fb.FillRectangle(x, y, size, size, badge);
-            int t = 2;
-            _fb.FillRectangle(x, y, size, t, text);
-            _fb.FillRectangle(x, y + size - t, size, t, text);
-            _fb.FillRectangle(x, y, t, size, text);
-            _fb.FillRectangle(x + size - t, y, t, size, text);
+            // A radius of size/2 makes the rounded rect a clean circle - a real notification bubble.
+            _fb.FillRoundRectangle(x, y, size, size, size / 2, size / 2, badge);
 
             string display = count > 9 ? "9+" : ((char)('0' + count)).ToString();
             int scale = 2;
@@ -316,7 +281,7 @@ namespace SpawnWear.UI
             _tiles[slot].BadgeCount = count;
         }
 
-        // ----- Icon primitives (rectangles only) -----
+        // ----- Icon primitives (native DrawEllipse / DrawLine / FillRoundRectangle) -----
 
         // Generic app icon: the app's first letter, big and centered. Gives each
         // installed app a distinct, recognizable tile without per-app bitmap art.
@@ -338,124 +303,105 @@ namespace SpawnWear.UI
             SmallFont.DrawString(_fb, s, x + (size - w) / 2, y + (size - h) / 2, scale, color);
         }
 
+        // Filled circle helper (DrawEllipse's fill path uses a solid start==end gradient).
+        void FillCircle(int cx, int cy, int r, Color color) => FillEllipse(cx, cy, r, r, color);
+
+        // Stroked circle helper (2px ring for visibility at watch density).
+        void RingCircle(int cx, int cy, int r, Color color)
+        {
+            _fb.DrawEllipse(color, cx, cy, r, r);
+            if (r > 2) _fb.DrawEllipse(color, cx, cy, r - 1, r - 1);
+        }
+
         void DrawClockIcon(int x, int y, int size, Color color)
         {
-            // Outline circle approximation: 4 corners with rectangles, plus a
-            // hands cross in the middle.
-            int t = 4;
-            // Top / bottom thick caps to suggest curvature.
-            int capW = size / 2;
-            _fb.FillRectangle(x + (size - capW) / 2, y, capW, t, color);
-            _fb.FillRectangle(x + (size - capW) / 2, y + size - t, capW, t, color);
-            _fb.FillRectangle(x, y + (size - capW) / 2, t, capW, color);
-            _fb.FillRectangle(x + size - t, y + (size - capW) / 2, t, capW, color);
-            // 12-3-6-9 markers as small dots.
-            int m = 4;
-            _fb.FillRectangle(x + size / 2 - m / 2, y + 8, m, m, color);
-            _fb.FillRectangle(x + size / 2 - m / 2, y + size - 8 - m, m, m, color);
-            _fb.FillRectangle(x + 8, y + size / 2 - m / 2, m, m, color);
-            _fb.FillRectangle(x + size - 8 - m, y + size / 2 - m / 2, m, m, color);
-            // Hands: vertical (hour) and horizontal-ish (minute).
-            int cx = x + size / 2;
-            int cy = y + size / 2;
-            _fb.FillRectangle(cx - 2, cy - size / 4, 4, size / 4, color);  // hour pointing up
-            _fb.FillRectangle(cx, cy - 2, size / 3, 4, color);              // minute pointing right
+            int cx = x + size / 2, cy = y + size / 2;
+            int r = size / 2 - 2;
+            RingCircle(cx, cy, r, color);                       // real circular face
+            _fb.DrawLine(color, 3, cx, cy, cx, cy - (r * 6) / 10);   // hour hand up
+            _fb.DrawLine(color, 3, cx, cy, cx + (r * 7) / 10, cy);   // minute hand right
+            FillCircle(cx, cy, 2, color);                       // hub
         }
 
         void DrawStatsIcon(int x, int y, int size, Color color)
         {
-            // Three vertical bars of increasing height, like a tiny bar chart.
+            // Rounded bar chart - three bars of increasing height.
             int barW = size / 5;
-            int barGap = (size - 3 * barW) / 4;
-            int baseY = y + size - 6;
-            int[] heights = { size / 3, size * 2 / 3, size - 6 };
+            int gap = (size - 3 * barW) / 4;
+            int baseY = y + size - 4;
+            int[] heights = { size / 3, (size * 2) / 3, size - 6 };
+            int cr = barW / 3;
             for (int i = 0; i < 3; i++)
             {
-                int barX = x + barGap + i * (barW + barGap);
+                int barX = x + gap + i * (barW + gap);
                 int h = heights[i];
-                _fb.FillRectangle(barX, baseY - h, barW, h, color);
+                _fb.FillRoundRectangle(barX, baseY - h, barW, h, cr, cr, color);
             }
         }
 
         void DrawSettingsIcon(int x, int y, int size, Color color)
         {
-            // Gear-like: a centered square + 8 surrounding rectangles for teeth.
-            int t = size / 4;
-            int cx = x + size / 2;
-            int cy = y + size / 2;
-            // Center hole (just an outline).
-            int hole = t / 2;
-            int holeStroke = 3;
-            int sb = size / 2 - 4;
-            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, sb, holeStroke, color);
-            _fb.FillRectangle(cx - sb / 2, cy + sb / 2 - holeStroke, sb, holeStroke, color);
-            _fb.FillRectangle(cx - sb / 2, cy - sb / 2, holeStroke, sb, color);
-            _fb.FillRectangle(cx + sb / 2 - holeStroke, cy - sb / 2, holeStroke, sb, color);
-            // Teeth: 4 cardinal stubs.
-            int toothLen = (size - sb) / 2 - 2;
-            int toothW = sb / 3;
-            // Top + bottom
-            _fb.FillRectangle(cx - toothW / 2, y, toothW, toothLen, color);
-            _fb.FillRectangle(cx - toothW / 2, y + size - toothLen, toothW, toothLen, color);
-            // Left + right
-            _fb.FillRectangle(x, cy - toothW / 2, toothLen, toothW, color);
-            _fb.FillRectangle(x + size - toothLen, cy - toothW / 2, toothLen, toothW, color);
+            int cx = x + size / 2, cy = y + size / 2;
+            int rOuter = size / 2 - 3;
+            RingCircle(cx, cy, rOuter, color);       // gear body ring
+            RingCircle(cx, cy, size / 6, color);     // center hole
+            // Four cardinal + four diagonal teeth as small rounded stubs (cos45 ~ 0.7).
+            int reach = rOuter - 1;
+            int diag = (reach * 7) / 10;
+            int tr = size / 12; if (tr < 3) tr = 3;
+            FillCircle(cx, cy - reach, tr, color);
+            FillCircle(cx, cy + reach, tr, color);
+            FillCircle(cx - reach, cy, tr, color);
+            FillCircle(cx + reach, cy, tr, color);
+            FillCircle(cx - diag, cy - diag, tr, color);
+            FillCircle(cx + diag, cy - diag, tr, color);
+            FillCircle(cx - diag, cy + diag, tr, color);
+            FillCircle(cx + diag, cy + diag, tr, color);
         }
 
         void DrawMusicIcon(int x, int y, int size, Color color)
         {
-            // Eighth note: filled head + thick stem + flag.
-            int cx = x + size / 4;
-            int cy = y + size - size / 4;
-            int headW = size / 3;
-            int headH = size / 4;
-            _fb.FillRectangle(cx - headW / 2, cy - headH / 2, headW, headH, color);
-            // Stem.
-            int stemX = cx + headW / 2 - 4;
-            int stemTopY = y + size / 6;
-            int stemH = cy - stemTopY;
-            _fb.FillRectangle(stemX, stemTopY, 4, stemH, color);
-            // Flag.
-            _fb.FillRectangle(stemX, stemTopY, size / 3, 4, color);
-            _fb.FillRectangle(stemX + size / 3 - 4, stemTopY, 4, size / 4, color);
+            // Eighth note: real elliptical head + line stem + flag.
+            int headRx = size / 4, headRy = size / 5;
+            int hcx = x + headRx + 2, hcy = y + size - headRy - 2;
+            FillEllipse(hcx, hcy, headRx, headRy, color);
+            int stemX = hcx + headRx - 2;
+            int stemTop = y + 2;
+            _fb.DrawLine(color, 3, stemX, hcy - headRy, stemX, stemTop);          // stem
+            _fb.DrawLine(color, 3, stemX, stemTop, stemX + size / 3, stemTop + size / 5); // flag
         }
+
+        void FillEllipse(int cx, int cy, int rx, int ry, Color color) =>
+            _fb.DrawEllipse(color, 1, cx, cy, rx, ry, color, 0, 0, color, 0, 0);
 
         void DrawGalleryIcon(int x, int y, int size, Color color)
         {
-            // Photo frame: outline rectangle + a "horizon line" + a "sun" dot.
-            int t = 3;
-            _fb.FillRectangle(x, y, size, t, color);
-            _fb.FillRectangle(x, y + size - t, size, t, color);
-            _fb.FillRectangle(x, y, t, size, color);
-            _fb.FillRectangle(x + size - t, y, t, size, color);
-            // Horizon line at 2/3 height.
-            int horizonY = y + (size * 2) / 3;
-            _fb.FillRectangle(x + 4, horizonY, size - 8, t, color);
-            // Sun.
-            int sunSize = size / 5;
-            _fb.FillRectangle(x + size - sunSize - 8, y + 8, sunSize, sunSize, color);
+            // Rounded photo frame + sun (real circle) + mountain (lines).
+            _fb.DrawRoundRectangle(x, y, size, size, 3, size / 6, size / 6, color);
+            FillCircle(x + (size * 3) / 4, y + size / 4, size / 9, color);        // sun
+            int baseY = y + size - 5;
+            _fb.DrawLine(color, 3, x + 4, baseY, x + (size * 2) / 5, y + size / 2);
+            _fb.DrawLine(color, 3, x + (size * 2) / 5, y + size / 2, x + size - 4, baseY);
         }
 
         void DrawWifiIcon(int x, int y, int size, Color color)
         {
-            // Three concentric arcs approximated as horizontal bars of decreasing
-            // width stacked on top of a dot. Bottom = dot, then small arc, mid arc,
-            // big arc. Reads as a wifi signal at the panel's density.
+            // Real wifi fan: concentric rings centered on a node near the bottom of the box,
+            // clipped to the box so only their UPPER arcs show (the classic radiating-signal
+            // shape). Clip is reset to the full framebuffer afterward so later tiles aren't
+            // restricted. NOTE: SetClippingRectangle is not yet probe-verified on this build; if it's
+            // a no-op the rings just draw as full circles (still legible) - confirm on hardware.
             int cx = x + size / 2;
-            int t = 4;
-            // Dot at bottom-center.
-            int dotSize = 6;
-            _fb.FillRectangle(cx - dotSize / 2, y + size - dotSize - 2, dotSize, dotSize, color);
-            // Three horizontal bars above the dot, increasing width.
-            int barCount = 3;
-            int gap = 6;
-            int baseY = y + size - dotSize - 2 - gap;
-            for (int i = 0; i < barCount; i++)
+            int cy = y + size - 5;
+            _fb.SetClippingRectangle(x, y, size, size - 2);
+            for (int i = 3; i >= 1; i--)
             {
-                int width = (size * (i + 1)) / (barCount + 1);
-                int yy = baseY - i * (t + gap);
-                _fb.FillRectangle(cx - width / 2, yy - t, width, t, color);
+                int r = (i * (size - 6)) / 3;
+                _fb.DrawEllipse(color, cx, cy, r, r);
+                if (r > 3) _fb.DrawEllipse(color, cx, cy, r - 1, r - 1); // thicken the arc
             }
+            _fb.SetClippingRectangle(0, 0, _panelWidth, _panelHeight);
+            FillCircle(cx, cy, 3, color); // node
         }
     }
 }
