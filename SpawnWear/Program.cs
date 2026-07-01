@@ -542,7 +542,7 @@ namespace SpawnWear
             {
                 _companionScreen = new CompanionScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _pairing);
             }
-            _nav.Push(_companionScreen);
+            _nav.PushAnimated(_companionScreen); // slides if it's a WidgetScreen, else instant (graceful)
         }
 
         // Settings -> UI KIT: push the UI-library demo (proves the GameUI-mirrored
@@ -554,7 +554,7 @@ namespace SpawnWear
             {
                 _uiDemoScreen = new UiKitDemoScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
             }
-            _nav.Push(_uiDemoScreen);
+            _nav.PushAnimated(_uiDemoScreen); // WidgetScreen -> slides down over Settings
         }
 
         // Settings -> GFX PROBE: push the native-graphics-primitive probe. Decides the UI
@@ -568,7 +568,7 @@ namespace SpawnWear
                 _gfxProbeScreen = new GraphicsProbeScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _gfxProbeScreen.SetStatusBar(_statusBar);
             }
-            _nav.Push(_gfxProbeScreen);
+            _nav.PushAnimated(_gfxProbeScreen); // slides if it's a WidgetScreen, else instant (graceful)
         }
 
         // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.
