@@ -1,5 +1,6 @@
 using nanoFramework.UI;
 using System.Drawing;
+using SpawnDev.UI;
 
 namespace SpawnWear.UI
 {
@@ -11,125 +12,113 @@ namespace SpawnWear.UI
     /// seen the watch screen can't complete pairing). Leaving the page (OnPause) or
     /// toggling off closes the window immediately.
     ///
-    /// Phase 2 delivers the UI + the windowed lifecycle; Phase 3 wires the actual
-    /// code-authenticated handshake into <see cref="PairingService"/>.
+    /// Built on the SpawnDev.UI widget library (WidgetScreen): a UISwitch arms pairing,
+    /// a UILabel shows the code, a UIButton forgets the pairing. Being a WidgetScreen it
+    /// also gets the navigator's slide transition + off-display capture. Back is the BOOT
+    /// button (a WidgetScreen consumes taps so a stray tap can't accidentally leave).
     /// </summary>
-    public class CompanionScreen : IScreen
+    public class CompanionScreen : WidgetScreen
     {
-        private readonly Bitmap _fb;
-        private readonly int _panelWidth;
-        private readonly int _panelHeight;
         private readonly PairingService _pairing;
-        private readonly ListView _list;
-        private readonly ListView.Row _pairRow;
-        private readonly ListView.Row _codeRow;
-        private readonly ListView.Row _forgetRow;
-        private bool _pairingOn;
-        private StatusBar _statusBar;
-        public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
+        private readonly UISwitch _pairSwitch;
+        private readonly UILabel _codeLabel;
+        private readonly UIButton _forgetButton;
 
         public CompanionScreen(Bitmap fb, int panelWidth, int panelHeight, PairingService pairing)
+            : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
-            _fb = fb;
-            _panelWidth = panelWidth;
-            _panelHeight = panelHeight;
             _pairing = pairing;
+            var t = Theme.Current;
 
-            int rowHeight = 54;
-            int listWidth = panelWidth - 40;
-            int listX = (panelWidth - listWidth) / 2;
-            // Two rows just below the title, well inside the safe band (clear of the
-            // ~100px rounded corners).
-            int listY = StatusBar.ReservedHeight + 16 + SmallFont.GlyphHeight * 4 + 16;
+            var root = new UIPanel
+            {
+                X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background,
+            };
 
-            _pairRow = new ListView.Row { Label = "PAIRING", Value = "OFF", OnTap = TogglePairing };
-            _codeRow = new ListView.Row { Label = "CODE", Value = "------", OnTap = null };
-            _forgetRow = new ListView.Row { Label = "FORGET", Value = "-", OnTap = ForgetPairing };
-            _list = new ListView(_fb, listX, listY, listWidth, rowHeight, 4,
-                new ListView.Row[] { _pairRow, _codeRow, _forgetRow });
+            root.Add(new UILabel
+            {
+                X = 0, Y = StatusBar.ReservedHeight + 8, Width = panelWidth, Height = 46,
+                Text = "COMPANION", Scale = t.TitleScale, Center = true, Color = t.OnSurface,
+            });
+
+            // Controls stacked in the safe band: arm pairing, show the code, forget.
+            var col = new UIColumn
+            {
+                X = SafeArea.EdgeInset, Y = StatusBar.ReservedHeight + 76,
+                Width = panelWidth - 2 * SafeArea.EdgeInset, Height = 240, Spacing = t.Gap,
+            };
+
+            _pairSwitch = new UISwitch { Text = "PAIRING", Scale = t.BodyScale, Toggled = OnPairToggled };
+            _codeLabel = new UILabel { Height = t.RowHeight, Text = "CODE  ------", Scale = t.BodyScale, Center = true, Color = t.Muted };
+            _forgetButton = new UIButton
+            {
+                Height = t.RowHeight, Text = "FORGET", Scale = t.BodyScale,
+                Background = t.Surface, Foreground = t.OnSurface, Clicked = OnForget,
+            };
+            col.Add(_pairSwitch);
+            col.Add(_codeLabel);
+            col.Add(_forgetButton);
+            root.Add(col);
+
+            // Hint + back note near the bottom (centered content never clips the round corners).
+            root.Add(new UILabel
+            {
+                X = 0, Y = StatusBar.ReservedHeight + 76 + 240 + 10, Width = panelWidth, Height = 30,
+                Text = "ENTER CODE IN COMPANION", Scale = t.SmallScale, Center = true, Color = t.Muted,
+            });
+            root.Add(new UILabel
+            {
+                X = 0, Y = panelHeight - 64, Width = panelWidth, Height = 30,
+                Text = "BACK BUTTON TO EXIT", Scale = t.SmallScale, Center = true, Color = t.Muted,
+            });
+
+            Root = root;
         }
 
-        public void Tick()
-        {
-            _statusBar?.Render(false);
-            _list.Tick();
-        }
-
-        public void Invalidate()
-        {
-            _fb.Clear();
-            _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
-
-            int statusBarHeight = _statusBar != null ? StatusBar.ReservedHeight : 0;
-            const string title = "COMPANION";
-            NativeFont.DrawCentered(NativeFont.Shared, _fb, title, _panelWidth, statusBarHeight + 16, Color.White, 4);
-
-            // Instruction line (centered -> always inside the round screen).
-            const string hint = "ENTER CODE IN COMPANION";
-            int hintScale = 2;
-            int hintWidth = SmallFont.MeasureString(hint, hintScale);
-            SmallFont.DrawString(_fb, hint, (_panelWidth - hintWidth) / 2, _panelHeight / 2 + 40, hintScale, Color.White);
-
-            const string footer = "TAP OUTSIDE TO BACK";
-            int footerScale = 2;
-            int footerWidth = SmallFont.MeasureString(footer, footerScale);
-            SmallFont.DrawString(_fb, footer, (_panelWidth - footerWidth) / 2, _panelHeight - 60, footerScale, Color.White);
-
-            // Explicit full-panel flush: this page has a large empty region below
-            // the rows that must overwrite whatever screen was underneath (the
-            // sub-page is pushed over Settings), so don't rely on a default flush.
-            _fb.Flush(0, 0, _panelWidth, _panelHeight);
-            _statusBar?.Render(true);
-            _list.Invalidate();
-        }
-
-        public void OnResume()
+        public override void OnResume()
         {
             // Always start disarmed; the user must explicitly toggle pairing on.
-            _pairingOn = false;
-            _pairRow.Value = "OFF";
-            _codeRow.Value = "------";
-            _forgetRow.Value = _pairing != null && _pairing.IsPaired ? "TAP" : "-"; // TAP to unpair if paired
-            Invalidate();
+            _pairSwitch.On = false;
+            _codeLabel.Text = "CODE  ------";
+            base.OnResume();
         }
 
-        public void OnPause()
+        public override void OnPause()
         {
-            // Leaving the page closes the pairing window - pairing is only armed
-            // while the user is actually looking at this screen (TJ's design).
-            _pairingOn = false;
+            // Leaving the page closes the pairing window - pairing is only armed while the user is
+            // actually looking at this screen (TJ's design).
             if (_pairing != null) _pairing.EndPairingWindow();
+            base.OnPause();
         }
 
-        public bool OnTap(int x, int y) => _list.HandleTap(x, y);
-
-        private void TogglePairing()
+        private void OnPairToggled(bool on)
         {
             if (_pairing == null) return;
-            _pairingOn = !_pairingOn;
-            if (_pairingOn)
+            if (on)
             {
                 string code = _pairing.BeginPairingWindow();
-                _pairRow.Value = "ON";
-                _codeRow.Value = code;
+                _codeLabel.Text = "CODE  " + code;
+                _codeLabel.Color = Theme.Current.OnSurface; // brighten the live code
             }
             else
             {
                 _pairing.EndPairingWindow();
-                _pairRow.Value = "OFF";
-                _codeRow.Value = "------";
+                _codeLabel.Text = "CODE  ------";
+                _codeLabel.Color = Theme.Current.Muted;
             }
+            Invalidate(); // repaint to show the updated code
         }
 
         // Watch-side "forget pairing": clears the paired peer + room so the watch reverts to its
         // unpaired/dev identity (the console + a fresh Companion can then re-pair). Mirrors the
         // Companion's "Forget Trust", but on the watch where the binding actually lives.
-        private void ForgetPairing()
+        private void OnForget()
         {
             if (_pairing == null) return;
             bool wasPaired = _pairing.IsPaired;
             _pairing.Unpair();
-            _forgetRow.Value = wasPaired ? "DONE" : "NONE";
+            _forgetButton.Text = wasPaired ? "FORGOTTEN" : "NOT PAIRED";
+            Invalidate();
         }
     }
 }
