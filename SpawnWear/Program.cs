@@ -2006,8 +2006,8 @@ namespace SpawnWear
                             else if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
                             else if (isSwipe)
                             {
-                                if (dx < 0) _nav.Next();  // swipe left -> next screen
-                                else _nav.Prev();          // swipe right -> previous screen
+                                if (dx < 0) _nav.NextAnimated();  // swipe left -> next screen (slides)
+                                else _nav.PrevAnimated();          // swipe right -> previous screen (slides)
                             }
                             else if (isTap)
                             {

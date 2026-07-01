@@ -42,10 +42,16 @@ namespace SpawnWear.UI
         private bool _canTransition;   // false if the boot allocation failed -> instant Push/Pop
         private bool _animOpen;        // current overlay was opened via PushAnimated -> _snapUnder is valid
         private bool _popOnDone;       // pop the overlay when the current (close) transition finishes
-        private Bitmap _transStatic;   // the screen that stays put (drawn as the base each frame)
-        private Bitmap _transMoving;   // the overlay that slides
-        private int _transOffset;      // moving layer's current y offset
-        private int _transTarget;      // final offset (0 = fully covering, -_h = fully off the top)
+        // Generalized 2-layer composite slide. Each layer is one of the snapshots, positioned by a base
+        // offset plus a shared animated offset (only if that layer moves), along one axis:
+        //   Overlay push/pop  -> base static, overlay moves on Y (vertical drop-down).
+        //   Rotation next/prev -> both layers move together on X (horizontal filmstrip).
+        private Bitmap _layer1, _layer2;
+        private int _l1Base, _l2Base;  // each layer's base offset on the axis
+        private bool _l1Moves, _l2Moves;
+        private bool _axisX;           // true = slide horizontally (X), false = vertically (Y)
+        private int _transOffset;      // current animated offset along the axis
+        private int _transTarget;      // final offset
         private int _transStep;        // signed per-frame delta
         private bool _transitioning;
         private const int SlideStepPx = 90; // per-frame slide distance (30=slow .. 60=2x .. 90=3x .. 120=4x)
@@ -157,7 +163,8 @@ namespace SpawnWear.UI
             CaptureInto(_snapOver);    // capture the overlay; the display still shows "beneath"
             _animOpen = true;          // keep _snapUnder for the eventual animated close
             _popOnDone = false;
-            BeginTransition(_snapUnder, _snapOver, -_h, 0, SlideStepPx); // overlay slides down over beneath
+            // Overlay slides DOWN (Y) over the static beneath: layer1=beneath (static), layer2=overlay.
+            BeginTransition(_snapUnder, 0, false, _snapOver, 0, true, false, -_h, 0, SlideStepPx);
         }
 
         /// <summary>Animated back: the overlay slides UP off the top, revealing the screen beneath. The
@@ -170,16 +177,53 @@ namespace SpawnWear.UI
             if (!_canTransition || _transitioning || !_animOpen) { Pop(); return; }
             CaptureInto(_snapOver);    // the overlay (currently displayed) - fresh, no flash
             _popOnDone = true;         // pop (resume the beneath fresh) once the slide completes
-            BeginTransition(_snapUnder, _snapOver, 0, -_h, -SlideStepPx); // overlay slides up off the beneath
+            // Overlay slides UP (Y) off the static beneath.
+            BeginTransition(_snapUnder, 0, false, _snapOver, 0, true, false, 0, -_h, -SlideStepPx);
         }
 
-        private void BeginTransition(Bitmap staticSnap, Bitmap movingSnap, int fromOffset, int toOffset, int step)
+        /// <summary>Animated rotation to the NEXT top-level screen (swipe left): the current screen slides
+        /// off to the left while the next slides in from the right (both move together). The incoming
+        /// screen is rendered off-display (must be a WidgetScreen); otherwise instant <see cref="Next"/>.</summary>
+        public void NextAnimated()
         {
-            _transStatic = staticSnap;
-            _transMoving = movingSnap;
-            _transOffset = fromOffset;
-            _transTarget = toOffset;
-            _transStep = step;
+            if (_depth > 0) { Next(); return; }
+            int next = (_activeIndex + 1) % _screens.Length;
+            if (next == _activeIndex) return;
+            var ws = _screens[next] as SpawnDev.UI.WidgetScreen;
+            if (!_canTransition || _transitioning || ws == null) { Next(); return; }
+            CaptureInto(_snapUnder);   // current screen A (displayed) - free
+            Next();                    // switch to B (WidgetScreen OnResume defers - no flush)
+            ws.RenderNoFlush();        // draw B off-display
+            CaptureInto(_snapOver);    // capture B; the display still shows A
+            // Both slide LEFT together (X): A from 0 -> -w, B from +w -> 0.
+            BeginTransition(_snapUnder, 0, true, _snapOver, _w, true, true, 0, -_w, -SlideStepPx);
+        }
+
+        /// <summary>Animated rotation to the PREVIOUS screen (swipe right): current slides off right, the
+        /// previous slides in from the left. Incoming must be a WidgetScreen; else instant <see cref="Prev"/>.</summary>
+        public void PrevAnimated()
+        {
+            if (_depth > 0) { Prev(); return; }
+            int prev = (_activeIndex - 1 + _screens.Length) % _screens.Length;
+            if (prev == _activeIndex) return;
+            var ws = _screens[prev] as SpawnDev.UI.WidgetScreen;
+            if (!_canTransition || _transitioning || ws == null) { Prev(); return; }
+            CaptureInto(_snapUnder);   // current screen A - free
+            Prev();                    // switch to B
+            ws.RenderNoFlush();        // draw B off-display
+            CaptureInto(_snapOver);    // capture B
+            // Both slide RIGHT together (X): A from 0 -> +w, B from -w -> 0.
+            BeginTransition(_snapUnder, 0, true, _snapOver, -_w, true, true, 0, _w, SlideStepPx);
+        }
+
+        private void BeginTransition(Bitmap layer1, int l1Base, bool l1Moves,
+                                     Bitmap layer2, int l2Base, bool l2Moves,
+                                     bool axisX, int fromOffset, int toOffset, int step)
+        {
+            _layer1 = layer1; _l1Base = l1Base; _l1Moves = l1Moves;
+            _layer2 = layer2; _l2Base = l2Base; _l2Moves = l2Moves;
+            _axisX = axisX;
+            _transOffset = fromOffset; _transTarget = toOffset; _transStep = step;
             _transitioning = true;
         }
 
@@ -191,8 +235,18 @@ namespace SpawnWear.UI
             _transOffset += _transStep;
             bool done = _transStep > 0 ? _transOffset >= _transTarget : _transOffset <= _transTarget;
             if (done) _transOffset = _transTarget;
-            _fb.DrawImage(new System.Drawing.Point(0, 0), _transStatic);
-            _fb.DrawImage(new System.Drawing.Point(0, _transOffset), _transMoving);
+            int o1 = _l1Base + (_l1Moves ? _transOffset : 0);
+            int o2 = _l2Base + (_l2Moves ? _transOffset : 0);
+            if (_axisX)
+            {
+                _fb.DrawImage(new System.Drawing.Point(o1, 0), _layer1);
+                _fb.DrawImage(new System.Drawing.Point(o2, 0), _layer2);
+            }
+            else
+            {
+                _fb.DrawImage(new System.Drawing.Point(0, o1), _layer1);
+                _fb.DrawImage(new System.Drawing.Point(0, o2), _layer2);
+            }
             _fb.Flush();
             if (done)
             {
