@@ -2001,6 +2001,15 @@ namespace SpawnWear
                             int totDy = snapY - _fingerDownY;
                             int aTdx = totDx < 0 ? -totDx : totDx;
                             int aTdy = totDy < 0 ? -totDy : totDy;
+                            // Once the finger moves beyond the tap slop this is a drag, not a tap: cancel any
+                            // press-state highlight from finger-down so a row doesn't sit lit while you drag.
+                            // Covers diagonal/slow drags that never cross the vertical-scroll threshold below
+                            // (OnScroll clears it immediately once vertical scrolling actually engages).
+                            if ((aTdx * aTdx + aTdy * aTdy) > TapMaxMoveSquared)
+                            {
+                                var pressCancel = _nav.Current as SpawnDev.UI.IPressable;
+                                if (pressCancel != null) pressCancel.OnRelease();
+                            }
                             if (aTdy > aTdx && aTdy > 12 && _fingerDownY >= StatusBar.ReservedHeight)
                             {
                                 var scroll = _nav.Current as SpawnDev.UI.IScrollable;
