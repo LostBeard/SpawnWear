@@ -216,13 +216,43 @@ object[] connectArgs = connectMi.GetParameters().Length == 3
 var defaultTimeoutProp = engineType.GetProperty("DefaultTimeout");
 if (defaultTimeoutProp != null && defaultTimeoutProp.CanWrite)
 {
-    defaultTimeoutProp.SetValue(engine, 30000);
-    Console.WriteLine("Set DefaultTimeout=30000ms");
+    // 120s (was 30s). The final commit block flushes flash + checksums the WHOLE deployment;
+    // that time scales with app size. As SpawnWear grew (UI library, more screens, scroll) the
+    // ~401 KB deployment's final commit began exceeding 30s -> "No reply from nanoDevice @
+    // 0x3D1..." -> partial write -> bricked deploy region -> bootloader erase/reflash recovery.
+    // A generous ceiling costs nothing on a fast commit and prevents the brick on a slow one.
+    defaultTimeoutProp.SetValue(engine, 120000);
+    Console.WriteLine("Set DefaultTimeout=120000ms");
 }
 
 bool connected = (bool)connectMi.Invoke(engine, connectArgs);
 if (!connected) { Console.WriteLine("Connect failed."); return 1; }
 Console.WriteLine("Connected.");
+
+// Halt the running app BEFORE the flash write. A busy app (WebRTC link up + render loop +
+// HTTP server) starves the wire-protocol thread, so the final commit block times out
+// ("No reply from nanoDevice @ 0x3D1...") and the partial write bricks the deploy region -
+// forcing a full bootloader erase/reflash. Pausing the managed threads frees the CPU for the
+// deploy; the wire protocol keeps running (same as VS single-stepping). rebootAfterDeploy
+// then restarts a fresh CLR. Best-effort: skip if this ABI lacks the method.
+try
+{
+    var pauseMi = engineType.GetMethod("PauseExecution", Type.EmptyTypes);
+    if (pauseMi != null)
+    {
+        pauseMi.Invoke(engine, null);
+        Thread.Sleep(250); // let the threads actually quiesce before we start writing flash
+        Console.WriteLine("Paused app execution for deploy (frees CPU for the flash commit).");
+    }
+    else
+    {
+        Console.WriteLine("PauseExecution not on this ABI - deploying against the running app.");
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine("PauseExecution skipped (" + ex.GetType().Name + "): " + ex.Message);
+}
 
 // OnMessage event - signature: (IncomingMessage, string)
 var onMessage = engineType.GetEvent("OnMessage");

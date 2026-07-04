@@ -123,3 +123,14 @@ So there is **no size ceiling**. There are two distinct bugs:
 - NEXT: bisect which of the 5 native crypto calls hangs (re-apply `Plans/crypto-selftest-boot.patch`). Full handoff in agent memory `project-spawnwear-EOD-2026-06-21-riker-deploy-ceiling-is-illusory-crypto-selftest-hangs`.
 
 The old `check-deploy-size.cs` / `DeployCeilingBytes` guards are based on the disproven ceiling model — treat them as "avoid the 358,896 bad-spot," not a hard limit.
+
+## 2026-07-04 UPDATE (Riker) — CONFIRMED: it was the 30s commit timeout, not size
+
+Deployed a **399,908-byte** `.pe` build (the 2026-07-02 "bricked, over-ceiling" drop-down-lock build)
+to COM3 with `tools/nf-deploy.cs` `DefaultTimeout=120000ms`. Result: **clean deploy + full boot** —
+framebuffer 410x502, BLE advertising 'SW-OK-Tok', HTTP on port 80, `[Nav] canTransition=True
+(2 x 411640 bytes)`, `Total 402052 ROM`, `[Boot] reload last app 'Dice': OK`, `Done.` No trimming,
+no brick. This directly confirms the "evening update" above: **there is no ~400KB size ceiling.**
+The 2026-07-02 "brick at ~400KB" was the final commit block exceeding the old **30s** `DefaultTimeout`
+(see `nf-deploy.cs:221` note) -> host abandons mid-commit -> partial write. Keeping `DefaultTimeout`
+at 120000ms is the fix. TJ's steer ("test if you need more space, you may be able to use it") was correct.

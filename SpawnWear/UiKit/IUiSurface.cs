@@ -25,6 +25,11 @@ namespace SpawnDev.UI
         int MeasureText(string text, int scale);
         int TextHeight(int scale);
 
+        /// <summary>Constrain subsequent drawing to this rectangle (for scroll viewports). Call
+        /// <see cref="ClearClip"/> to restore full-surface drawing.</summary>
+        void SetClip(int x, int y, int w, int h);
+        void ClearClip();
+
         /// <summary>Pushes a region of the backing buffer to the physical surface.</summary>
         void Flush(int x, int y, int w, int h);
         /// <summary>Pushes the whole surface.</summary>

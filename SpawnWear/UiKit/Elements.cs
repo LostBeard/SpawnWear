@@ -179,6 +179,68 @@ namespace SpawnDev.UI
         }
     }
 
+    /// <summary>A vertical stack that SCROLLS: children are laid out top-to-bottom but shifted up by
+    /// <see cref="ScrollOffset"/> and clipped to the column's own bounds (its viewport). Drag-scroll feeds
+    /// <see cref="Scroll"/>. Use for lists taller than the screen (e.g. Settings) - the fixed chrome
+    /// (status bar / page dots) stays put because it's outside this container.</summary>
+    public class UIScrollColumn : UIElement
+    {
+        public int Spacing = 10;
+        public int ScrollOffset;
+        private int _contentHeight;
+
+        private int MaxScroll { get { int m = _contentHeight - Height; return m > 0 ? m : 0; } }
+
+        public override void Layout()
+        {
+            int y = Y - ScrollOffset;
+            int total = 0;
+            for (int i = 0; i < Children.Count; i++)
+            {
+                var c = (UIElement)Children[i];
+                if (!c.Visible) continue;
+                c.X = X;
+                c.Y = y;
+                c.Width = Width;
+                c.Layout();
+                y += c.Height + Spacing;
+                total += c.Height + Spacing;
+            }
+            if (total > 0) total -= Spacing;
+            _contentHeight = total;
+            if (ScrollOffset > MaxScroll) ScrollOffset = MaxScroll;
+            if (ScrollOffset < 0) ScrollOffset = 0;
+        }
+
+        /// <summary>Scroll by a finger delta (drag down = fingerDy&gt;0 = content moves down / earlier rows).</summary>
+        public void Scroll(int fingerDy)
+        {
+            ScrollOffset -= fingerDy;
+            if (ScrollOffset < 0) ScrollOffset = 0;
+            if (ScrollOffset > MaxScroll) ScrollOffset = MaxScroll;
+        }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            s.SetClip(X, Y, Width, Height);
+            base.Draw(s);      // children at their scrolled positions, clipped to the viewport
+            s.ClearClip();
+        }
+
+        public override bool OnTap(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false; // only taps inside the viewport reach rows
+            return base.OnTap(px, py);
+        }
+
+        public override bool OnPress(int px, int py)
+        {
+            if (!Visible || !Contains(px, py)) return false;
+            return base.OnPress(px, py);
+        }
+    }
+
     /// <summary>A labelled on/off toggle row (themed): label on the left, a pill track + knob on the
     /// right. Tapping flips <see cref="On"/> and fires <see cref="Toggled"/>.</summary>
     public class UISwitch : UIElement
@@ -285,6 +347,54 @@ namespace SpawnDev.UI
             if (Changed != null) Changed(Value);
             return true;
         }
+    }
+
+    /// <summary>A tappable settings/list row: rounded surface with a label on the left and a value/state
+    /// on the right; darkens while pressed and fires <see cref="Tapped"/> on tap. Rows with no
+    /// <see cref="Tapped"/> handler are informational (don't consume the tap).</summary>
+    public class UIListRow : UIElement
+    {
+        public delegate void TapHandler();
+
+        public string Label = "";
+        public string Value = "";
+        public int Scale = Theme.Current.BodyScale;
+        public TapHandler Tapped;
+        public bool Pressed;
+
+        public UIListRow() { Height = 40; }
+
+        public override void Draw(IUiSurface s)
+        {
+            if (!Visible) return;
+            var t = Theme.Current;
+            Color bg = Pressed ? t.SurfacePressed : t.Surface;
+            Shapes.RoundedRect(s, X, Y, Width, Height, t.Radius, bg);
+            int th = s.TextHeight(Scale);
+            int ty = Y + (Height - th) / 2;
+            s.DrawText(Label, X + t.CornerInset + 14, ty, Scale, t.OnSurface);
+            if (Value != null && Value.Length > 0)
+            {
+                int vw = s.MeasureText(Value, Scale);
+                s.DrawText(Value, X + Width - vw - t.CornerInset - 14, ty, Scale, t.Muted);
+            }
+        }
+
+        public override bool OnTap(int px, int py)
+        {
+            if (!Visible || !Contains(px, py) || Tapped == null) return false;
+            Tapped();
+            return true;
+        }
+
+        public override bool OnPress(int px, int py)
+        {
+            if (!Visible || !Contains(px, py) || Tapped == null) return false;
+            Pressed = true;
+            return true;
+        }
+
+        public override void OnRelease() { Pressed = false; }
     }
 
     /// <summary>Draws a single <see cref="UiIcon"/> centered + scaled to fit its bounds. For screen-scale

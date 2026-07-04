@@ -83,7 +83,15 @@ namespace SpawnWear.UI
         /// <see cref="TickTransition"/> each frame instead of the current screen's Tick.</summary>
         public bool IsTransitioning => _transitioning;
 
-        private void CaptureInto(Bitmap dst) => dst.DrawImage(new System.Drawing.Point(0, 0), _fb);
+        // Reset any clip left on the framebuffer by a scroll-list render, so captures/composites aren't
+        // limited to the scroll viewport. Defensive (SetClippingRectangle unverified on this firmware).
+        private void ClearFbClip() { try { _fb.SetClippingRectangle(0, 0, _w, _h); } catch { } }
+
+        private void CaptureInto(Bitmap dst)
+        {
+            ClearFbClip();
+            dst.DrawImage(new System.Drawing.Point(0, 0), _fb);
+        }
 
         // ---- Fixed chrome (status bar + page dots) drawn over the page content. It does NOT slide: each
         // rotation page's RenderNow draws it on top (via ChromeDrawer), the off-display snapshot excludes
@@ -265,6 +273,7 @@ namespace SpawnWear.UI
             _transOffset += _transStep;
             bool done = _transStep > 0 ? _transOffset >= _transTarget : _transOffset <= _transTarget;
             if (done) _transOffset = _transTarget;
+            ClearFbClip(); // a scroll page may have left a viewport clip that would crop the composite
             int o1 = _l1Base + (_l1Moves ? _transOffset : 0);
             int o2 = _l2Base + (_l2Moves ? _transOffset : 0);
             if (_axisX)

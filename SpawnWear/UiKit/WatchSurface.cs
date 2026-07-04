@@ -60,6 +60,11 @@ namespace SpawnDev.UI
             return (f != null && f.IsValid) ? f.Height : SmallFont.GlyphHeight * scale;
         }
 
+        // Defensive: SetClippingRectangle is not verified on this CO5300 firmware. If it throws, no-op
+        // (the scroll list may overflow, but it must NEVER crash/wedge the UI).
+        public void SetClip(int x, int y, int w, int h) { try { _fb.SetClippingRectangle(x, y, w, h); } catch { } }
+        public void ClearClip() { try { _fb.SetClippingRectangle(0, 0, _w, _h); } catch { } }
+
         public void Flush(int x, int y, int w, int h) => _fb.Flush(x, y, w, h);
 
         // No-arg Flush pushes the WHOLE bitmap reliably (the launcher uses this for full repaints).

@@ -20,8 +20,19 @@ namespace SpawnDev.UI
         void OnRelease();
     }
 
-    public abstract class WidgetScreen : IScreen, IPressable
+    /// <summary>A screen whose content can be scrolled vertically by a finger drag. The event loop calls
+    /// OnScroll with the finger's vertical delta while dragging.</summary>
+    public interface IScrollable
     {
+        void OnScroll(int fingerDy);
+    }
+
+    public abstract class WidgetScreen : IScreen, IPressable, IScrollable
+    {
+        /// <summary>A scrolling list on this screen, if any - set by a subclass. When set, vertical drags
+        /// scroll it (see <see cref="OnScroll"/>).</summary>
+        protected UIScrollColumn ScrollTarget;
+
         protected readonly IUiSurface Surface;
         protected UIElement Root;
 
@@ -54,6 +65,7 @@ namespace SpawnDev.UI
         private void RenderNow()
         {
             if (Root == null) return;
+            Surface.ClearClip();                     // drop any scroll-viewport clip left by a prior render
             Surface.Clear(Theme.Current.Background); // full clear (the launcher does this) before draw
             Root.Layout();
             Root.Draw(Surface);
@@ -68,6 +80,7 @@ namespace SpawnDev.UI
         public void RenderNoFlush()
         {
             if (Root == null) return;
+            Surface.ClearClip();                     // drop any scroll-viewport clip left by a prior render
             Surface.Clear(Theme.Current.Background);
             Root.Layout();
             Root.Draw(Surface);
@@ -120,6 +133,18 @@ namespace SpawnDev.UI
             // rendered the press; deferring keeps it visible.
             if (_pressShowing) _releaseRequested = true;
             else if (Root != null) Root.OnRelease();
+        }
+
+        // IScrollable: a vertical finger drag scrolls the screen's scroll list (if it has one).
+        public virtual void OnScroll(int fingerDy)
+        {
+            if (ScrollTarget != null)
+            {
+                if (Root != null) Root.OnRelease(); // a drag cancels any pending press-state on a row
+                _pressShowing = false; _releaseRequested = false;
+                ScrollTarget.Scroll(fingerDy);
+                _needsRender = true;
+            }
         }
     }
 

@@ -84,6 +84,10 @@ namespace SpawnWear
         static BootButtonAction _bootLongPressAction; // programmable long-press (AI agent hold-to-talk later)
         static bool _fingerDown;
         static long _lastTouchUtcTicks;
+        // Serializes framebuffer work between the main-loop render (OnTick) and the touch-thread gesture
+        // dispatch (press/scroll/tap that captures the screen for a slide transition), so a capture never
+        // races a mid-render framebuffer (which showed as a black/partial "beneath" during drop-downs).
+        static readonly object _uiLock = new object();
 
         // Tap-gesture detection state. A "tap" = finger goes down, stays within
         // a small radius for under TapMaxMs, then lifts. Anything longer is a
@@ -402,18 +406,21 @@ namespace SpawnWear
 
                 if (_screenState != ScreenState.Sleep)
                 {
-                    if (_nav.IsTransitioning)
+                    lock (_uiLock) // don't render while the touch thread is capturing for a slide transition
                     {
-                        _nav.TickTransition(); // animating a slide - composite frame, skip the screen tick
-                    }
-                    else
-                    {
-                        // Refresh the Companion-link icon from the live transport state. Cheap: the status
-                        // bar only repaints when the value actually changes (change-detection cache).
-                        if (_statusBar != null && _webrtc != null)
-                            _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
-                        _nav.Current.Tick();
-                        _nav.TickChrome(); // live status-bar clock for WidgetScreen rotation pages
+                        if (_nav.IsTransitioning)
+                        {
+                            _nav.TickTransition(); // animating a slide - composite frame, skip the screen tick
+                        }
+                        else
+                        {
+                            // Refresh the Companion-link icon from the live transport state. Cheap: the status
+                            // bar only repaints when the value actually changes (change-detection cache).
+                            if (_statusBar != null && _webrtc != null)
+                                _statusBar.SetCompanionConnected(_webrtc.Bus.IsConnected);
+                            _nav.Current.Tick();
+                            _nav.TickChrome(); // live status-bar clock for WidgetScreen rotation pages
+                        }
                     }
                 }
             }
@@ -1959,8 +1966,11 @@ namespace SpawnWear
                     int snapX = snapshot.X1;
                     int snapY = snapshot.Y1;
 
+                    lock (_uiLock) // serialize touch dispatch with the main-loop render (shared framebuffer)
+                    {
                     if (_fingerDown)
                     {
+                        int prevY = _fingerLastY;
                         _fingerLastX = snapX;
                         _fingerLastY = snapY;
                         _lastTouchUtcTicks = nowTicks;
@@ -1976,6 +1986,25 @@ namespace SpawnWear
                             {
                                 var pressDown = _nav.Current as SpawnDev.UI.IPressable;
                                 if (pressDown != null) pressDown.OnPress(snapX, snapY);
+                            }
+                        }
+                        else if (_nav != null && _screenState == ScreenState.Active)
+                        {
+                            // Held + dragging: a dominant-vertical drag (not from the status bar) scrolls the
+                            // current screen's list. The moved gesture also means the UP won't fire a tap.
+                            int totDx = snapX - _fingerDownX;
+                            int totDy = snapY - _fingerDownY;
+                            int aTdx = totDx < 0 ? -totDx : totDx;
+                            int aTdy = totDy < 0 ? -totDy : totDy;
+                            if (aTdy > aTdx && aTdy > 12 && _fingerDownY >= StatusBar.ReservedHeight)
+                            {
+                                var scroll = _nav.Current as SpawnDev.UI.IScrollable;
+                                int dyMove = snapY - prevY;
+                                if (scroll != null && dyMove != 0)
+                                {
+                                    scroll.OnScroll(dyMove);
+                                    if (_eventLoop != null) _eventLoop.Wake();
+                                }
                             }
                         }
                     }
@@ -2026,6 +2055,7 @@ namespace SpawnWear
                             }
                         }
                     }
+                    } // end lock (_uiLock)
 
                     // Wake the main loop so it picks up the new finger state and applies
                     // the appropriate tick budget (16 ms while held, 1 s when idle).
