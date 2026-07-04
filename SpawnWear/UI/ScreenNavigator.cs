@@ -54,6 +54,10 @@ namespace SpawnWear.UI
         private int _transTarget;      // final offset
         private int _transStep;        // signed per-frame delta
         private bool _transitioning;
+        // Chrome drawn over an axisX slide: 1 = full (status bar + carousel dots, for screen rotation),
+        // 2 = status bar only (launcher page slide - the launcher bakes its own app-page dots into the
+        // sliding content). Y-axis overlays draw no chrome regardless.
+        private int _transChromeMode = 1;
         private const int SlideStepPx = 90; // per-frame slide distance (30=slow .. 60=2x .. 90=3x .. 120=4x)
 
         /// <summary>Give the navigator the shared framebuffer and pre-allocate the two transition buffers
@@ -99,12 +103,12 @@ namespace SpawnWear.UI
         private StatusBar _chromeBar;
         public void SetChrome(StatusBar bar) { _chromeBar = bar; }
 
-        /// <summary>Draw the fixed chrome into the framebuffer (no flush): status bar at top, page dots at
-        /// the bottom for the current rotation position (only at the rotation base - overlays hide it).</summary>
+        /// <summary>Draw the fixed chrome into the framebuffer (no flush): just the status bar at top.
+        /// (There is no screen carousel anymore, so no carousel page dots - the launcher draws its own
+        /// app-page dots. Kept as the WidgetScreen ChromeDrawer so every widget screen shows the bar.)</summary>
         public void DrawChrome()
         {
             if (_chromeBar != null) _chromeBar.Render(force: true, flush: false);
-            if (_depth == 0 && _screens.Length > 1) PageDots.Render(_fb, _w, _h, _activeIndex, _screens.Length);
         }
 
         /// <summary>Cheap per-tick live update of the status-bar clock for a WidgetScreen rotation page
@@ -233,6 +237,7 @@ namespace SpawnWear.UI
             Next();                    // switch to B (WidgetScreen OnResume defers - no flush)
             ws.RenderNoFlush();        // draw B off-display
             CaptureInto(_snapOver);    // capture B; the display still shows A
+            _transChromeMode = 1;      // full chrome (status bar + carousel dots) over the rotation slide
             // Both slide LEFT together (X): A from 0 -> -w, B from +w -> 0.
             BeginTransition(_snapUnder, 0, true, _snapOver, _w, true, true, 0, -_w, -SlideStepPx);
         }
@@ -250,8 +255,41 @@ namespace SpawnWear.UI
             Prev();                    // switch to B
             ws.RenderNoFlush();        // draw B off-display
             CaptureInto(_snapOver);    // capture B
+            _transChromeMode = 1;      // full chrome (status bar + carousel dots) over the rotation slide
             // Both slide RIGHT together (X): A from 0 -> +w, B from -w -> 0.
             BeginTransition(_snapUnder, 0, true, _snapOver, -_w, true, true, 0, _w, SlideStepPx);
+        }
+
+        /// <summary>Renders the incoming content into the framebuffer WITHOUT flushing - the caller draws
+        /// its next page here so the navigator can capture and slide it.</summary>
+        public delegate void RenderContent();
+
+        // Caller-supplied fixed chrome for a content slide (status bar + the launcher's app-page dots),
+        // redrawn on top of the sliding tiles every frame so it stays put while only the content moves.
+        private RenderContent _transFixedChrome;
+
+        /// <summary>Horizontal content slide within a single self-chromed screen (the launcher paging
+        /// between app-grid pages). Mirrors the rotation slide's fixed-chrome model: only the sliding
+        /// CONTENT (tiles) is captured and moved; the chrome (status bar + app-page dots) is redrawn
+        /// FIXED on top each frame via <paramref name="drawFixedChrome"/>, so the dots stay in place and
+        /// just change which one is lit. <paramref name="renderOutgoing"/> and
+        /// <paramref name="renderIncoming"/> each draw one page's tiles-only content into the framebuffer
+        /// (no chrome, no flush) to be captured. <paramref name="forward"/>=true means the new page
+        /// enters from the right (swipe left). Returns false if it can't animate (caller repaints instantly).</summary>
+        public bool SlideContentHorizontal(bool forward, RenderContent renderOutgoing, RenderContent renderIncoming, RenderContent drawFixedChrome)
+        {
+            if (!_canTransition || _transitioning || renderOutgoing == null || renderIncoming == null) return false;
+            renderOutgoing();          // draw the outgoing page's tiles (no chrome) into fb
+            CaptureInto(_snapUnder);   // capture outgoing tiles; display still shows the live page
+            renderIncoming();          // draw the incoming page's tiles (no chrome) into fb
+            CaptureInto(_snapOver);    // capture incoming tiles
+            _transFixedChrome = drawFixedChrome;
+            _transChromeMode = 2;      // caller-supplied fixed chrome (status bar + app-page dots)
+            if (forward)
+                BeginTransition(_snapUnder, 0, true, _snapOver, _w, true, true, 0, -_w, -SlideStepPx);
+            else
+                BeginTransition(_snapUnder, 0, true, _snapOver, -_w, true, true, 0, _w, SlideStepPx);
+            return true;
         }
 
         private void BeginTransition(Bitmap layer1, int l1Base, bool l1Moves,
@@ -287,7 +325,11 @@ namespace SpawnWear.UI
                 _fb.DrawImage(new System.Drawing.Point(0, o2), _layer2);
             }
             // Rotation (horizontal) pages carry the fixed chrome on top; modal overlays (vertical) don't.
-            if (_axisX) DrawChrome();
+            if (_axisX)
+            {
+                if (_transChromeMode == 1) DrawChrome();                                   // status bar + carousel dots
+                else if (_transChromeMode == 2 && _transFixedChrome != null) _transFixedChrome(); // caller-supplied fixed chrome (status bar + app-page dots)
+            }
             _fb.Flush();
             if (done)
             {

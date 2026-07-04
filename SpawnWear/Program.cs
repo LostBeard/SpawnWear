@@ -293,6 +293,7 @@ namespace SpawnWear
                 wifiScreen.SetPageDots(5, 7);
                 loadedApp.SetPageDots(6, 7);
                 launcher.SetStatusBar(statusBar);
+                launcher.SetNavigator(_nav); // enables the animated horizontal slide between app-grid pages
                 watchface.SetStatusBar(statusBar);
                 stats.SetStatusBar(statusBar);
                 settings.SetStatusBar(statusBar);
@@ -447,21 +448,16 @@ namespace SpawnWear
         /// at boot and on every resume, so installs / uninstalls appear live.</summary>
         static LauncherScreen.Tile[] BuildLauncherTiles()
         {
-            var builtins = new LauncherScreen.Tile[]
-            {
-                new LauncherScreen.Tile { Label = "CLOCK",    TargetScreenIndex = 1, Icon = LauncherScreen.IconKind.Clock,    Background = Color.FromArgb(58, 70, 128) },
-                new LauncherScreen.Tile { Label = "STATS",    TargetScreenIndex = 2, Icon = LauncherScreen.IconKind.Stats,    Background = Color.FromArgb(44, 104, 92) },
-                new LauncherScreen.Tile { Label = "SETTINGS", TargetScreenIndex = 3, Icon = LauncherScreen.IconKind.Settings, Background = Color.FromArgb(128, 96, 52) },
-                new LauncherScreen.Tile { Label = "WIFI",     TargetScreenIndex = 5, Icon = LauncherScreen.IconKind.Wifi,     Background = Color.FromArgb(48, 100, 140) },
-            };
-
+            // The launcher is an APP DRAWER - only installed apps, one tile each (TJ 2026-07-04). The
+            // built-in system screens (clock/watchface, stats, settings, wifi) are NOT launcher tiles;
+            // they live on the screen carousel (swipe past the app pages) and inside Settings. WIFI is
+            // already a Settings entry.
             AppInfo[] apps = _appRepo != null ? _appRepo.ListInfo() : new AppInfo[0];
-            var tiles = new LauncherScreen.Tile[builtins.Length + apps.Length];
-            for (int i = 0; i < builtins.Length; i++) tiles[i] = builtins[i];
+            var tiles = new LauncherScreen.Tile[apps.Length];
             for (int i = 0; i < apps.Length; i++)
             {
                 string name = apps[i].Name;
-                tiles[builtins.Length + i] = new LauncherScreen.Tile
+                tiles[i] = new LauncherScreen.Tile
                 {
                     Label = name,
                     AppName = name,                 // marks this as an app tile
@@ -657,9 +653,18 @@ namespace SpawnWear
                     QsGetBle, QsSetBle,
                     QsGetCompanion, QsSetCompanion,
                     QsGetHttp, QsSetHttp,
-                    QsGetBrightness, QsSetBrightness);
+                    QsGetBrightness, QsSetBrightness,
+                    QsOpenSettings);
             }
             _nav.PushAnimated(_quickSettings); // slide down over the current screen
+        }
+
+        // Opens the Settings screen from the quick-settings drop-down. GoTo clears the quick-settings
+        // overlay first, then switches to the Settings rotation screen (index 3 in the nav stack). With
+        // the launcher an apps-only drawer, this is the primary way into Settings.
+        static void QsOpenSettings()
+        {
+            if (_nav != null) _nav.GoTo(3);
         }
 
         static bool QsGetWifi() { return _wifi != null && _wifi.IsConnected; }
@@ -2033,21 +2038,17 @@ namespace SpawnWear
                             // Release the press-state first (button returns to normal), then the tap.
                             var pressUp = _nav.Current as SpawnDev.UI.IPressable;
                             if (pressUp != null) pressUp.OnRelease();
-                            if (isLongPress) _nav.GoHome();
-                            else if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
+                            // Touchscreen long-press no longer navigates home - the hardware back
+                            // button owns back/home (TJ 2026-07-04). isLongPress stays for logging.
+                            if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
                             else if (isSwipe)
                             {
-                                // On a paginated screen (the launcher), a horizontal swipe pages the
-                                // app grid first; only fall through to the screen carousel when the
-                                // launcher is already at a page boundary.
+                                // Horizontal swipe pages the launcher's app drawer (the only IPageable
+                                // screen). There is NO screen carousel anymore - other screens ignore
+                                // horizontal swipes. Reach apps via the launcher, Settings via the
+                                // quick-settings SETTINGS shortcut, and go back with the BOOT button.
                                 var pageable = _nav.Current as SpawnDev.UI.IPageable;
-                                int pageDir = dx < 0 ? 1 : -1; // swipe left -> next page, right -> prev page
-                                if (pageable != null && pageable.TryPage(pageDir))
-                                {
-                                    // consumed - the launcher advanced a page and repainted itself.
-                                }
-                                else if (dx < 0) _nav.NextAnimated();  // swipe left -> next screen (slides)
-                                else _nav.PrevAnimated();               // swipe right -> previous screen (slides)
+                                if (pageable != null) pageable.TryPage(dx < 0 ? 1 : -1); // left -> next page, right -> prev
                             }
                             else if (isTap)
                             {

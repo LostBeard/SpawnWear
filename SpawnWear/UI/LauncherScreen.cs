@@ -60,6 +60,7 @@ namespace SpawnWear.UI
         readonly TileProvider _tileProvider;
         readonly ActivateTile _activate;
         StatusBar _statusBar;
+        ScreenNavigator _nav;   // for animated page-slide transitions (set via SetNavigator)
         int _pageDotIndex = -1;
         int _pageDotCount;
 
@@ -118,15 +119,32 @@ namespace SpawnWear.UI
         // dir = +1 next page (swipe left), -1 previous page (swipe right).
         public bool TryPage(int dir)
         {
-            int target = _page + dir;
-            if (target < 0 || target >= PageCount()) return false;
-            _page = target;
-            System.Diagnostics.Debug.WriteLine("[Launcher] page -> " + _page + "/" + (PageCount() - 1));
-            Invalidate();
+            // The launcher is an app drawer: a horizontal swipe stays WITHIN the app pages and WRAPS at
+            // the ends (last -> first, first -> last). It always consumes the swipe (returns true) so it
+            // never falls through to a screen carousel - there is no carousel behind the apps anymore.
+            int pages = PageCount();
+            if (pages <= 1) return true; // single page (or none): consume and stay put
+            int from = _page;
+            int target = (_page + dir + pages) % pages; // wrap around at the ends
+            bool forward = dir > 0; // next page enters from the right (swipe left)
+            System.Diagnostics.Debug.WriteLine("[Launcher] page -> " + target + "/" + (pages - 1));
+            // Animate as a horizontal slide (matching the screen transitions): ONLY the tile content
+            // slides. The status bar and the page-dot panel are redrawn FIXED on top each frame - the
+            // dots stay put and just relight for the new page (they are NOT baked into the sliding
+            // tiles). Falls back to an instant repaint if the slide can't run.
+            if (_nav == null || !_nav.SlideContentHorizontal(forward,
+                    delegate { _page = from; DrawTiles(); },                       // outgoing page tiles
+                    delegate { _page = target; DrawTiles(); },                     // incoming page tiles (leaves _page = target)
+                    delegate { _statusBar?.Render(true, false); DrawDots(); }))    // fixed panel: status bar + target-page dots
+            {
+                _page = target;
+                Invalidate();
+            }
             return true;
         }
 
         public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
+        public void SetNavigator(ScreenNavigator nav) { _nav = nav; }
         public void SetPageDots(int activeIndex, int total) { _pageDotIndex = activeIndex; _pageDotCount = total; }
 
         public void Tick()
@@ -135,6 +153,18 @@ namespace SpawnWear.UI
         }
 
         public void Invalidate()
+        {
+            DrawTiles();
+            DrawDots();
+            _fb.Flush();
+            _statusBar?.Render(force: true);
+        }
+
+        // Draws the current page's TILES into the framebuffer - no dots, no status bar, no flush. This
+        // is the SLIDING content of a page-swipe animation; the dots + status bar are drawn separately
+        // as FIXED chrome on top (see DrawDots and the slide's fixed-chrome callback) so they stay put
+        // while only the tiles move.
+        void DrawTiles()
         {
             Layout();
             _fb.Clear();
@@ -154,17 +184,19 @@ namespace SpawnWear.UI
                     DrawTile(x, y, _tiles[idx]);
                 }
             }
+        }
 
-            // Page dots reflect the app-grid page (which page of apps you're on), not the
-            // screen carousel. Only shown when there's more than one page of apps.
+        // Draws the app-page dot panel - a FIXED pagination indicator (which page of apps you're on),
+        // NOT part of the sliding tile content. Shown only when there's more than one page; highlights
+        // the current _page. Drawn on top of the tiles by Invalidate and, during a slide, redrawn fixed
+        // each frame by the slide's fixed-chrome callback so the dots never move with the tiles.
+        void DrawDots()
+        {
             int pages = PageCount();
             if (pages > 1)
             {
                 PageDots.Render(_fb, _panelWidth, _panelHeight, _page, pages);
             }
-
-            _fb.Flush();
-            _statusBar?.Render(force: true);
         }
 
         public void OnResume() { RefreshTiles(); Invalidate(); }

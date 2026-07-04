@@ -40,7 +40,8 @@ namespace SpawnWear.UI
             BoolGetter getBle, UITile.ToggleHandler setBle,
             BoolGetter getCompanion, UITile.ToggleHandler setCompanion,
             BoolGetter getHttp, UITile.ToggleHandler setHttp,
-            IntGetter getBrightness, UISlider.ChangeHandler setBrightness)
+            IntGetter getBrightness, UISlider.ChangeHandler setBrightness,
+            UIListRow.TapHandler openSettings)
             : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
             _getWifi = getWifi;
@@ -95,6 +96,13 @@ namespace SpawnWear.UI
             col.Add(row1);
             col.Add(row2);
             col.Add(_brightness);
+
+            // Full-width SETTINGS row opens the Settings screen. With the launcher an apps-only drawer
+            // (no screen carousel), this drop-down is the way into Settings.
+            if (openSettings != null)
+            {
+                col.Add(new UIListRow { Label = "SETTINGS", Height = 56, Tapped = openSettings });
+            }
 
             root.Add(col);
             Root = root;
