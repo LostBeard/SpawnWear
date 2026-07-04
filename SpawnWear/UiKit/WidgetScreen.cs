@@ -27,6 +27,16 @@ namespace SpawnDev.UI
         void OnScroll(int fingerDy);
     }
 
+    /// <summary>A screen whose content is horizontally paginated - e.g. the launcher's app grid across
+    /// multiple pages. A horizontal swipe asks the screen to change page first via <see cref="TryPage"/>;
+    /// it returns true if it consumed the swipe (changed page) or false if already at the edge, in which
+    /// case the caller falls through to the screen carousel. <paramref name="dir"/> is +1 for the next
+    /// page (swipe left) or -1 for the previous page (swipe right).</summary>
+    public interface IPageable
+    {
+        bool TryPage(int dir);
+    }
+
     public abstract class WidgetScreen : IScreen, IPressable, IScrollable
     {
         /// <summary>A scrolling list on this screen, if any - set by a subclass. When set, vertical drags

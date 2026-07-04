@@ -1,5 +1,6 @@
 using nanoFramework.UI;
 using System.Drawing;
+using SpawnDev.UI;   // IPageable
 
 namespace SpawnWear.UI
 {
@@ -15,7 +16,7 @@ namespace SpawnWear.UI
     /// "manifests" loaded from the SD card register their own tiles + icon
     /// data.
     /// </summary>
-    public class LauncherScreen : IScreen
+    public class LauncherScreen : IScreen, IPageable
     {
         /// <summary>Invoked when a non-placeholder tile is tapped. The handler
         /// decides what to do based on the tile: a built-in tile navigates to
@@ -66,6 +67,11 @@ namespace SpawnWear.UI
         // gaps between them, centered horizontally and below the status bar.
         const int Cols = 3;
         const int Rows = 3;
+        const int PerPage = Cols * Rows;   // 9 tiles per launcher page
+
+        // Current app-grid page. A horizontal swipe moves between pages (Android-style);
+        // the page dots at the bottom reflect this page, not the screen carousel.
+        int _page = 0;
         int _tileSize;
         int _tileGap;
         int _gridTopY;
@@ -89,6 +95,35 @@ namespace SpawnWear.UI
             if (_tileProvider == null) return;
             var t = _tileProvider();
             if (t != null) _tiles = t;
+            ClampPage(); // an uninstall may have removed the page we were on
+        }
+
+        // Number of app-grid pages needed to show every tile, at PerPage tiles each. Always >= 1.
+        int PageCount()
+        {
+            int n = (_tiles.Length + PerPage - 1) / PerPage;
+            return n < 1 ? 1 : n;
+        }
+
+        // Keep _page within [0, PageCount-1] after the tile set changes.
+        void ClampPage()
+        {
+            int max = PageCount() - 1;
+            if (_page > max) _page = max;
+            if (_page < 0) _page = 0;
+        }
+
+        // IPageable: a horizontal swipe on the launcher pages the app grid. Returns true if it changed
+        // page (consumed the swipe); false at the edge so the caller falls through to the screen carousel.
+        // dir = +1 next page (swipe left), -1 previous page (swipe right).
+        public bool TryPage(int dir)
+        {
+            int target = _page + dir;
+            if (target < 0 || target >= PageCount()) return false;
+            _page = target;
+            System.Diagnostics.Debug.WriteLine("[Launcher] page -> " + _page + "/" + (PageCount() - 1));
+            Invalidate();
+            return true;
         }
 
         public void SetStatusBar(StatusBar bar) { _statusBar = bar; }
@@ -105,13 +140,14 @@ namespace SpawnWear.UI
             _fb.Clear();
             _fb.FillRectangle(0, 0, _panelWidth, _panelHeight, Color.Black);
 
-            // 3x3 grid. Empty slots (i >= _tiles.Length) render nothing so the
-            // launcher gracefully scales from 1 to 9 registered apps.
+            // 3x3 grid for the current page. Slots past the end of the tile set (last
+            // page partially full) render nothing, so the launcher scales gracefully.
+            int pageBase = _page * PerPage;
             for (int row = 0; row < Rows; row++)
             {
                 for (int col = 0; col < Cols; col++)
                 {
-                    int idx = row * Cols + col;
+                    int idx = pageBase + row * Cols + col;
                     if (idx >= _tiles.Length) break;
                     int x = _gridLeftX + col * (_tileSize + _tileGap);
                     int y = _gridTopY + row * (_tileSize + _tileGap);
@@ -119,10 +155,12 @@ namespace SpawnWear.UI
                 }
             }
 
-            // Page dots.
-            if (_pageDotCount > 1)
+            // Page dots reflect the app-grid page (which page of apps you're on), not the
+            // screen carousel. Only shown when there's more than one page of apps.
+            int pages = PageCount();
+            if (pages > 1)
             {
-                PageDots.Render(_fb, _panelWidth, _panelHeight, _pageDotIndex, _pageDotCount);
+                PageDots.Render(_fb, _panelWidth, _panelHeight, _page, pages);
             }
 
             _fb.Flush();
@@ -150,7 +188,7 @@ namespace SpawnWear.UI
             int rowInSlot = relY - rowSlot * (_tileSize + _tileGap);
             if (colInSlot >= _tileSize || rowInSlot >= _tileSize) return false;
 
-            int idx = rowSlot * Cols + colSlot;
+            int idx = _page * PerPage + rowSlot * Cols + colSlot;
             if (idx >= _tiles.Length) return false;
 
             var tile = _tiles[idx];

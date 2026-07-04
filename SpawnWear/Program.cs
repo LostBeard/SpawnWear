@@ -2037,8 +2037,17 @@ namespace SpawnWear
                             else if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
                             else if (isSwipe)
                             {
-                                if (dx < 0) _nav.NextAnimated();  // swipe left -> next screen (slides)
-                                else _nav.PrevAnimated();          // swipe right -> previous screen (slides)
+                                // On a paginated screen (the launcher), a horizontal swipe pages the
+                                // app grid first; only fall through to the screen carousel when the
+                                // launcher is already at a page boundary.
+                                var pageable = _nav.Current as SpawnDev.UI.IPageable;
+                                int pageDir = dx < 0 ? 1 : -1; // swipe left -> next page, right -> prev page
+                                if (pageable != null && pageable.TryPage(pageDir))
+                                {
+                                    // consumed - the launcher advanced a page and repainted itself.
+                                }
+                                else if (dx < 0) _nav.NextAnimated();  // swipe left -> next screen (slides)
+                                else _nav.PrevAnimated();               // swipe right -> previous screen (slides)
                             }
                             else if (isTap)
                             {
