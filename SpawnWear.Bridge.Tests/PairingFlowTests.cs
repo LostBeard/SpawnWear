@@ -1,5 +1,5 @@
-using SpawnDev.BlazorJS.Cryptography;
-using SpawnDev.BlazorJS.Cryptography.DotNet;
+using SpawnDev.SpawnJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography.DotNet;
 using SpawnWear.Bridge.Pairing;
 
 namespace SpawnWear.Bridge.Tests;
@@ -255,7 +255,7 @@ public class PairingFlowTests
         byte[] watchBPubRaw = RawFromSpki(await crypto.ExportPublicKeySpki(watchBKey));
 
         // Watch A and watch B sign with their respective keys.
-        Func<byte[], SpawnDev.BlazorJS.Cryptography.PortableEd25519Key, HookedFakeTransport> makeTransport =
+        Func<byte[], SpawnDev.SpawnJS.Cryptography.PortableEd25519Key, HookedFakeTransport> makeTransport =
             (watchPubRaw, watchKey) =>
                 new HookedFakeTransport(watchPubRaw, async sentPayload =>
                 {

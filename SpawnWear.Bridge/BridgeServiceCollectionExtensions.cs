@@ -39,7 +39,7 @@ public static class BridgeServiceCollectionExtensions
         services.AddScoped<WebRtc.WebRtcTransportFactory>(sp =>
             new WebRtc.WebRtcTransportFactory(
                 sp.GetService<WebRtc.BridgeWebRtcOptions>(),
-                sp.GetRequiredService<SpawnDev.BlazorJS.Cryptography.IPortableCrypto>()));
+                sp.GetRequiredService<SpawnDev.SpawnJS.Cryptography.IPortableCrypto>()));
 
         return services;
     }

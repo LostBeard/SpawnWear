@@ -1,5 +1,5 @@
-using SpawnDev.BlazorJS;
-using SpawnDev.BlazorJS.JSObjects;
+using SpawnDev.SpawnJS;
+using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnWear.Companion.Services;
 
@@ -18,8 +18,8 @@ public class WatchPrefs
 {
     const string KeyWatchUrl = "spawnwear.watchUrl";
 
-    readonly BlazorJSRuntime _js;
-    public WatchPrefs(BlazorJSRuntime js) { _js = js; }
+    readonly SpawnJSRuntime _js;
+    public WatchPrefs(SpawnJSRuntime js) { _js = js; }
 
     public string? WatchUrl
     {

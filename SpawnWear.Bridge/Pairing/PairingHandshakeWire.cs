@@ -3,7 +3,7 @@ namespace SpawnWear.Bridge.Pairing;
 /// <summary>
 /// Wire-format encoder/decoder for the BLE pairing handshake. Crypto-free —
 /// just the byte packing. Sign/verify happens at the call site via
-/// <see cref="SpawnDev.BlazorJS.Cryptography.IPortableCrypto"/> against the
+/// <see cref="SpawnDev.SpawnJS.Cryptography.IPortableCrypto"/> against the
 /// <see cref="SignedDomainCompanionToWatch"/> and
 /// <see cref="SignedDomainWatchToCompanion"/> outputs of this class.
 ///

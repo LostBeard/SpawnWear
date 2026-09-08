@@ -1,4 +1,4 @@
-using SpawnDev.BlazorJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography;
 
 namespace SpawnWear.Bridge.Pairing;
 

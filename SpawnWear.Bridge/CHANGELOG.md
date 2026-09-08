@@ -31,7 +31,7 @@ Initial public surface.
 
 ### Added
 - `ITransport` abstraction with `ConnectAsync` / `SendAsync` / `RefreshAsync` / `DisconnectAsync` + `IsConnected` / `PeerName` properties + `ConnectionChanged` / `MessageReceived` events.
-- `BleTransport` (Web Bluetooth via SpawnDev.BlazorJS): `requestDevice` filtered on the SpawnWear primary GATT service UUID with `SW-` name-prefix fallback, GATT connect, primary service resolve, every characteristic resolved (battery / IMU / RTC / button / wifi-status / wifi-scan / debug-log on notify side; wifi-cmd / wifi-creds / debug-cmd on write side), `StartNotifications` + `OnCharacteristicValueChanged` subscriptions wired, `Device.OnGATTServerDisconnected` cleanup.
+- `BleTransport` (Web Bluetooth via SpawnDev.SpawnJS): `requestDevice` filtered on the SpawnWear primary GATT service UUID with `SW-` name-prefix fallback, GATT connect, primary service resolve, every characteristic resolved (battery / IMU / RTC / button / wifi-status / wifi-scan / debug-log on notify side; wifi-cmd / wifi-creds / debug-cmd on write side), `StartNotifications` + `OnCharacteristicValueChanged` subscriptions wired, `Device.OnGATTServerDisconnected` cleanup.
 - `WebRtcTransport` stub (Phase 7) with the `BLE-as-signaling` plan documented in code.
 - `BridgeClient` with strongly-typed events: `BatteryChanged` / `ImuSampleReceived` / `RtcTimeReceived` / `ButtonEventReceived` / `WifiStatusChanged` / `WifiScanResultsReceived` / `DebugLogReceived`. `RefreshAsync` triggers an on-demand read of every readable characteristic so consumers see current state immediately after pairing.
 - Channel ID constants (`ChannelIds.Battery`, `ImuSample`, `RtcTime`, `Button`, `WifiStatus`, `WifiScan`, `WifiCommand`, `WifiCredentials`, `DebugLog`, `DebugCmd`).

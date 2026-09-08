@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using SpawnDev.BlazorJS;
-using SpawnDev.BlazorJS.JSObjects;
+using SpawnDev.SpawnJS;
+using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnWear.Bridge.Ble;
 
@@ -21,7 +21,7 @@ namespace SpawnWear.Bridge.Ble;
 /// </summary>
 public class BleTransport : ITransport, IAsyncDisposable
 {
-    readonly BlazorJSRuntime _js;
+    readonly SpawnJSRuntime _js;
 
     BluetoothDevice? _device;
     BluetoothRemoteGATTServer? _server;
@@ -46,7 +46,7 @@ public class BleTransport : ITransport, IAsyncDisposable
     BluetoothRemoteGATTCharacteristic? _pairingPubKey;
     BluetoothRemoteGATTCharacteristic? _pairingHandshake;
 
-    public BleTransport(BlazorJSRuntime js)
+    public BleTransport(SpawnJSRuntime js)
     {
         _js = js;
     }

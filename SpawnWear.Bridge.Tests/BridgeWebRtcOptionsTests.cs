@@ -1,4 +1,4 @@
-using SpawnDev.BlazorJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography;
 using SpawnWear.Bridge.WebRtc;
 
 namespace SpawnWear.Bridge.Tests;

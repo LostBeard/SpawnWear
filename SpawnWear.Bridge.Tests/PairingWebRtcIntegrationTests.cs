@@ -1,5 +1,5 @@
-using SpawnDev.BlazorJS.Cryptography;
-using SpawnDev.BlazorJS.Cryptography.DotNet;
+using SpawnDev.SpawnJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography.DotNet;
 using SpawnWear.Bridge.Pairing;
 using SpawnWear.Bridge.WebRtc;
 

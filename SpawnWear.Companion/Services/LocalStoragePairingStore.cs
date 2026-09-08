@@ -1,6 +1,6 @@
 using System.Text.Json;
-using SpawnDev.BlazorJS;
-using SpawnDev.BlazorJS.JSObjects;
+using SpawnDev.SpawnJS;
+using SpawnDev.SpawnJS.JSObjects;
 using SpawnWear.Bridge.Pairing;
 
 namespace SpawnWear.Companion.Services;
@@ -25,13 +25,13 @@ public class LocalStoragePairingStore : IPairingStore
 {
     const string KeyPrefix = "spawnwear.pair.";
 
-    readonly BlazorJSRuntime _js;
+    readonly SpawnJSRuntime _js;
     readonly JsonSerializerOptions _opts = new()
     {
         PropertyNameCaseInsensitive = true,
     };
 
-    public LocalStoragePairingStore(BlazorJSRuntime js)
+    public LocalStoragePairingStore(SpawnJSRuntime js)
     {
         _js = js;
     }

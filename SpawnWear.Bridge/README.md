@@ -2,7 +2,7 @@
 
 Razor Class Library that bridges Blazor WebAssembly apps to a [SpawnWear](https://github.com/LostBeard/SpawnWear) watch (Waveshare ESP32-S3-Touch-AMOLED-2.06 running .NET nanoFramework). Provides a typed `BridgeClient` that pairs over Web Bluetooth and surfaces watch state - battery, IMU, RTC, button events, WiFi status / scan results, and the live debug log - through ordinary C# events. WebRTC peer-to-peer transport is live (Phase 7, proven end to end 2026-06-23 - see [`Docs/transport.md`](../Docs/transport.md)): an authenticated, multiplexed data-channel bus over [SpawnDev.RTC](https://github.com/LostBeard/SpawnDev.RTC), working in both browser and .NET desktop.
 
-No raw JavaScript. No `IJSRuntime`. All interop goes through [SpawnDev.BlazorJS](https://github.com/LostBeard/SpawnDev.BlazorJS) typed wrappers.
+No raw JavaScript. No `IJSRuntime`. All interop goes through [SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS) typed wrappers.
 
 ## Install
 
@@ -17,16 +17,16 @@ No raw JavaScript. No `IJSRuntime`. All interop goes through [SpawnDev.BlazorJS]
 `Program.cs`:
 
 ```csharp
-using SpawnDev.BlazorJS;
+using SpawnDev.SpawnJS;
 using SpawnWear.Bridge;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 
-builder.Services.AddBlazorJSRuntime();
+builder.Services.AddSpawnJSRuntime();
 builder.Services.AddSpawnWearBridge();   // <-- this line
 
-await builder.Build().BlazorJSRunAsync();
+await builder.Build().SpawnJSRunAsync();
 ```
 
 `AddSpawnWearBridge` registers `BleTransport` and `BridgeClient` as scoped services (one per browser tab). The default transport is BLE; consumers can swap to a different `ITransport` via `client.UseTransportAsync(...)`.
@@ -111,7 +111,7 @@ Your Blazor WASM page
 │ BleTransport   │    │ WebRtcTransport        │
 │ (Web Bluetooth │    │ (SpawnDev.RTC, LIVE;   │
 │  via SpawnDev. │    │  signals over BLE so   │
-│  BlazorJS)     │    │  no shared network     │
+│  SpawnJS)     │    │  no shared network     │
 │                │    │  needed)               │
 └────────┬───────┘    └─────────┬──────────────┘
          │                      │

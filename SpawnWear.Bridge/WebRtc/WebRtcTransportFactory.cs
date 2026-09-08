@@ -1,4 +1,4 @@
-using SpawnDev.BlazorJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography;
 using SpawnDev.RTC.Signaling;
 using SpawnWear.Bridge.Pairing;
 

@@ -1,9 +1,9 @@
 @page "/mirror"
-@using SpawnDev.BlazorJS
-@using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.SpawnJS
+@using SpawnDev.SpawnJS.JSObjects
 @using SpawnWear.Bridge
 @using SpawnWear.Companion.Services
-@inject BlazorJSRuntime JS
+@inject SpawnJSRuntime JS
 @inject BridgeClient Bridge
 @inject WatchHttp WatchHttp
 @inject WatchPrefs Prefs
@@ -158,7 +158,7 @@
 
     async Task PushToCanvas(int w, int h, byte[] rgba)
     {
-        // SpawnDev.BlazorJS typed Canvas / ImageData interop. No raw JS.
+        // SpawnDev.SpawnJS typed Canvas / ImageData interop. No raw JS.
         using var doc = JS.Get<Document>("document");
         using var canvas = doc.GetElementById<HTMLCanvasElement>("mirror-canvas");
         if (canvas is null) throw new InvalidOperationException("Canvas element not in DOM yet.");

@@ -1,4 +1,4 @@
-using SpawnDev.BlazorJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography;
 using SpawnDev.RTC;
 using SpawnDev.RTC.Signaling;
 using SpawnWear.Bridge.Pairing;
@@ -53,7 +53,7 @@ public class WebRtcTransport : ITransport, IAsyncDisposable
     TaskCompletionSource<bool>? _verifyTcs;
 
     /// <param name="signaling">Already-constructed signaling client (e.g. <see cref="TrackerSignalingClient"/> bound to <c>wss://hub.spawndev.com</c>).</param>
-    /// <param name="crypto">Cross-platform Ed25519. <c>SpawnDev.BlazorJS.Cryptography</c> picks the right backend per runtime.</param>
+    /// <param name="crypto">Cross-platform Ed25519. <c>SpawnDev.SpawnJS.Cryptography</c> picks the right backend per runtime.</param>
     /// <param name="pairing">Result of a prior BLE pairing. Contains both Ed25519 keypairs (raw + PKCS8) + the agreed <c>RoomKey</c>.</param>
     /// <param name="rtcConfig">Optional ICE / bundle / transport-policy config. <c>null</c> = platform defaults.</param>
     public WebRtcTransport(
