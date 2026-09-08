@@ -36,6 +36,8 @@ namespace SpawnWear
         static CompanionScreen _companionScreen;
         static UiKitDemoScreen _uiDemoScreen;
         static GraphicsProbeScreen _gfxProbeScreen;
+        static StatsScreen _statsScreen;   // pushed as a sub-page from Settings -> STATS
+        static AboutScreen _aboutScreen;   // pushed as a sub-page from Settings -> ABOUT
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
         static WifiService _wifi;
@@ -238,9 +240,10 @@ namespace SpawnWear
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
+                _statsScreen = stats; _aboutScreen = about; // reachable as sub-pages pushed from Settings (STATS / ABOUT)
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
                     ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage,
-                    OpenUiKitPage, OpenGfxProbePage);
+                    OpenUiKitPage, OpenGfxProbePage, OpenStatsPage, OpenAboutPage);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
@@ -284,14 +287,8 @@ namespace SpawnWear
                 // (so /apps/launch can switch to the app) + the SD app library.
                 // Also gives the navigator to /touch so the Mirror remote works.
                 _http?.AttachAppLoader(loadedApp, _nav, AppSlotIndex, _appRepo);
-                // Wire page-dot indices + the shared status bar into each screen.
-                launcher.SetPageDots(0, 7);
-                watchface.SetPageDots(1, 7);
-                stats.SetPageDots(2, 7);
-                settings.SetPageDots(3, 7);
-                about.SetPageDots(4, 7);
-                wifiScreen.SetPageDots(5, 7);
-                loadedApp.SetPageDots(6, 7);
+                // Page dots: the launcher draws its own app-page dot panel; there is no screen carousel,
+                // so no per-screen carousel dots are wired anymore (removed SetPageDots(i, 7)).
                 launcher.SetStatusBar(statusBar);
                 launcher.SetNavigator(_nav); // enables the animated horizontal slide between app-grid pages
                 watchface.SetStatusBar(statusBar);
@@ -574,6 +571,21 @@ namespace SpawnWear
                 _gfxProbeScreen.SetStatusBar(_statusBar);
             }
             _nav.PushAnimated(_gfxProbeScreen); // slides if it's a WidgetScreen, else instant (graceful)
+        }
+
+        // Settings -> STATS: push the system-stats screen (battery/system info) as a sub-page. Created at
+        // boot into _statsScreen; back returns to Settings. (No longer a carousel rotation screen.)
+        static void OpenStatsPage()
+        {
+            if (_nav == null || _statsScreen == null) return;
+            _nav.PushAnimated(_statsScreen);
+        }
+
+        // Settings -> ABOUT: push the About screen as a sub-page. Created at boot into _aboutScreen.
+        static void OpenAboutPage()
+        {
+            if (_nav == null || _aboutScreen == null) return;
+            _nav.PushAnimated(_aboutScreen);
         }
 
         // Settings BLE toggle: start/stop GATT advertising. Returns the resulting state.

@@ -27,6 +27,8 @@ namespace SpawnWear.UI
         private readonly OpenPage _openCompanion;
         private readonly OpenPage _openUiKit;
         private readonly OpenPage _openGfxProbe;
+        private readonly OpenPage _openStats;
+        private readonly OpenPage _openAbout;
         private bool _bleOn;
         private bool _wifiOn;
         private int _motionThrottle;
@@ -36,7 +38,7 @@ namespace SpawnWear.UI
 
         public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu,
             ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion,
-            OpenPage openUiKit, OpenPage openGfxProbe)
+            OpenPage openUiKit, OpenPage openGfxProbe, OpenPage openStats, OpenPage openAbout)
             : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
             _requestSleep = requestSleep;
@@ -48,6 +50,8 @@ namespace SpawnWear.UI
             _openCompanion = openCompanion;
             _openUiKit = openUiKit;
             _openGfxProbe = openGfxProbe;
+            _openStats = openStats;
+            _openAbout = openAbout;
             var t = Theme.Current;
 
             var root = new UIPanel { X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background };
@@ -73,9 +77,11 @@ namespace SpawnWear.UI
             _wifiRow = Row("WIFI", _wifiToggle != null ? OnOff(_wifiOn) : "N/A", ToggleWifi, rowH);
             _motionRow = Row("MOTION", _imu != null ? "----" : "N/A", null, rowH); // informational
             col.Add(_brightRow); col.Add(_bleRow); col.Add(_wifiRow); col.Add(_motionRow);
+            col.Add(Row("STATS", ">", OpenStats, rowH));
             col.Add(Row("COMPANION", ">", OpenCompanion, rowH));
             col.Add(Row("UI KIT", ">", OpenUiKit, rowH));
             col.Add(Row("GFX PROBE", ">", OpenGfxProbe, rowH));
+            col.Add(Row("ABOUT", ">", OpenAbout, rowH));
             col.Add(Row("SLEEP", "NOW", TriggerSleep, rowH));
             root.Add(col);
             ScrollTarget = col; // vertical drag scrolls this list
@@ -122,6 +128,8 @@ namespace SpawnWear.UI
         private void OpenCompanion() { if (_openCompanion != null) _openCompanion(); }
         private void OpenUiKit() { if (_openUiKit != null) _openUiKit(); }
         private void OpenGfxProbe() { if (_openGfxProbe != null) _openGfxProbe(); }
+        private void OpenStats() { if (_openStats != null) _openStats(); }
+        private void OpenAbout() { if (_openAbout != null) _openAbout(); }
 
         private void ToggleBle()
         {
