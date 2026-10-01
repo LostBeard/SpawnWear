@@ -84,6 +84,85 @@ namespace SpawnWear.Services
             return SmallFont.MeasureString(text == null ? "" : text, scale);
         }
 
+        // TextStyle -> font. Small/Large are the native UI faces (NativeFont), Clock is the big managed
+        // SpanFont; any of them missing (no SD font) falls back to the 5x7 SmallFont at a similar height.
+        static int FallbackScale(TextStyle style)
+        {
+            return style == TextStyle.Clock ? 12 : style == TextStyle.Large ? 4 : 2;
+        }
+
+        static NativeFont Native(TextStyle style)
+        {
+            NativeFont f = style == TextStyle.Large ? NativeFont.Shared : style == TextStyle.Small ? NativeFont.SharedSmall : null;
+            return f != null && f.IsValid ? f : null;
+        }
+
+        public void DrawText(string text, int x, int y, TextStyle style, Color color)
+        {
+            if (text == null || text.Length == 0) return;
+            if (style == TextStyle.Clock && SpanFont.Clock != null) { SpanFont.Clock.Draw(_fb, text, x, y, color); return; }
+            NativeFont f = Native(style);
+            if (f != null) { f.Draw(_fb, text, x, y, color); return; }
+            SmallFont.DrawString(_fb, text, x, y, FallbackScale(style), color);
+        }
+
+        public int MeasureText(string text, TextStyle style)
+        {
+            if (text == null) return 0;
+            if (style == TextStyle.Clock && SpanFont.Clock != null) return SpanFont.Clock.Measure(text);
+            NativeFont f = Native(style);
+            if (f != null) return f.Measure(text);
+            return SmallFont.MeasureString(text, FallbackScale(style));
+        }
+
+        public int TextHeight(TextStyle style)
+        {
+            if (style == TextStyle.Clock && SpanFont.Clock != null) return SpanFont.Clock.Height;
+            NativeFont f = Native(style);
+            if (f != null) return f.Height;
+            return SmallFont.GlyphHeight * FallbackScale(style);
+        }
+
+        public void DrawLine(int x0, int y0, int x1, int y1, int thickness, Color color)
+        {
+            if (thickness > 3)
+            {
+                _fb.DrawLine(color, thickness, x0, y0, x1, y1);
+                return;
+            }
+            // Thin lines: parallel 1 px lines offset across the minor axis. The native thick-line path at
+            // 2-3 px breaks a diagonal into detached dashes (seen on the analog face's second hand); the
+            // 1 px line is solid at every angle.
+            int dx = x1 - x0, dy = y1 - y0;
+            bool steep = (dy < 0 ? -dy : dy) > (dx < 0 ? -dx : dx);
+            int t = thickness < 1 ? 1 : thickness;
+            for (int i = 0; i < t; i++)
+            {
+                int off = i - (t - 1) / 2;
+                if (steep) _fb.DrawLine(color, 1, x0 + off, y0, x1 + off, y1);
+                else _fb.DrawLine(color, 1, x0, y0 + off, x1, y1 + off);
+            }
+        }
+
+        public void FillCircle(int cx, int cy, int radius, Color color)
+        {
+            // DrawEllipse's fill is a gradient; a start == end colour makes it solid.
+            _fb.DrawEllipse(color, 1, cx, cy, radius, radius, color, 0, 0, color, 0, 0);
+        }
+
+        public void DrawCircle(int cx, int cy, int radius, int thickness, Color color)
+        {
+            // Concentric 1 px rings (the launcher's RingCircle technique) - a thick outline stroke is
+            // not reliable on this graphics build.
+            for (int i = 0; i < thickness && radius - i > 0; i++)
+                _fb.DrawEllipse(color, cx, cy, radius - i, radius - i);
+        }
+
+        public void FillRoundRectangle(int x, int y, int w, int h, int radius, Color color)
+        {
+            _fb.FillRoundRectangle(x, y, w, h, radius, radius, color);
+        }
+
         public void Flush() { _fb.Flush(); }
         public void Flush(int x, int y, int w, int h) { _fb.Flush(x, y, w, h); }
     }

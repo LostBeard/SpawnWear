@@ -46,6 +46,9 @@ namespace SpawnWear
         static LoadedAppScreen _loadedApp;
         // loadedApp is the last entry in the navigator's screens array.
         const int AppSlotIndex = 6;
+        // The watch face loaded when no app has been launched yet: the digital Clock app (the analog
+        // face is the "Analog" app). Faces are ordinary SD apps.
+        const string DefaultFaceApp = "Clock";
         static Qmi8658Driver _imu;
         static LoggerService _logger;
         static WifiConfigService _bleConfig;   // BLE provider handle, so Settings can toggle advertising
@@ -257,6 +260,7 @@ namespace SpawnWear
                     _http = new SpawnWear.Services.HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                     _http.InjectTap = InjectTap;
                     _http.InjectBack = InjectBack;
+                    _http.UiLock = _uiLock;
                     if (_wifi != null && _wifi.IsConnected)
                     {
                         _http.Start();
@@ -305,7 +309,12 @@ namespace SpawnWear
                 // on its launcher tile / navigator slot.
                 if (_appRepo != null && _appRepo.IsReady)
                 {
+                    // Parse the big clock-face font in the background now (~1.7 s on the watch) so the first
+                    // face render doesn't freeze the UI doing it under the UI lock.
+                    new System.Threading.Thread(() => { var unused = SpawnWear.UI.SpanFont.Clock; }).Start();
+                    // No app launched yet (fresh card): the digital face is the default (TJ 2026-10-01).
                     string lastApp = _appRepo.LastApp;
+                    if (lastApp == null) lastApp = DefaultFaceApp;
                     if (lastApp != null)
                     {
                         byte[] peBytes = _appRepo.Read(lastApp);

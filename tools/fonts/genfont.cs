@@ -6,7 +6,9 @@
 //   Ranges  (ranges+1)*12 : indexOfFirstChar(u32) firstChar(u16) lastChar(u16) rangeOffset(u32)
 //   Chars   (chars+1)*4   : offset(u16) marginLeft(i8) marginRight(i8)
 //   Atlas                 : 1bpp, ((width+31)/32)*height*4 bytes, LSB-first bit per pixel
-// v1: single ASCII range 0x20..0x7E, 1bpp (no anti-alias yet - proves DrawText first).
+// v1: single ASCII range (default 0x20..0x7E), 1bpp (no anti-alias yet - proves DrawText first).
+// usage: dotnet run tools/fonts/genfont.cs "<family>" <emPx> <out.tinyfnt> [regular|bold] [first-last]
+//   e.g. the watch-face clock digits: "Bahnschrift" 140 spawnsans-clock.tinyfnt regular 0-:   ('0'..':')
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
@@ -16,7 +18,8 @@ int emPx = args.Length > 1 ? int.Parse(args[1]) : 22;
 string outPath = args.Length > 2 ? args[2] : "spawnfont.tinyfnt";
 FontStyle style = args.Length > 3 && args[3] == "bold" ? FontStyle.Bold : FontStyle.Regular;
 
-const int firstChar = 0x20, lastChar = 0x7E;
+int firstChar = 0x20, lastChar = 0x7E;
+if (args.Length > 4 && args[4].Length == 3 && args[4][1] == '-') { firstChar = args[4][0]; lastChar = args[4][2]; }
 int nChars = lastChar - firstChar + 1;
 
 using var probe = new Bitmap(8, 8);

@@ -16,6 +16,13 @@ namespace AppTemplate
     ///   5. OnTap - finger lifted after a short tap; mutate state + flag dirty
     ///   6. OnPause - user navigated away; stop timers, free transient state
     ///   7. OnDestroy - app is being unloaded; drop service references
+    ///
+    /// NO STATIC FIELD INITIALIZERS in an app (2026-10-01, nanoFramework 2.0 preview firmware): a static field
+    /// with an initializer - `static readonly Color Accent = Color.FromArgb(...)`, or an array
+    /// initializer like `static readonly int[] T = { 1, 2 }` (the compiler emits a hidden static data
+    /// field for it) - makes the firmware's Assembly.Load fail and then PANIC the watch; if the app is
+    /// the last-launched one it boot-loops (uninstall it over HTTP to recover). Use instance fields,
+    /// static properties (`static Color Accent => Color.FromArgb(...)`) or a switch-based lookup.
     /// </summary>
     public class MyApp : ISpawnApp
     {

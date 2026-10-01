@@ -190,6 +190,15 @@ public interface IDisplayBuffer
     void DrawString(string text, int x, int y, int scale, Color color);
     int MeasureString(string text, int scale);
 
+    // Added 2026-10-01 (additive; contract version stays 1.0.0.0 so existing apps keep loading):
+    void DrawText(string text, int x, int y, TextStyle style, Color color); // Small ~18px, Large ~30px, Clock ~120px digits
+    int MeasureText(string text, TextStyle style);
+    int TextHeight(TextStyle style);
+    void DrawLine(int x0, int y0, int x1, int y1, int thickness, Color color);
+    void FillCircle(int cx, int cy, int radius, Color color);
+    void DrawCircle(int cx, int cy, int radius, int thickness, Color color);
+    void FillRoundRectangle(int x, int y, int w, int h, int radius, Color color);
+
     /// <summary>
     /// Push pending pixels to the panel. Apps SHOULD call Flush at the end
     /// of OnResume / on visible state changes; the firmware doesn't auto-

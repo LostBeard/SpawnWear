@@ -59,6 +59,10 @@ namespace SpawnWear.Services
         public delegate void ButtonInjector();
         public TapInjector InjectTap;
         public ButtonInjector InjectBack;
+        /// <summary>The UI lock (Program._uiLock), set by Program. /screenshot.bin holds it while it streams
+        /// (~5 s) so the frame is one moment in time - otherwise a screen redrawing every second (a watch
+        /// face) is captured as bands from different seconds. The UI pauses while a capture runs.</summary>
+        public object UiLock;
 
         /// <summary>Wire the SD card service so /sdformat can in-place reformat
         /// the inserted card without pulling it for Windows. Optional - the
@@ -379,7 +383,8 @@ namespace SpawnWear.Services
             // Transient load: activate the app but do NOT persist it to SD. The
             // /apps/install + /apps/launch routes are the durable path.
             string status;
-            _appLoader.LoadPe(payload, out status);
+            // Under the UI lock: LoadPe swaps the active app, which the main loop may be ticking.
+            lock (UiLock != null ? UiLock : this) { _appLoader.LoadPe(payload, out status); }
             Debug.WriteLine("[LoadApp] " + status);
             ServeText(client, status);
         }
@@ -470,17 +475,23 @@ namespace SpawnWear.Services
                 return;
             }
             string status;
-            if (!_appLoader.LoadPe(bytes, out status))
+            // Under the UI lock, like a finger tap: swapping the active app and switching screens from
+            // this HTTP thread used to race the main loop's render (a face drawn twice, one of them
+            // before its font finished loading).
+            lock (UiLock != null ? UiLock : this)
             {
-                ServeText(client, status);
-                return;
-            }
-            _appRepo.LastApp = name;
-            // Switch the watch to the app screen so the launch is visible.
-            if (_navigator != null && _appLoaderScreenIndex >= 0)
-            {
-                try { _navigator.GoTo(_appLoaderScreenIndex); }
-                catch (System.Exception ex) { Debug.WriteLine("[LaunchApp] GoTo EX " + ex.Message); }
+                if (!_appLoader.LoadPe(bytes, out status))
+                {
+                    ServeText(client, status);
+                    return;
+                }
+                _appRepo.LastApp = name;
+                // Switch the watch to the app screen so the launch is visible.
+                if (_navigator != null && _appLoaderScreenIndex >= 0)
+                {
+                    try { _navigator.GoTo(_appLoaderScreenIndex); }
+                    catch (System.Exception ex) { Debug.WriteLine("[LaunchApp] GoTo EX " + ex.Message); }
+                }
             }
             Debug.WriteLine("[LaunchApp] launched: " + status + " (" + name + ")");
             ServeText(client, status);
@@ -658,22 +669,26 @@ namespace SpawnWear.Services
 
         void ServeScreenshot(Socket client)
         {
-            // Fast path: copy the framebuffer a strip at a time into a small bitmap (native DrawImage) and
-            // send each strip's native GetBitmap() bytes as-is - 32 bpp, 0xAARRGGBB little-endian, so B G R A
-            // on the wire. No per-pixel managed code: the old loop below made 205,820 interpreted GetPixel +
-            // Color + RGB565 calls and took ~140 s on nanoFramework 2.0.
-            Bitmap strip = null;
+            // Copy the framebuffer a strip at a time into a small bitmap (native DrawImage) and send each
+            // strip's native GetBitmap() bytes as-is - 32 bpp, 0xAARRGGBB little-endian, so B G R A on the
+            // wire. No per-pixel managed code: the old RGB565 loop (205,820 interpreted GetPixel + Color
+            // calls) took ~140 s on nanoFramework 2.0. Decoders still accept that format (no fmt= token).
+            Bitmap strip;
             try { strip = new Bitmap(_panelWidth, ScreenshotStripRows); }
-            catch (System.Exception ex) { Debug.WriteLine("[Http] screenshot strip alloc failed, slow path: " + ex.Message); }
-            if (strip != null)
+            catch (System.Exception ex)
             {
-                try
+                ServeText(client, "503 Service Unavailable\r\n\r\nscreenshot strip alloc failed: " + ex.Message);
+                return;
+            }
+            try
+            {
+                byte[] hdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + " fmt=bgra32\n");
+                int contentLen = hdr.Length + _panelWidth * _panelHeight * 4;
+                string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + contentLen + Cors + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
+                client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
+                client.Send(hdr, 0, hdr.Length, SocketFlags.None);
+                lock (UiLock != null ? UiLock : strip) // one moment in time: no redraw mid-capture
                 {
-                    byte[] fhdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + " fmt=bgra32\n");
-                    int fLen = fhdr.Length + _panelWidth * _panelHeight * 4;
-                    string fHeaders = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fLen + Cors + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
-                    client.Send(Encoding.UTF8.GetBytes(fHeaders), 0, fHeaders.Length, SocketFlags.None);
-                    client.Send(fhdr, 0, fhdr.Length, SocketFlags.None);
                     for (int y = 0; y < _panelHeight; y += ScreenshotStripRows)
                     {
                         int rows = _panelHeight - y < ScreenshotStripRows ? _panelHeight - y : ScreenshotStripRows;
@@ -682,31 +697,8 @@ namespace SpawnWear.Services
                         client.Send(px, 0, _panelWidth * rows * 4, SocketFlags.None);
                     }
                 }
-                finally { strip.Dispose(); }
-                return;
             }
-
-            // Slow fallback. Header: ASCII "w=W h=H\n", then panel*panel*2 raw RGB565 BE bytes.
-            int totalPixels = _panelWidth * _panelHeight;
-            byte[] hdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + "\n");
-            int contentLen = hdr.Length + totalPixels * 2;
-            string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + contentLen + Cors + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
-            client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
-            client.Send(hdr, 0, hdr.Length, SocketFlags.None);
-
-            // Stream pixels in 1-row chunks (820 bytes per row).
-            byte[] rowBuf = new byte[_panelWidth * 2];
-            for (int y = 0; y < _panelHeight; y++)
-            {
-                for (int x = 0; x < _panelWidth; x++)
-                {
-                    var c = _fb.GetPixel(x, y);
-                    ushort rgb565 = ToRgb565(c);
-                    rowBuf[x * 2] = (byte)(rgb565 >> 8);
-                    rowBuf[x * 2 + 1] = (byte)(rgb565 & 0xFF);
-                }
-                client.Send(rowBuf, 0, rowBuf.Length, SocketFlags.None);
-            }
+            finally { strip.Dispose(); }
         }
 
         void ServeNotFound(Socket client)
@@ -716,14 +708,6 @@ namespace SpawnWear.Services
             string headers = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + bodyBytes.Length + Cors + "\r\nConnection: close\r\n\r\n";
             client.Send(Encoding.UTF8.GetBytes(headers), 0, headers.Length, SocketFlags.None);
             client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
-        }
-
-        static ushort ToRgb565(System.Drawing.Color c)
-        {
-            int r = (c.R >> 3) & 0x1F;
-            int g = (c.G >> 2) & 0x3F;
-            int b = (c.B >> 3) & 0x1F;
-            return (ushort)((r << 11) | (g << 5) | b);
         }
     }
 }
