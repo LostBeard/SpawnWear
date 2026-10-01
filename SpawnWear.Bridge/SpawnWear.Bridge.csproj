@@ -35,15 +35,15 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.7" />
     <!-- Web Bluetooth + typed JS interop (today). Browser-target only.
          Pinned >= what SpawnDev.RTC requires transitively. -->
-    <PackageReference Include="SpawnDev.SpawnJS" Version="2.1.10" />
+    <PackageReference Include="SpawnDev.SpawnJS" Version="3.0.0" />
     <!-- Cross-platform Ed25519 sign/verify for the Phase 7 pairing-trust
          layer. Browser uses WebCrypto (with Ed25519Managed fallback);
          a future SpawnWear.Bridge.Desktop consumer uses DotNetCrypto. -->
-    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.0.1" />
+    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.0.2" />
     <!-- WebRTC peer (Phase 7). Same package supports desktop too,
          setting up the future SpawnWear.Bridge.Desktop crate to use
          the same WebRTC plumbing via SpawnDev.RTC. -->
-    <PackageReference Include="SpawnDev.RTC" Version="2.2.2" />
+    <PackageReference Include="SpawnDev.RTC" Version="2.2.5" />
   </ItemGroup>
 
 </Project>

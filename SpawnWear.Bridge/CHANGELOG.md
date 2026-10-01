@@ -4,6 +4,12 @@ All notable changes to `SpawnWear.Bridge` are recorded here. Format follows [Kee
 
 ## [Unreleased]
 
+### Dependencies - SpawnJS 3.0 (2026-10-01 - Riker)
+
+- Completes the 2026-09-08 move off SpawnDev.BlazorJS: `SpawnDev.SpawnJS` 3.0.0, `SpawnDev.SpawnJS.Cryptography` 2.0.2, `SpawnDev.RTC` 2.2.5 (Companion: `SpawnDev.SpawnJS.Blazor` 3.0.0). `SpawnWear.Console` was still on BlazorJS.Cryptography + RTC 1.1.11 and did not restore (NU1605); ported.
+- `BleTransport` and `AddSpawnWearBridge` are `[SupportedOSPlatform("browser")]` (Web Bluetooth). Clears 56 CA1416 warnings; desktop consumers never reach them.
+- New Companion test `WebRtcSelfTestTests` proves the browser path (RTCPeerConnection, datachannel, WebCrypto Ed25519) against a real desktop peer over the hub.
+
 ### Transport — WebRTC bus is live (2026-06-23 → 2026-06-25 — Riker)
 
 `WebRtcTransport` is no longer a stub. The watch ↔ Companion link is a live, authenticated, multiplexed WebRTC data-channel bus over SpawnDev.RTC, proven end to end 2026-06-23 (Phase 7). Highlights:

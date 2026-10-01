@@ -87,7 +87,7 @@ This is the canonical roadmap. The README's Status / Milestones table tracks wha
 
 See `companion-pwa.md`.
 
-- [ ] Scaffolded with SpawnDev.BlazorJS
+- [ ] Scaffolded with SpawnDev.SpawnJS (was SpawnDev.BlazorJS until 2026-09-08)
 - [ ] Mirrors every Settings page over BLE (provisioning + diagnostics work even before the on-device keyboard is comfortable)
 - [ ] Mirrors every built-in app (remote launcher)
 - [ ] Live system log viewer over BLE notify

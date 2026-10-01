@@ -132,7 +132,7 @@ Until that pain shows up, the duplication note at the top of `BleUuids.cs` ("mir
 
 ## Cross-references
 
-- **SpawnDev.BlazorJS** - `D:/users/tj/Projects/SpawnDev.BlazorJS/`. Use typed interop, never raw `IJSRuntime`. See its CLAUDE.md.
+- **SpawnDev.SpawnJS** - `D:/users/tj/Projects/SpawnDev.SpawnJS/SpawnDev.SpawnJS/` (replaced SpawnDev.BlazorJS 2026-09-08). Use typed interop, never raw `IJSRuntime`. See its CLAUDE.md.
 - **SpawnDev.RTC** - WebRTC peer-to-peer for both Blazor browser AND .NET desktop. Phase 7 wires this into `WebRtcTransport`.
 - **NanoFrameTest1** - `D:/users/tj/Projects/NanoFrameTest1/`. The reference architecture for "nanoFramework GATT + Blazor PWA + Playwright tests". Mirror its shape when in doubt.
 - **BLE GATT layout** - SpawnWear's UUID namespace base is `a0e4f2c1-SSSS-CCCC-8000-00805f9b34fb` (note `c1`, not `c0` which NanoFrameTest1 uses, so a phone with both PWAs installed doesn't get device contracts confused). Duplicated in firmware `SpawnWear/BleUuids.cs` and Bridge `SpawnWear.Bridge/BleUuids.cs` - keep in sync.

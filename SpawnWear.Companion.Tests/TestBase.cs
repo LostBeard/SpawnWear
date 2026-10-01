@@ -14,7 +14,8 @@ namespace SpawnWear.Companion.Tests;
 /// </summary>
 public abstract class TestBase
 {
-    static readonly CompanionAppFixture s_fixture = new();
+    // Shared by every test class; stopped once per run by CompanionAppTeardown.
+    internal static readonly CompanionAppFixture s_fixture = new();
     protected string BaseUrl => s_fixture.BaseUrl;
 
     IPlaywright? _pw;

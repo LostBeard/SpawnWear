@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.Versioning;
 using SpawnDev.SpawnJS;
 using SpawnDev.SpawnJS.JSObjects;
 
@@ -18,7 +19,9 @@ namespace SpawnWear.Bridge.Ble;
 /// bytes came from. Outbound writes go through
 /// <see cref="SendAsync"/>; the channel-id selects the matching write
 /// characteristic.
+/// Browser-only: Web Bluetooth has no desktop backend.
 /// </summary>
+[SupportedOSPlatform("browser")]
 public class BleTransport : ITransport, IAsyncDisposable
 {
     readonly SpawnJSRuntime _js;

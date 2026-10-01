@@ -25,7 +25,7 @@ Layered, Android-flavored. From bottom to top:
 2. **System Services** — singletons started at boot: Power, WiFi, BLE, RTC, Audio, Storage, Sensors, Update, Logger. Apps consume services through interfaces; only one of each.
 3. **UI Framework** — drawing primitives, framebuffer, touch + button dispatch, navigation stack, app lifecycle (`OnCreate` / `OnResume` / `OnPause` / `OnDestroy`), system widgets (status bar, keyboard, dialogs, list, slider, switch).
 4. **Apps** — managed C# classes implementing the app lifecycle, run in-process under the SpawnWear app host. Built-ins: Launcher, Settings, Clock, AI Assistant (flagship), Media Player, Voice Recorder, Activity. Aim for OTA-installable apps once the foundation is solid.
-5. **Companion Blazor WASM PWA** — talks BLE + WiFi to the watch, mirrors every built-in app as a remote-control surface. Uses `SpawnDev.BlazorJS` (no raw JS, no `IJSRuntime`).
+5. **Companion Blazor WASM PWA** — talks BLE + WiFi to the watch, mirrors every built-in app as a remote-control surface. Uses `SpawnDev.SpawnJS` (no raw JS, no `IJSRuntime`; moved off SpawnDev.BlazorJS 2026-09-08).
 
 ### BLE GATT layout
 
@@ -40,11 +40,12 @@ Layered, Android-flavored. From bottom to top:
 - **One owner per resource.** Display backlight, BLE radio, audio output, AXP2101 — each has exactly one system service that owns it. Apps ask through the service. Two apps grabbing the speaker simultaneously is a service-design failure, not an "apps fight it out" feature.
 - **Lifecycle discipline.** Apps must implement `OnPause` / `OnResume` correctly. Anything an app starts (timer, BLE notify subscription, sensor stream, audio session) it must stop in `OnPause` and restart in `OnResume`. Background services keep ticking through pause / resume.
 - **Power-aware by default.** Every service exposes a "low-power mode". The Power service (AXP2101 driver) coordinates: when the screen is off + idle, it tells everyone to drop to low-power, gates radios, dims rails. Don't write code that polls forever at full clock — use events, sleeps, and AXP2101 wake interrupts.
-- **SpawnDev.BlazorJS for ALL JS interop.** No raw JavaScript. No `IJSRuntime`. (Companion PWA only.)
+- **SpawnDev.SpawnJS for ALL JS interop** (`SpawnDev.SpawnJS.Blazor` hosts it in the Companion). No raw JavaScript. No `IJSRuntime`. (Companion PWA only.)
 - **SpawnDev.RTC for WebRTC.** That's the AI Assistant transport. Don't write a parallel WebRTC stack.
-- **Fix libraries, don't work around.** If `nanoFramework.Device.Bluetooth` / `nanoFramework.Hardware.Esp32` / SpawnDev.BlazorJS / SpawnDev.RTC is missing something, fix it upstream — see Rule 2 in `D:\users\tj\Projects\CLAUDE.md`.
-- **DI first** in the Blazor companion. `BlazorJSRuntime` injected via constructor, never the static accessor in DI-available contexts.
-- **Event properties** in SpawnDev.BlazorJS — `OnGATTServerDisconnected += handler`, never `AddEventListener`.
+- **Browser-only code is marked `[SupportedOSPlatform("browser")]`.** SpawnJS APIs carry it; `SpawnWear.Bridge` is shared with desktop (Bridge.Desktop, Console), so its browser-only types (`BleTransport`, `AddSpawnWearBridge`) are annotated, and the Companion is browser-only at assembly level (`Properties/AssemblyInfo.cs`). Keep the build at 0 CA1416 warnings; don't suppress it.
+- **Fix libraries, don't work around.** If `nanoFramework.Device.Bluetooth` / `nanoFramework.Hardware.Esp32` / SpawnDev.SpawnJS / SpawnDev.RTC is missing something, fix it upstream — see Rule 2 in `D:\users\tj\Projects\CLAUDE.md`.
+- **DI first** in the Blazor companion. `SpawnJSRuntime` injected via constructor, never the static accessor in DI-available contexts.
+- **Event properties** in SpawnDev.SpawnJS — `OnGATTServerDisconnected += handler`, never `AddEventListener`.
 - **Performance** — no unnecessary .NET ↔ JS roundtrips. Keep data on the side that needs it.
 - **Pin numbers come from `pin_config.h`** (vendor source) or the schematic PDF — never from memory, never from another Waveshare watch's wiki.
 - **The watch is the primary device.** Don't design features that require the PWA to be running. The PWA is a remote, not a tether.
@@ -68,7 +69,7 @@ These are the things that bit somebody else first. Don't be the second.
 
 ## Testing
 
-- **PlaywrightMultiTest pattern** (mirroring NanoFrameTest1.Tests) for the Blazor WASM PWA.
+- **PlaywrightMultiTest pattern** (mirroring NanoFrameTest1.Tests) for the Blazor WASM PWA. `WebRtcSelfTestTests` (`[Category("Network")]`) drives the real browser <-> desktop WebRTC + Ed25519 path over hub.spawndev.com; it starts `SpawnWear.Bridge.Desktop -- watch` itself.
 - **Hardware-in-the-loop tests** require the watch on a known COM port. Tag those `[Category("HardwareWatch")]` so they're optional.
 - **No mock tests.** The PWA tests must drive a real Chromium with a real Web Bluetooth stack. The firmware tests must talk to a real watch over a real BLE link.
 - **TJ confirms, doesn't test.** Run the test suite yourself before declaring something ready. See `D:\users\tj\Projects\CLAUDE.md` Rule 5.
@@ -76,7 +77,7 @@ These are the things that bit somebody else first. Don't be the second.
 ## Lane Ownership
 
 This project is **Riker's lane** for now (consuming-project work, BLE plumbing, PWA UI). If a SpawnDev library needs a fix to support the watch:
-- BLE / WiFi / Web Bluetooth → SpawnDev.BlazorJS or upstream nanoFramework — Riker
+- BLE / WiFi / Web Bluetooth → SpawnDev.SpawnJS or upstream nanoFramework — Riker
 - WebRTC integration (Phase 7) → SpawnDev.RTC — Riker
 - Display QSPI / CO5300 driver path (LostBeard `nanoFramework.Graphics` fork - working on hardware) → coordinate with Captain before any cross-lane fix
 

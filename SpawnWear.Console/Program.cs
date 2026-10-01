@@ -1,7 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
-using SpawnDev.BlazorJS.Cryptography;
-using SpawnDev.BlazorJS.Cryptography.DotNet;
+using SpawnDev.SpawnJS.Cryptography;
+using SpawnDev.SpawnJS.Cryptography.DotNet;
 using SpawnWear.Bridge;
 using SpawnWear.Bridge.WebRtc;
 
@@ -58,7 +58,7 @@ var record = WebRtcSelfTestPairing.CompanionRecord() with { RoomKey = Encoding.A
 // Stop-and-wait reply plumbing: one outstanding request per channel at a time.
 var pending = new Dictionary<string, TaskCompletionSource<byte[]>>();
 var pendingLock = new object();
-WebRtcTransport peer = null;
+WebRtcTransport? peer = null;
 
 async Task<byte[]> SendRecv(string channel, byte[] payload, int timeoutMs = 15000)
 {

@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace SpawnWear.Bridge;
@@ -17,6 +18,8 @@ namespace SpawnWear.Bridge;
 /// </summary>
 public static class BridgeServiceCollectionExtensions
 {
+    // Browser-only: the default transport is BleTransport (Web Bluetooth).
+    [SupportedOSPlatform("browser")]
     public static IServiceCollection AddSpawnWearBridge(this IServiceCollection services)
     {
         services.AddScoped<Ble.BleTransport>();
