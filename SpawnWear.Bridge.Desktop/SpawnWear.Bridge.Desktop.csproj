@@ -22,14 +22,14 @@
   <ItemGroup>
     <!-- WebRTC peer (Phase 7). Same library SpawnWear.Bridge references on the
          browser side, but here it picks the desktop SipSorcery-fork backend. -->
-    <PackageReference Include="SpawnDev.RTC" Version="2.2.5" />
+    <PackageReference Include="SpawnDev.RTC" Version="2.3.0" />
     <!-- Console logger so we can surface SipSorcery's internal ICE/DTLS/SCTP logs while
          bringing up the desktop WebRTC peer path (diagnostic; can be removed later). -->
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
     <!-- Cross-platform Ed25519 for the pairing-trust layer (Stack A in
          Plans/phase7-webrtc-handoff.md). DotNetCrypto picks
          Ed25519Managed on net10.0. -->
-    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.0.2" />
+    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.1.0" />
   </ItemGroup>
 
 </Project>

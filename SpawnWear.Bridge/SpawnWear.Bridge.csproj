@@ -39,11 +39,11 @@
     <!-- Cross-platform Ed25519 sign/verify for the Phase 7 pairing-trust
          layer. Browser uses WebCrypto (with Ed25519Managed fallback);
          a future SpawnWear.Bridge.Desktop consumer uses DotNetCrypto. -->
-    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.0.2" />
+    <PackageReference Include="SpawnDev.SpawnJS.Cryptography" Version="2.1.0" />
     <!-- WebRTC peer (Phase 7). Same package supports desktop too,
          setting up the future SpawnWear.Bridge.Desktop crate to use
          the same WebRTC plumbing via SpawnDev.RTC. -->
-    <PackageReference Include="SpawnDev.RTC" Version="2.2.5" />
+    <PackageReference Include="SpawnDev.RTC" Version="2.3.0" />
   </ItemGroup>
 
 </Project>
