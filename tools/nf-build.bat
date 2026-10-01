@@ -24,7 +24,7 @@ REM matching the installed python.exe version.
 set IDF_TOOLS_PATH=C:\Espressif
 
 REM Activate ESP-IDF v5.5.4 environment (verbose to console for diagnostics)
-call "C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat"
+call "C:\Espressif\frameworks\esp-idf-v5.5.5\export.bat"
 if errorlevel 1 (
     echo [ERROR] ESP-IDF export.bat failed
     exit /b 1

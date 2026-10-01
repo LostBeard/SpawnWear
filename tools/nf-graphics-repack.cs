@@ -7,8 +7,9 @@
 //
 // Example: dotnet run tools/nf-graphics-repack.cs spawnwear.2
 //
-// Output: three .nupkg files in D:\users\SpawnDevPackages\, ready for the
-// SpawnWear .nfproj to consume via the existing HintPath references.
+// Output: three .nupkg files staged in %TEMP%\nf-graphics-repack, then registered in the local feed
+// D:\users\SpawnDevPackages with `nuget add`, ready for the SpawnWear .nfproj (HintPath references)
+// after a packages.config restore.
 
 #:package System.IO.Compression@4.3.0
 
@@ -26,7 +27,11 @@ string suffix = args[0];
 string newVersion = $"2.0.0-{suffix}";
 const string baseVersion = "2.0.0-spawnwear.1";
 const string graphicsRoot = @"D:\users\tj\Projects\nanoFramework.Graphics\nanoFramework.Graphics";
-const string outputDir = @"D:\users\SpawnDevPackages";
+// The feed is HIERARCHICAL (id/version/): packages go in with `nuget add`, never as a copy into its root.
+const string feedDir = @"D:\users\SpawnDevPackages";
+// nuget.exe is not on the agent PATH (and the .cargo nuget.exe that is, is not NuGet) - use the WinGet install
+const string nugetExe = @"C:\Users\TJ\AppData\Local\Microsoft\WinGet\Packages\Microsoft.NuGet_Microsoft.Winget.Source_8wekyb3d8bbwe\nuget.exe";
+string outputDir = Path.Combine(Path.GetTempPath(), "nf-graphics-repack");
 
 var packages = new (string Name, string BinDir, string AssemblyName, string Description)[]
 {
@@ -122,8 +127,19 @@ foreach (var pkg in packages)
     }
 }
 
+foreach (var pkg in packages)
+{
+    string nupkg = Path.Combine(outputDir, $"{pkg.Name}.{newVersion}.nupkg");
+    // an earlier version of this tool wrote flat .nupkg files into the feed root - remove that copy if present
+    string flat = Path.Combine(feedDir, Path.GetFileName(nupkg));
+    if (File.Exists(flat)) { File.Delete(flat); Console.WriteLine($"Removed flat feed-root copy {flat}"); }
+    var add = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(nugetExe, $"add \"{nupkg}\" -source \"{feedDir}\"") { UseShellExecute = false })!;
+    add.WaitForExit();
+    if (add.ExitCode != 0) { Console.Error.WriteLine($"nuget add failed ({add.ExitCode}) for {nupkg}"); return 3; }
+}
+
 Console.WriteLine();
-Console.WriteLine($"Repacked 3 packages to {outputDir} as {newVersion}.");
+Console.WriteLine($"Repacked 3 packages as {newVersion} and added them to {feedDir}.");
 Console.WriteLine();
 Console.WriteLine("Next: update SpawnWear/SpawnWear.nfproj <Reference HintPath> to point at");
 Console.WriteLine($"      ..\\packages\\<package>.{newVersion}\\lib\\<assembly>.dll");

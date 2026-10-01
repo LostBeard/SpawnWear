@@ -22,7 +22,7 @@ set MSYS=
 set PYTHONNOUSERSITE=1
 set IDF_TOOLS_PATH=C:\Espressif
 
-call "C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat"
+call "C:\Espressif\frameworks\esp-idf-v5.5.5\export.bat"
 if errorlevel 1 ( echo [ERROR] export.bat failed & exit /b 1 )
 
 set PRESET=%1

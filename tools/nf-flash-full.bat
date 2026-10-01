@@ -24,7 +24,7 @@ set MSYS=
 set PYTHONNOUSERSITE=1
 set IDF_TOOLS_PATH=C:\Espressif
 
-call "C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat" > "%TEMP%\nf-flash-full-export.log" 2>&1
+call "C:\Espressif\frameworks\esp-idf-v5.5.5\export.bat" > "%TEMP%\nf-flash-full-export.log" 2>&1
 if errorlevel 1 (
     echo [ERROR] ESP-IDF export.bat failed - see %TEMP%\nf-flash-full-export.log
     exit /b 1

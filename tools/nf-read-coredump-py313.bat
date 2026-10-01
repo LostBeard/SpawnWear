@@ -15,11 +15,11 @@ set MSYSTEM=
 set MSYS=
 set PYTHONNOUSERSITE=1
 set IDF_TOOLS_PATH=C:\Espressif
-call "C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat" > "%TEMP%\coredump-export.log" 2>&1
+call "C:\Espressif\frameworks\esp-idf-v5.5.5\export.bat" > "%TEMP%\coredump-export.log" 2>&1
 if errorlevel 1 ( echo [ERROR] export.bat failed - see %TEMP%\coredump-export.log & exit /b 1 )
 
 set NF_ELF=D:\users\tj\Projects\nf-interpreter\nf-interpreter\build\nanoCLR.elf
-set ESPCD=C:\Espressif\frameworks\esp-idf-v5.5.4\components\espcoredump\espcoredump.py
+set ESPCD=C:\Espressif\frameworks\esp-idf-v5.5.5\components\espcoredump\espcoredump.py
 
 echo ==^> Reading coredump partition 0x8F0000 (64K) from %~1
 esptool --chip esp32s3 --port %~1 --baud 921600 read_flash 0x8F0000 0x10000 "%TEMP%\coredump.bin"

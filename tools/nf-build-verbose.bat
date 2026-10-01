@@ -5,7 +5,7 @@ set MSYS=
 set PYTHONNOUSERSITE=1
 set IDF_TOOLS_PATH=C:\Espressif
 
-call "C:\Espressif\frameworks\esp-idf-v5.5.4\export.bat" > "%TEMP%\nf-export.log" 2>&1
+call "C:\Espressif\frameworks\esp-idf-v5.5.5\export.bat" > "%TEMP%\nf-export.log" 2>&1
 if errorlevel 1 exit /b 1
 
 cd /d D:\users\tj\Projects\nf-interpreter\nf-interpreter
