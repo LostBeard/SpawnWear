@@ -51,16 +51,30 @@ public class WatchHttp
 
         var header = System.Text.Encoding.ASCII.GetString(bytes, 0, nl);
         var (w, h) = ParseDim(header);
+        // "fmt=bgra32": the watch's native 32 bpp bytes (B G R A per pixel), the fast path.
+        // No fmt token: RGB565 big-endian (older firmware app / slow fallback).
+        bool bgra32 = header.Contains("fmt=bgra32");
 
         int pxOffset = nl + 1;
         int pxCount = w * h;
-        if (bytes.Length < pxOffset + pxCount * 2)
+        if (bytes.Length < pxOffset + pxCount * (bgra32 ? 4 : 2))
             throw new InvalidOperationException("Truncated pixel payload.");
 
-        // RGB565 BE -> RGBA8. Managed buffer; consumer pushes via
-        // ImageData / Uint8ClampedArray. ~820 KB at 410x502; cheap
-        // enough not to need zero-copy.
+        // -> RGBA8. Managed buffer; consumer pushes via ImageData / Uint8ClampedArray.
+        // ~820 KB at 410x502; cheap enough not to need zero-copy.
         var rgba = new byte[pxCount * 4];
+        if (bgra32)
+        {
+            for (int i = 0; i < pxCount; i++)
+            {
+                int s = pxOffset + i * 4;
+                rgba[i * 4    ] = bytes[s + 2];
+                rgba[i * 4 + 1] = bytes[s + 1];
+                rgba[i * 4 + 2] = bytes[s];
+                rgba[i * 4 + 3] = 255;
+            }
+            return new Screenshot(w, h, rgba);
+        }
         for (int i = 0; i < pxCount; i++)
         {
             int v = (bytes[pxOffset + i * 2] << 8) | bytes[pxOffset + i * 2 + 1];

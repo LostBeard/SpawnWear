@@ -79,6 +79,26 @@ public class WatchHttpTests
     }
 
     [Fact]
+    public async Task GetScreenshotAsync_decodes_the_bgra32_fast_format()
+    {
+        // fmt=bgra32 = the watch's native 32 bpp bytes, B G R A per pixel. Distinct channel values so
+        // a swapped R/B (the easy bug here) fails.
+        var hdr = System.Text.Encoding.ASCII.GetBytes("w=2 h=1 fmt=bgra32\n");
+        byte[] px = { 0x30, 0x20, 0x10, 0xFF, 0x03, 0x02, 0x01, 0xFF };
+        var body = new byte[hdr.Length + px.Length];
+        Buffer.BlockCopy(hdr, 0, body, 0, hdr.Length);
+        Buffer.BlockCopy(px, 0, body, hdr.Length, px.Length);
+        var (http, stub) = NewClient();
+        stub.Respond = _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) };
+
+        var shot = await http.GetScreenshotAsync("http://192.168.1.171");
+
+        Assert.Equal(2, shot.Width);
+        Assert.Equal(1, shot.Height);
+        Assert.Equal(new byte[] { 0x10, 0x20, 0x30, 255, 0x01, 0x02, 0x03, 255 }, shot.Rgba);
+    }
+
+    [Fact]
     public async Task GetScreenshotAsync_appends_cache_buster_query_param()
     {
         var (http, stub) = NewClient();

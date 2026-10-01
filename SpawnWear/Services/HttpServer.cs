@@ -637,7 +637,7 @@ namespace SpawnWear.Services
                 "<div id='out'>idle</div>" +
                 "<script>" +
                 "const out=document.getElementById('out');const drop=document.getElementById('drop');const f=document.getElementById('f');" +
-                "async function fetchShot(){out.textContent='fetching...';const r=await fetch('/screenshot.bin?t='+Date.now());const ab=await r.arrayBuffer();const b=new Uint8Array(ab);let nl=0;while(b[nl]!=10)nl++;const h=new TextDecoder().decode(b.slice(0,nl));const w=+h.match(/w=(\\d+)/)[1],ht=+h.match(/h=(\\d+)/)[1];const px=b.slice(nl+1);const c=document.getElementById('c');c.width=w;c.height=ht;const cx=c.getContext('2d'),img=cx.createImageData(w,ht);for(let i=0;i<w*ht;i++){const v=(px[i*2]<<8)|px[i*2+1];const r5=(v>>11)&0x1F,g6=(v>>5)&0x3F,b5=v&0x1F;img.data[i*4]=(r5<<3)|(r5>>2);img.data[i*4+1]=(g6<<2)|(g6>>4);img.data[i*4+2]=(b5<<3)|(b5>>2);img.data[i*4+3]=255}cx.putImageData(img,0,0);out.textContent='screen '+w+'x'+ht}" +
+                "async function fetchShot(){out.textContent='fetching...';const r=await fetch('/screenshot.bin?t='+Date.now());const ab=await r.arrayBuffer();const b=new Uint8Array(ab);let nl=0;while(b[nl]!=10)nl++;const h=new TextDecoder().decode(b.slice(0,nl));const w=+h.match(/w=(\\d+)/)[1],ht=+h.match(/h=(\\d+)/)[1];const px=b.slice(nl+1);const c=document.getElementById('c');c.width=w;c.height=ht;const cx=c.getContext('2d'),img=cx.createImageData(w,ht);const q=h.includes('fmt=bgra32');for(let i=0;i<w*ht;i++){if(q){img.data[i*4]=px[i*4+2];img.data[i*4+1]=px[i*4+1];img.data[i*4+2]=px[i*4];img.data[i*4+3]=255;continue}const v=(px[i*2]<<8)|px[i*2+1];const r5=(v>>11)&0x1F,g6=(v>>5)&0x3F,b5=v&0x1F;img.data[i*4]=(r5<<3)|(r5>>2);img.data[i*4+1]=(g6<<2)|(g6>>4);img.data[i*4+2]=(b5<<3)|(b5>>2);img.data[i*4+3]=255}cx.putImageData(img,0,0);out.textContent='screen '+w+'x'+ht}" +
                 "async function uploadApp(file){out.textContent='uploading '+file.name+' ('+file.size+' bytes)...';const buf=await file.arrayBuffer();const r=await fetch('/loadapp',{method:'POST',body:buf});const t=await r.text();out.textContent=t.trim();setTimeout(fetchShot,500)}" +
                 "document.getElementById('r').onclick=fetchShot;" +
                 "document.getElementById('pick').onclick=e=>{e.preventDefault();f.click()};" +
@@ -653,9 +653,40 @@ namespace SpawnWear.Services
             client.Send(bodyBytes, 0, bodyBytes.Length, SocketFlags.None);
         }
 
+        // Rows per strip for the fast screenshot: a W x StripRows off-display bitmap, 26 KB as 32 bpp.
+        const int ScreenshotStripRows = 16;
+
         void ServeScreenshot(Socket client)
         {
-            // Header: ASCII "w=W h=H\n", then panel*panel*2 raw RGB565 BE bytes.
+            // Fast path: copy the framebuffer a strip at a time into a small bitmap (native DrawImage) and
+            // send each strip's native GetBitmap() bytes as-is - 32 bpp, 0xAARRGGBB little-endian, so B G R A
+            // on the wire. No per-pixel managed code: the old loop below made 205,820 interpreted GetPixel +
+            // Color + RGB565 calls and took ~140 s on nanoFramework 2.0.
+            Bitmap strip = null;
+            try { strip = new Bitmap(_panelWidth, ScreenshotStripRows); }
+            catch (System.Exception ex) { Debug.WriteLine("[Http] screenshot strip alloc failed, slow path: " + ex.Message); }
+            if (strip != null)
+            {
+                try
+                {
+                    byte[] fhdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + " fmt=bgra32\n");
+                    int fLen = fhdr.Length + _panelWidth * _panelHeight * 4;
+                    string fHeaders = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fLen + Cors + "\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n";
+                    client.Send(Encoding.UTF8.GetBytes(fHeaders), 0, fHeaders.Length, SocketFlags.None);
+                    client.Send(fhdr, 0, fhdr.Length, SocketFlags.None);
+                    for (int y = 0; y < _panelHeight; y += ScreenshotStripRows)
+                    {
+                        int rows = _panelHeight - y < ScreenshotStripRows ? _panelHeight - y : ScreenshotStripRows;
+                        strip.DrawImage(0, 0, _fb, 0, y, _panelWidth, rows);
+                        byte[] px = strip.GetBitmap();
+                        client.Send(px, 0, _panelWidth * rows * 4, SocketFlags.None);
+                    }
+                }
+                finally { strip.Dispose(); }
+                return;
+            }
+
+            // Slow fallback. Header: ASCII "w=W h=H\n", then panel*panel*2 raw RGB565 BE bytes.
             int totalPixels = _panelWidth * _panelHeight;
             byte[] hdr = Encoding.UTF8.GetBytes("w=" + _panelWidth + " h=" + _panelHeight + "\n");
             int contentLen = hdr.Length + totalPixels * 2;
