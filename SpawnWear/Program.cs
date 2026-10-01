@@ -255,6 +255,8 @@ namespace SpawnWear
                 try
                 {
                     _http = new SpawnWear.Services.HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
+                    _http.InjectTap = InjectTap;
+                    _http.InjectBack = InjectBack;
                     if (_wifi != null && _wifi.IsConnected)
                     {
                         _http.Start();
@@ -427,11 +429,11 @@ namespace SpawnWear
                 Debug.WriteLine("[Tick] EX " + ex.GetType().Name + ": " + ex.Message);
             }
 
-            // Keep ticking fast while a widget screen is mid press-release animation, so the pressed
-            // state stays visible briefly even on a very quick tap (finger lifts before a slow tick).
+            // Keep ticking fast while a screen (widget screen or launcher) is mid press-release
+            // animation, so the pressed state clears promptly after a quick tap instead of a slow tick.
             if (_nav != null && _nav.IsTransitioning) return 16; // keep slide transitions smooth
-            var animWs = _nav != null ? _nav.Current as SpawnDev.UI.WidgetScreen : null;
-            if (animWs != null && animWs.IsAnimating) return 16;
+            var animPress = _nav != null ? _nav.Current as SpawnDev.UI.IPressable : null;
+            if (animPress != null && animPress.IsAnimating) return 16;
             if (_fingerDown) return 16;
             switch (_screenState)
             {
@@ -464,6 +466,44 @@ namespace SpawnWear
                 };
             }
             return tiles;
+        }
+
+        // Dev input injection (HTTP POST /touch). Runs the path a real finger takes - press, a short hold
+        // so the pressed frame is on screen, release, tap - under _uiLock, so an injected tap exercises
+        // press feedback and never races the main-loop render (it used to call HandleTap bare from the
+        // HTTP thread). A dimmed / sleeping screen is woken first, then the tap acts, so a remote test
+        // doesn't need a separate wake tap.
+        static void InjectTap(int x, int y)
+        {
+            if (_nav == null) return;
+            _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+            for (int i = 0; i < 20 && _screenState != ScreenState.Active; i++)
+            {
+                if (_eventLoop != null) _eventLoop.Wake();
+                System.Threading.Thread.Sleep(50);
+            }
+            lock (_uiLock)
+            {
+                var press = _nav.Current as SpawnDev.UI.IPressable;
+                if (press != null) press.OnPress(x, y);
+            }
+            System.Threading.Thread.Sleep(120); // a real tap holds ~100 ms
+            lock (_uiLock)
+            {
+                var press = _nav.Current as SpawnDev.UI.IPressable;
+                if (press != null) press.OnRelease();
+                _nav.HandleTap(x, y);
+            }
+            if (_eventLoop != null) _eventLoop.Wake();
+        }
+
+        // Dev input injection (HTTP POST /back): a short BOOT-button press - pop a sub-page, else Home.
+        static void InjectBack()
+        {
+            _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+            _bootStateAtPress = ScreenState.Active; // act, don't just wake
+            _bootButtonClickPending = 1;
+            if (_eventLoop != null) _eventLoop.Wake();
         }
 
         /// <summary>Launcher tile tap handler: built-in tiles navigate; app tiles

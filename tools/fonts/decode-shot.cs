@@ -2,8 +2,10 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 
-var dir = "C:/Users/TJ/AppData/Local/Temp/claude/D--users-tj-Projects/3d5a3c97-9c50-4b92-a1bf-ee4ed97eef78/scratchpad";
-byte[] all = File.ReadAllBytes(Path.Combine(dir, "shot.bin"));
+// usage: dotnet run tools/fonts/decode-shot.cs <shot.bin> [out.png]   (shot.bin = curl http://<watch>/screenshot.bin)
+string inPath = args.Length > 0 ? args[0] : "shot.bin";
+string outPng = args.Length > 1 ? args[1] : Path.ChangeExtension(inPath, ".png");
+byte[] all = File.ReadAllBytes(inPath);
 // Header: ASCII "w=W h=H\n"
 int nl = Array.IndexOf(all, (byte)'\n');
 string hdr = System.Text.Encoding.ASCII.GetString(all, 0, nl);
@@ -20,6 +22,5 @@ for (int x = 0; x < w; x++)
     int r = (v >> 11) & 0x1F, g = (v >> 5) & 0x3F, b = v & 0x1F;
     bmp.SetPixel(x, y, Color.FromArgb((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)));
 }
-string outPng = Path.Combine(dir, "shot.png");
 bmp.Save(outPng, ImageFormat.Png);
 Console.WriteLine("saved " + outPng);

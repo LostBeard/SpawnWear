@@ -16,7 +16,7 @@ namespace SpawnWear.UI
     /// "manifests" loaded from the SD card register their own tiles + icon
     /// data.
     /// </summary>
-    public class LauncherScreen : IScreen, IPageable
+    public class LauncherScreen : IScreen, IPageable, IPressable
     {
         /// <summary>Invoked when a non-placeholder tile is tapped. The handler
         /// decides what to do based on the tile: a built-in tile navigates to
@@ -75,6 +75,16 @@ namespace SpawnWear.UI
         int _page = 0;
         int _tileSize;
         int _tileGap;
+
+        // Press state (Android-style touch feedback). The tile under the finger lightens and sinks from
+        // finger-down until it has been visible MinPressVisibleMs AND the finger has lifted, so even a
+        // quick tap visibly registers. A tap that launches an app leaves the pressed tile on screen
+        // while the app loads off the SD card (the load runs inside the tap) - the "it heard me" cue a
+        // slow launch needs. Index is into _tiles; -1 = nothing pressed.
+        int _pressedIdx = -1;
+        bool _releasePending;
+        long _pressStartTicks;
+        const int MinPressVisibleMs = 90;
         int _gridTopY;
         int _gridLeftX;
 
@@ -124,6 +134,7 @@ namespace SpawnWear.UI
             // never falls through to a screen carousel - there is no carousel behind the apps anymore.
             int pages = PageCount();
             if (pages <= 1) return true; // single page (or none): consume and stay put
+            ClearPress(); // a swipe that began on a tile must not slide that tile out pressed
             int from = _page;
             int target = (_page + dir + pages) % pages; // wrap around at the ends
             bool forward = dir > 0; // next page enters from the right (swipe left)
@@ -149,7 +160,49 @@ namespace SpawnWear.UI
 
         public void Tick()
         {
+            if (_releasePending)
+            {
+                long heldMs = (System.DateTime.UtcNow.Ticks - _pressStartTicks) / System.TimeSpan.TicksPerMillisecond;
+                if (heldMs >= MinPressVisibleMs)
+                {
+                    int idx = _pressedIdx;
+                    ClearPress();
+                    RedrawTile(idx);
+                }
+            }
             _statusBar?.Render(force: false);
+        }
+
+        /// <summary>True while a lifted press is still showing - the event loop keeps ticking fast so the
+        /// pressed tile clears ~MinPressVisibleMs after the tap instead of on the next 1 s tick.</summary>
+        public bool IsAnimating { get { return _releasePending; } }
+
+        // IPressable: finger-down on a live tile shows it pressed immediately. Runs on the touch thread
+        // under Program._uiLock, which also serializes the main-loop render, so drawing here is safe.
+        public void OnPress(int x, int y)
+        {
+            int idx = HitTile(x, y);
+            if (idx < 0 || IsPlaceholder(_tiles[idx])) return;
+            int prev = _pressedIdx;
+            _pressedIdx = idx;
+            _releasePending = false;
+            _pressStartTicks = System.DateTime.UtcNow.Ticks;
+            if (prev >= 0 && prev != idx) RedrawTile(prev);
+            RedrawTile(idx);
+        }
+
+        // IPressable: finger lifted (or the touch became a drag). The visual release is deferred to Tick
+        // so the pressed frame stays up at least MinPressVisibleMs. Called repeatedly while dragging.
+        public void OnRelease()
+        {
+            if (_pressedIdx >= 0) _releasePending = true;
+        }
+
+        // Drops any press state without drawing (the caller repaints).
+        void ClearPress()
+        {
+            _pressedIdx = -1;
+            _releasePending = false;
         }
 
         public void Invalidate()
@@ -181,7 +234,7 @@ namespace SpawnWear.UI
                     if (idx >= _tiles.Length) break;
                     int x = _gridLeftX + col * (_tileSize + _tileGap);
                     int y = _gridTopY + row * (_tileSize + _tileGap);
-                    DrawTile(x, y, _tiles[idx]);
+                    DrawTile(x, y, _tiles[idx], idx == _pressedIdx);
                 }
             }
         }
@@ -199,33 +252,16 @@ namespace SpawnWear.UI
             }
         }
 
-        public void OnResume() { RefreshTiles(); Invalidate(); }
-        public void OnPause() { }
+        public void OnResume() { ClearPress(); RefreshTiles(); Invalidate(); }
+        public void OnPause() { ClearPress(); }
 
         public bool OnTap(int x, int y)
         {
-            if (_tileSize == 0) Layout();
-
-            int relX = x - _gridLeftX;
-            int relY = y - _gridTopY;
-            if (relX < 0 || relY < 0) return false;
-
-            int colSlot = relX / (_tileSize + _tileGap);
-            int rowSlot = relY / (_tileSize + _tileGap);
-            if (colSlot < 0 || colSlot >= Cols) return false;
-            if (rowSlot < 0 || rowSlot >= Rows) return false;
-
-            // Reject taps that land in the gap between cells.
-            int colInSlot = relX - colSlot * (_tileSize + _tileGap);
-            int rowInSlot = relY - rowSlot * (_tileSize + _tileGap);
-            if (colInSlot >= _tileSize || rowInSlot >= _tileSize) return false;
-
-            int idx = _page * PerPage + rowSlot * Cols + colSlot;
-            if (idx >= _tiles.Length) return false;
+            int idx = HitTile(x, y);
+            if (idx < 0) return false;
 
             var tile = _tiles[idx];
-            // A placeholder is a system tile with no destination AND no app.
-            if (tile.TargetScreenIndex < 0 && tile.AppName == null)
+            if (IsPlaceholder(tile))
             {
                 System.Diagnostics.Debug.WriteLine("[Launcher] tile " + tile.Label + " is a placeholder, ignored");
                 return true; // consume so navigator doesn't cycle
@@ -234,6 +270,53 @@ namespace SpawnWear.UI
                 (tile.AppName != null ? " (app)" : " -> screen " + tile.TargetScreenIndex));
             _activate?.Invoke(tile);
             return true;
+        }
+
+        // Index into _tiles of the tile under (x, y) on the current page, or -1 for empty space, the
+        // gaps between cells, or an empty slot on a partially-filled last page.
+        int HitTile(int x, int y)
+        {
+            if (_tileSize == 0) Layout();
+
+            int relX = x - _gridLeftX;
+            int relY = y - _gridTopY;
+            if (relX < 0 || relY < 0) return -1;
+
+            int colSlot = relX / (_tileSize + _tileGap);
+            int rowSlot = relY / (_tileSize + _tileGap);
+            if (colSlot >= Cols || rowSlot >= Rows) return -1;
+
+            // Reject touches that land in the gap between cells.
+            int colInSlot = relX - colSlot * (_tileSize + _tileGap);
+            int rowInSlot = relY - rowSlot * (_tileSize + _tileGap);
+            if (colInSlot >= _tileSize || rowInSlot >= _tileSize) return -1;
+
+            int idx = _page * PerPage + rowSlot * Cols + colSlot;
+            return idx < _tiles.Length ? idx : -1;
+        }
+
+        // A placeholder is a system tile with no destination AND no app.
+        static bool IsPlaceholder(Tile tile) { return tile.TargetScreenIndex < 0 && tile.AppName == null; }
+
+        // Repaints ONE tile in place (press / release) and flushes just its rectangle - ~30 KB instead
+        // of the full 411 KB frame. The rect covers the badge overhang above the tile and is snapped to
+        // the CO5300 even-start / odd-end address window (see Watchface's partial repaint) so no stale
+        // edge pixels survive. Tiles not on the current page are skipped.
+        void RedrawTile(int idx)
+        {
+            if (idx < 0 || idx >= _tiles.Length) return;
+            int slot = idx - _page * PerPage;
+            if (slot < 0 || slot >= PerPage) return;
+            if (_tileSize == 0) Layout();
+            int x = _gridLeftX + (slot % Cols) * (_tileSize + _tileGap);
+            int y = _gridTopY + (slot / Cols) * (_tileSize + _tileGap);
+            int left = (x - 2) & ~1;
+            int top = (y - 6) & ~1;
+            int right = (x + _tileSize + 1) | 1;
+            int bottom = (y + _tileSize + 1) | 1;
+            _fb.FillRectangle(left, top, right - left + 1, bottom - top + 1, Color.Black);
+            DrawTile(x, y, _tiles[idx], idx == _pressedIdx);
+            _fb.Flush(left, top, right - left + 1, bottom - top + 1);
         }
 
         // ----- Layout -----
@@ -266,9 +349,9 @@ namespace SpawnWear.UI
 
         // ----- Tile rendering -----
 
-        void DrawTile(int x, int y, Tile tile)
+        void DrawTile(int x, int y, Tile tile, bool pressed)
         {
-            bool placeholder = tile.TargetScreenIndex < 0 && tile.AppName == null;
+            bool placeholder = IsPlaceholder(tile);
 
             // Native rounded tile. FillRoundRectangle is supported on this CO5300 nf-interpreter
             // build (verified via the GFX PROBE screen 2026-06-30) - true smooth corners instead
@@ -279,10 +362,27 @@ namespace SpawnWear.UI
             int faceR = placeholder ? 82 : tile.Background.R;
             int faceG = placeholder ? 82 : tile.Background.G;
             int faceB = placeholder ? 82 : tile.Background.B;
+            if (pressed)
+            {
+                // Pressed: the face lifts ~30% toward white (Material's pressed-state overlay).
+                faceR += ((255 - faceR) * 30) / 100;
+                faceG += ((255 - faceG) * 30) / 100;
+                faceB += ((255 - faceB) * 30) / 100;
+            }
             Color face = Color.FromArgb(faceR, faceG, faceB);
-            Color edge = Color.FromArgb((faceR * 55) / 100, (faceG * 55) / 100, (faceB * 55) / 100);
-            _fb.FillRoundRectangle(x, y, _tileSize, _tileSize, radius, radius, edge);
-            _fb.FillRoundRectangle(x, y, _tileSize, _tileSize - 3, radius, radius, face);
+            if (pressed)
+            {
+                // ...and sinks: no 3 px bottom edge, the face drops onto the base and its contents
+                // ride down with it.
+                _fb.FillRoundRectangle(x, y + 3, _tileSize, _tileSize - 3, radius, radius, face);
+                y += 3;
+            }
+            else
+            {
+                Color edge = Color.FromArgb((faceR * 55) / 100, (faceG * 55) / 100, (faceB * 55) / 100);
+                _fb.FillRoundRectangle(x, y, _tileSize, _tileSize, radius, radius, edge);
+                _fb.FillRoundRectangle(x, y, _tileSize, _tileSize - 3, radius, radius, face);
+            }
 
             // Layout INSIDE the tile: icon in the top ~65%, label in the bottom ~25%
             // with a small gap between them. This matches the Android launcher
@@ -307,7 +407,7 @@ namespace SpawnWear.UI
                 case IconKind.Music: DrawMusicIcon(iconX, iconY, iconBoxSize, iconColor); break;
                 case IconKind.Gallery: DrawGalleryIcon(iconX, iconY, iconBoxSize, iconColor); break;
                 case IconKind.Wifi: DrawWifiIcon(iconX, iconY, iconBoxSize, iconColor); break;
-                case IconKind.App: DrawAppLetterIcon(iconX, iconY, iconBoxSize, iconColor, tile.Label); break;
+                case IconKind.App: DrawAppLetterIcon(iconX, iconY, iconBoxSize, iconColor, face, tile.Label); break;
                 case IconKind.Empty: break;
             }
 
@@ -321,16 +421,39 @@ namespace SpawnWear.UI
             // NativeFont.Draw, so the colored text composites cleanly over the tile face.
             int labelY = y + _tileSize - labelStripH + 3;
             Color labelColor = placeholder ? Color.FromArgb(120, 120, 120) : Color.White;
+            int maxLabelW = _tileSize - 8;
             if (labelFont != null && labelFont.IsValid)
             {
-                int lw = labelFont.Measure(tile.Label);
-                labelFont.Draw(_fb, tile.Label, x + (_tileSize - lw) / 2, labelY, labelColor);
+                string label = FitLabel(tile.Label, maxLabelW, labelFont, labelScale);
+                int lw = labelFont.Measure(label);
+                labelFont.Draw(_fb, label, x + (_tileSize - lw) / 2, labelY, labelColor);
             }
             else
             {
-                int labelW = SmallFont.MeasureString(tile.Label, labelScale);
-                SmallFont.DrawString(_fb, tile.Label, x + (_tileSize - labelW) / 2, labelY, labelScale, labelColor);
+                string label = FitLabel(tile.Label, maxLabelW, null, labelScale);
+                int labelW = SmallFont.MeasureString(label, labelScale);
+                SmallFont.DrawString(_fb, label, x + (_tileSize - labelW) / 2, labelY, labelScale, labelColor);
             }
+        }
+
+        // Shortens a label that is wider than the tile to "Generi.." (Android ellipsizes launcher labels
+        // the same way) so a long app name never spills into the neighbouring tile. Measures with the
+        // label font when it's loaded, else the 5x7 SmallFont at fallbackScale.
+        static string FitLabel(string label, int maxW, NativeFont font, int fallbackScale)
+        {
+            if (label == null) return "";
+            if (MeasureLabel(label, font, fallbackScale) <= maxW) return label;
+            for (int n = label.Length - 1; n > 0; n--)
+            {
+                string s = label.Substring(0, n) + "..";
+                if (MeasureLabel(s, font, fallbackScale) <= maxW) return s;
+            }
+            return "..";
+        }
+
+        static int MeasureLabel(string s, NativeFont font, int fallbackScale)
+        {
+            return font != null ? font.Measure(s) : SmallFont.MeasureString(s, fallbackScale);
         }
 
         // Rounded red badge (pill/circle) with a small white digit; "9+" if count > 9.
@@ -364,9 +487,11 @@ namespace SpawnWear.UI
 
         // ----- Icon primitives (native DrawEllipse / DrawLine / FillRoundRectangle) -----
 
-        // Generic app icon: the app's first letter, big and centered. Gives each
-        // installed app a distinct, recognizable tile without per-app bitmap art.
-        void DrawAppLetterIcon(int x, int y, int size, Color color, string label)
+        // Generic app icon: an Android-style monogram - the app's first letter in the UI font, centered
+        // on a disc a step lighter than the tile face. Gives each installed app a distinct, finished-
+        // looking tile without per-app bitmap art. Falls back to the scaled 5x7 letter when the SD font
+        // is missing.
+        void DrawAppLetterIcon(int x, int y, int size, Color color, Color face, string label)
         {
             string s = "?";
             if (label != null && label.Length > 0)
@@ -374,6 +499,18 @@ namespace SpawnWear.UI
                 char c = label[0];
                 if (c >= 'a' && c <= 'z') c = (char)(c - 32); // upper-case the glyph
                 s = c.ToString();
+            }
+            NativeFont font = NativeFont.Shared;
+            if (font != null && font.IsValid)
+            {
+                int r = size / 2;
+                Color disc = Color.FromArgb(face.R + ((255 - face.R) * 22) / 100,
+                                            face.G + ((255 - face.G) * 22) / 100,
+                                            face.B + ((255 - face.B) * 22) / 100);
+                FillCircle(x + r, y + r, r, disc);
+                int gw = font.Measure(s);
+                font.Draw(_fb, s, x + (size - gw) / 2, y + (size - font.Height) / 2, color);
+                return;
             }
             int scale = size / SmallFont.GlyphHeight;
             if (scale < 2) scale = 2;

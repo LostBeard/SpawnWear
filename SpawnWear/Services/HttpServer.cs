@@ -52,6 +52,14 @@ namespace SpawnWear.Services
         SdCardService _sdCard;
         AppRepositoryService _appRepo;
 
+        /// <summary>Dev input injection for POST /touch and POST /back, set by Program so injected input
+        /// takes the same path real input does (press-state, the UI lock, BOOT-button Back). Unset, /touch
+        /// falls back to a bare navigator tap and /back answers 503.</summary>
+        public delegate void TapInjector(int x, int y);
+        public delegate void ButtonInjector();
+        public TapInjector InjectTap;
+        public ButtonInjector InjectBack;
+
         /// <summary>Wire the SD card service so /sdformat can in-place reformat
         /// the inserted card without pulling it for Windows. Optional - the
         /// route returns 503 if not attached.</summary>
@@ -239,6 +247,12 @@ namespace SpawnWear.Services
             {
                 ServeTouch(client, reqHeader, buf, n, headerEnd);
             }
+            else if (path == "/back" && method == "POST")
+            {
+                // Same as a short press of the BOOT side button: pop a sub-page, else go Home.
+                if (InjectBack == null) ServeText(client, "503 Service Unavailable\r\n\r\nBack injector not attached");
+                else { InjectBack(); ServeText(client, "OK back"); }
+            }
             else if (path == "/sdformat" && method == "POST")
             {
                 ServeSdFormat(client, reqHeader, buf, n, headerEnd);
@@ -313,7 +327,11 @@ namespace SpawnWear.Services
                 ServeText(client, "400 Bad Request\r\n\r\nTap (" + x + "," + y + ") out of " + _panelWidth + "x" + _panelHeight + " panel");
                 return;
             }
-            try { _navigator.HandleTap(x, y); }
+            try
+            {
+                if (InjectTap != null) InjectTap(x, y);
+                else _navigator.HandleTap(x, y);
+            }
             catch (System.Exception ex)
             {
                 ServeText(client, "500 Internal Server Error\r\n\r\nHandleTap EX: " + ex.GetType().Name + ": " + ex.Message);

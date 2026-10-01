@@ -18,6 +18,9 @@ namespace SpawnDev.UI
     {
         void OnPress(int x, int y);
         void OnRelease();
+        /// <summary>True while a lifted press is still showing - the event loop ticks fast (16 ms) until
+        /// it clears.</summary>
+        bool IsAnimating { get; }
     }
 
     /// <summary>A screen whose content can be scrolled vertically by a finger drag. The event loop calls
