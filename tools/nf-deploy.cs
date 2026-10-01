@@ -179,7 +179,19 @@ var createForSerial = portBaseType.GetMethod("CreateInstanceForSerial", new[] { 
 object portBase = createForSerial.Invoke(null, new object[] { false });
 
 var addDeviceMi = portBaseType.GetMethod("AddDevice", new[] { typeof(string) });
-object device = addDeviceMi.Invoke(portBase, new object[] { port });
+// Discovery occasionally misses on the USB-Serial-JTAG port (2 of ~10 deploys, 2026-10-01) while a
+// retry a moment later works - the running CLR's buffered debug output can crowd the first ping
+// reply. Try a few times before giving up.
+object device = null;
+for (int attempt = 1; attempt <= 3 && device == null; attempt++)
+{
+    device = addDeviceMi.Invoke(portBase, new object[] { port });
+    if (device == null && attempt < 3)
+    {
+        Console.WriteLine($"AddDevice({port}) attempt {attempt} found no device; retrying...");
+        await Task.Delay(2000);
+    }
+}
 if (device == null)
 {
     Console.WriteLine($"AddDevice({port}) returned null - device not present or holder of port.");

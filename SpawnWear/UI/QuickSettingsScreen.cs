@@ -71,7 +71,9 @@ namespace SpawnWear.UI
                 X = SafeArea.EdgeInset,
                 Y = StatusBar.ReservedHeight + 66,
                 Width = panelWidth - 2 * SafeArea.EdgeInset,
-                Height = panelHeight - StatusBar.ReservedHeight - 120,
+                // Down to the panel bottom: the SETTINGS row sits below the slider, and taps are hit-tested
+                // against this column's bounds - the old "- 120" height cut off the lower half of SETTINGS.
+                Height = panelHeight - (StatusBar.ReservedHeight + 66) - 8,
                 Spacing = t.Gap,
             };
 

@@ -40,6 +40,7 @@ namespace SpawnWear
         static AboutScreen _aboutScreen;   // pushed as a sub-page from Settings -> ABOUT
         static Axp2101Driver _axp;
         static Pcf85063Driver _rtc;
+        static TimeService _time; // local time over the UTC RTC + trusted sync
         static WifiService _wifi;
         static SdCardService _sd;
         static AppRepositoryService _appRepo;
@@ -173,10 +174,14 @@ namespace SpawnWear
             // first (rails are already up from EnablePowerRails), then bring up radios.
             StartSdCard();
             StartRtc();
+            _time = new TimeService(_rtc); // RTC keeps UTC; zone from I:\timezone.txt
             StartImu();
             StartTouchProbe();
             StartBootButton();
             StartWifi();
+            // Trusted time sync (HTTPS Date from a cert-verified host) whenever WiFi is up: soon after
+            // boot, then every 6 h.
+            _time.StartAutoSync(() => _wifi != null && _wifi.IsConnected);
             // BLE stripped - see using comment above.
             // StartDisplay must run BEFORE BLE - the graphics heap allocates the
             // LARGEST free PSRAM block at init time. NimBLE consumes hundreds of KB
@@ -227,7 +232,7 @@ namespace SpawnWear
                 {
                     Debug.WriteLine("[SpawnWear] WebRTC transport service DISABLED (freeze diagnostic 2026-06-23)");
                 }
-                var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _rtc);
+                var statusBar = new StatusBar(fb, BoardPins.LcdWidth, _axp, _time);
                 _statusBar = statusBar; // expose to OnTick for the live Companion-link icon
                 // WiFi state -> status bar. We don't have RSSI on this build so
                 // signal strength is reported as full bars (4) when connected
@@ -239,7 +244,7 @@ namespace SpawnWear
                 // Service host - the single point through which screens consume
                 // system services via the AppContracts interfaces. Phase 8
                 // SD-card-loadable apps will receive this same instance.
-                var services = new ServiceHost(_axp, _rtc, _wifi, _logger);
+                var services = new ServiceHost(_axp, _time, _wifi, _logger);
 
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
@@ -247,7 +252,7 @@ namespace SpawnWear
                 _statsScreen = stats; _aboutScreen = about; // reachable as sub-pages pushed from Settings (STATS / ABOUT)
                 var settings = new SettingsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, ForceSleepFromUi, _imu,
                     ToggleBleFromUi, _bleAdvertising, ToggleWifiFromUi, _wifi != null && _wifi.IsConnected, OpenCompanionPage,
-                    OpenUiKitPage, OpenGfxProbePage, OpenStatsPage, OpenAboutPage);
+                    OpenUiKitPage, OpenGfxProbePage, OpenStatsPage, OpenAboutPage, _time, OpenTimeZonePage);
                 var loadedApp = new LoadedAppScreen(services, fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                 _loadedApp = loadedApp;
                 services.AttachDisplay(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
@@ -261,6 +266,7 @@ namespace SpawnWear
                     _http = new SpawnWear.Services.HttpServer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight);
                     _http.InjectTap = InjectTap;
                     _http.InjectBack = InjectBack;
+                    _http.InjectSwipe = InjectSwipe;
                     _http.UiLock = _uiLock;
                     if (_wifi != null && _wifi.IsConnected)
                     {
@@ -478,33 +484,161 @@ namespace SpawnWear
             return tiles;
         }
 
-        // Dev input injection (HTTP POST /touch). Runs the path a real finger takes - press, a short hold
-        // so the pressed frame is on screen, release, tap - under _uiLock, so an injected tap exercises
-        // press feedback and never races the main-loop render (it used to call HandleTap bare from the
-        // HTTP thread). A dimmed / sleeping screen is woken first, then the tap acts, so a remote test
-        // doesn't need a separate wake tap.
+        // One touch-controller report (finger count + first point): press-state, drag/scroll, and on
+        // lift the tap / swipe / drop-down classification. Called by the FT3168 interrupt handler and by
+        // the HTTP dev injectors (/touch, /swipe), so injected input runs exactly the real gesture path.
+        static void OnTouch(int fingerCount, int x, int y)
+        {
+            bool wasDown = _fingerDown;
+            _fingerDown = fingerCount > 0;
+            long nowTicks = DateTime.UtcNow.Ticks;
+            int snapX = x;
+            int snapY = y;
+
+            lock (_uiLock) // serialize touch dispatch with the main-loop render (shared framebuffer)
+            {
+            if (_fingerDown)
+            {
+                int prevY = _fingerLastY;
+                _fingerLastX = snapX;
+                _fingerLastY = snapY;
+                _lastTouchUtcTicks = nowTicks;
+                if (!wasDown)
+                {
+                    _fingerDownUtcTicks = nowTicks;
+                    _fingerDownX = x;
+                    _fingerDownY = y;
+                    _stateAtFingerDown = _screenState;
+                    Debug.WriteLine("[Touch] DOWN at (" + x + "," + y + ") state=" + _stateAtFingerDown);
+                    // Raw press -> widget press-state animation (only on an active screen).
+                    if (_nav != null && _screenState == ScreenState.Active)
+                    {
+                        var pressDown = _nav.Current as SpawnDev.UI.IPressable;
+                        if (pressDown != null) pressDown.OnPress(snapX, snapY);
+                    }
+                }
+                else if (_nav != null && _screenState == ScreenState.Active)
+                {
+                    // Held + dragging: a dominant-vertical drag (not from the status bar) scrolls the
+                    // current screen's list. The moved gesture also means the UP won't fire a tap.
+                    int totDx = snapX - _fingerDownX;
+                    int totDy = snapY - _fingerDownY;
+                    int aTdx = totDx < 0 ? -totDx : totDx;
+                    int aTdy = totDy < 0 ? -totDy : totDy;
+                    // Once the finger moves beyond the tap slop this is a drag, not a tap: cancel any
+                    // press-state highlight from finger-down so a row doesn't sit lit while you drag.
+                    // Covers diagonal/slow drags that never cross the vertical-scroll threshold below
+                    // (OnScroll clears it immediately once vertical scrolling actually engages).
+                    if ((aTdx * aTdx + aTdy * aTdy) > TapMaxMoveSquared)
+                    {
+                        var pressCancel = _nav.Current as SpawnDev.UI.IPressable;
+                        if (pressCancel != null) pressCancel.OnRelease();
+                    }
+                    if (aTdy > aTdx && aTdy > 12 && _fingerDownY >= StatusBar.ReservedHeight)
+                    {
+                        var scroll = _nav.Current as SpawnDev.UI.IScrollable;
+                        int dyMove = snapY - prevY;
+                        if (scroll != null && dyMove != 0)
+                        {
+                            scroll.OnScroll(dyMove);
+                            if (_eventLoop != null) _eventLoop.Wake();
+                        }
+                    }
+                }
+            }
+            else if (wasDown)
+            {
+                // Finger lifted. Classify as tap, long-press, or drag.
+                long elapsedMs = (nowTicks - _fingerDownUtcTicks) / TimeSpan.TicksPerMillisecond;
+                int dx = _fingerLastX - _fingerDownX;
+                int dy = _fingerLastY - _fingerDownY;
+                bool stayedPut = (dx * dx + dy * dy) < TapMaxMoveSquared;
+                bool isTap = elapsedMs < TapMaxMs && stayedPut;
+                bool isLongPress = elapsedMs >= LongPressMinMs && stayedPut;
+                int adx = dx < 0 ? -dx : dx;
+                int ady = dy < 0 ? -dy : dy;
+                bool isSwipe = !stayedPut && elapsedMs < SwipeMaxMs && adx >= SwipeMinDist && adx > ady;
+                // Downward swipe that STARTED in the top status-bar band -> Android-style quick
+                // settings drop-down. Dominant-vertical (ady > adx), downward (dy > 0), from the bar.
+                bool isSwipeDown = !stayedPut && elapsedMs < SwipeMaxMs && dy > 0 && ady >= SwipeMinDist
+                                   && ady > adx && _fingerDownY < StatusBar.ReservedHeight;
+                Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress + " swipe=" + isSwipe + " down=" + isSwipeDown);
+                // Wake-tap consumption: any gesture whose finger-DOWN happened while
+                // the screen was asleep is consumed by the wake itself, not dispatched
+                // to the UI.
+                if (_nav != null && _stateAtFingerDown == ScreenState.Active)
+                {
+                    // Release the press-state first (button returns to normal), then the tap.
+                    var pressUp = _nav.Current as SpawnDev.UI.IPressable;
+                    if (pressUp != null) pressUp.OnRelease();
+                    // Touchscreen long-press no longer navigates home - the hardware back
+                    // button owns back/home (TJ 2026-07-04). isLongPress stays for logging.
+                    if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
+                    else if (isSwipe)
+                    {
+                        // Horizontal swipe pages the launcher's app drawer (the only IPageable
+                        // screen). There is NO screen carousel anymore - other screens ignore
+                        // horizontal swipes. Reach apps via the launcher, Settings via the
+                        // quick-settings SETTINGS shortcut, and go back with the BOOT button.
+                        var pageable = _nav.Current as SpawnDev.UI.IPageable;
+                        if (pageable != null) pageable.TryPage(dx < 0 ? 1 : -1); // left -> next page, right -> prev
+                    }
+                    else if (isTap)
+                    {
+                        long sinceLastTapMs = (nowTicks - _lastTapDispatchUtcTicks) / TimeSpan.TicksPerMillisecond;
+                        if (sinceLastTapMs >= TapDebounceMs)
+                        {
+                            _lastTapDispatchUtcTicks = nowTicks;
+                            _nav.HandleTap(_fingerLastX, _fingerLastY);
+                        }
+                        else
+                        {
+                            Debug.WriteLine("[Touch] tap debounced (" + sinceLastTapMs + "ms since last)");
+                        }
+                    }
+                }
+            }
+            } // end lock (_uiLock)
+
+            // Wake the main loop so it picks up the new finger state and applies
+            // the appropriate tick budget (16 ms while held, 1 s when idle).
+            if (_eventLoop != null) _eventLoop.Wake();
+        }
+
+        // Dev input injection (HTTP POST /touch, /swipe): feeds OnTouch exactly what the touch controller
+        // would - finger down, moves, finger up - so injected input runs the real gesture path (press-state,
+        // tap / swipe / drop-down classification) under _uiLock. A dimmed / sleeping screen is woken first
+        // so a remote test doesn't need a separate wake tap.
         static void InjectTap(int x, int y)
         {
-            if (_nav == null) return;
+            if (!WakeForInjection()) return;
+            OnTouch(1, x, y);
+            System.Threading.Thread.Sleep(120); // a real tap holds ~100 ms
+            OnTouch(0, x, y);
+        }
+
+        static void InjectSwipe(int x0, int y0, int x1, int y1)
+        {
+            if (!WakeForInjection()) return;
+            const int Steps = 6; // ~180 ms gesture: well under SwipeMaxMs
+            for (int i = 0; i <= Steps; i++)
+            {
+                OnTouch(1, x0 + (x1 - x0) * i / Steps, y0 + (y1 - y0) * i / Steps);
+                System.Threading.Thread.Sleep(30);
+            }
+            OnTouch(0, x1, y1);
+        }
+
+        static bool WakeForInjection()
+        {
+            if (_nav == null) return false;
             _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
             for (int i = 0; i < 20 && _screenState != ScreenState.Active; i++)
             {
                 if (_eventLoop != null) _eventLoop.Wake();
                 System.Threading.Thread.Sleep(50);
             }
-            lock (_uiLock)
-            {
-                var press = _nav.Current as SpawnDev.UI.IPressable;
-                if (press != null) press.OnPress(x, y);
-            }
-            System.Threading.Thread.Sleep(120); // a real tap holds ~100 ms
-            lock (_uiLock)
-            {
-                var press = _nav.Current as SpawnDev.UI.IPressable;
-                if (press != null) press.OnRelease();
-                _nav.HandleTap(x, y);
-            }
-            if (_eventLoop != null) _eventLoop.Wake();
+            return true;
         }
 
         // Dev input injection (HTTP POST /back): a short BOOT-button press - pop a sub-page, else Home.
@@ -595,6 +729,19 @@ namespace SpawnWear
                 _companionScreen = new CompanionScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _pairing);
             }
             _nav.PushAnimated(_companionScreen); // slides if it's a WidgetScreen, else instant (graceful)
+        }
+
+        // Settings -> TIME ZONE: push the zone picker; picking a zone saves it and slides back to Settings.
+        static TimeZoneScreen _timeZoneScreen;
+        static void OpenTimeZonePage()
+        {
+            if (_nav == null || _fb == null || _time == null) return;
+            if (_timeZoneScreen == null)
+            {
+                _timeZoneScreen = new TimeZoneScreen(_fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _time,
+                    () => { if (_nav != null) _nav.RequestBack(); });
+            }
+            _nav.PushAnimated(_timeZoneScreen);
         }
 
         // Settings -> UI KIT: push the UI-library demo (proves the GameUI-mirrored
@@ -2025,123 +2172,7 @@ namespace SpawnWear
                 _touchStatus = id == 0x03 ? "Tok" : "T" + id.ToString("X2");
                 Debug.WriteLine("[Touch] T5 - Device id=0x" + id.ToString("X2") + " status=" + _touchStatus);
 
-                touch.TouchEvent += (sender, snapshot) =>
-                {
-                    bool wasDown = _fingerDown;
-                    _fingerDown = snapshot.FingerCount > 0;
-                    long nowTicks = DateTime.UtcNow.Ticks;
-                    int snapX = snapshot.X1;
-                    int snapY = snapshot.Y1;
-
-                    lock (_uiLock) // serialize touch dispatch with the main-loop render (shared framebuffer)
-                    {
-                    if (_fingerDown)
-                    {
-                        int prevY = _fingerLastY;
-                        _fingerLastX = snapX;
-                        _fingerLastY = snapY;
-                        _lastTouchUtcTicks = nowTicks;
-                        if (!wasDown)
-                        {
-                            _fingerDownUtcTicks = nowTicks;
-                            _fingerDownX = snapshot.X1;
-                            _fingerDownY = snapshot.Y1;
-                            _stateAtFingerDown = _screenState;
-                            Debug.WriteLine("[Touch] DOWN at (" + snapshot.X1 + "," + snapshot.Y1 + ") state=" + _stateAtFingerDown);
-                            // Raw press -> widget press-state animation (only on an active screen).
-                            if (_nav != null && _screenState == ScreenState.Active)
-                            {
-                                var pressDown = _nav.Current as SpawnDev.UI.IPressable;
-                                if (pressDown != null) pressDown.OnPress(snapX, snapY);
-                            }
-                        }
-                        else if (_nav != null && _screenState == ScreenState.Active)
-                        {
-                            // Held + dragging: a dominant-vertical drag (not from the status bar) scrolls the
-                            // current screen's list. The moved gesture also means the UP won't fire a tap.
-                            int totDx = snapX - _fingerDownX;
-                            int totDy = snapY - _fingerDownY;
-                            int aTdx = totDx < 0 ? -totDx : totDx;
-                            int aTdy = totDy < 0 ? -totDy : totDy;
-                            // Once the finger moves beyond the tap slop this is a drag, not a tap: cancel any
-                            // press-state highlight from finger-down so a row doesn't sit lit while you drag.
-                            // Covers diagonal/slow drags that never cross the vertical-scroll threshold below
-                            // (OnScroll clears it immediately once vertical scrolling actually engages).
-                            if ((aTdx * aTdx + aTdy * aTdy) > TapMaxMoveSquared)
-                            {
-                                var pressCancel = _nav.Current as SpawnDev.UI.IPressable;
-                                if (pressCancel != null) pressCancel.OnRelease();
-                            }
-                            if (aTdy > aTdx && aTdy > 12 && _fingerDownY >= StatusBar.ReservedHeight)
-                            {
-                                var scroll = _nav.Current as SpawnDev.UI.IScrollable;
-                                int dyMove = snapY - prevY;
-                                if (scroll != null && dyMove != 0)
-                                {
-                                    scroll.OnScroll(dyMove);
-                                    if (_eventLoop != null) _eventLoop.Wake();
-                                }
-                            }
-                        }
-                    }
-                    else if (wasDown)
-                    {
-                        // Finger lifted. Classify as tap, long-press, or drag.
-                        long elapsedMs = (nowTicks - _fingerDownUtcTicks) / TimeSpan.TicksPerMillisecond;
-                        int dx = _fingerLastX - _fingerDownX;
-                        int dy = _fingerLastY - _fingerDownY;
-                        bool stayedPut = (dx * dx + dy * dy) < TapMaxMoveSquared;
-                        bool isTap = elapsedMs < TapMaxMs && stayedPut;
-                        bool isLongPress = elapsedMs >= LongPressMinMs && stayedPut;
-                        int adx = dx < 0 ? -dx : dx;
-                        int ady = dy < 0 ? -dy : dy;
-                        bool isSwipe = !stayedPut && elapsedMs < SwipeMaxMs && adx >= SwipeMinDist && adx > ady;
-                        // Downward swipe that STARTED in the top status-bar band -> Android-style quick
-                        // settings drop-down. Dominant-vertical (ady > adx), downward (dy > 0), from the bar.
-                        bool isSwipeDown = !stayedPut && elapsedMs < SwipeMaxMs && dy > 0 && ady >= SwipeMinDist
-                                           && ady > adx && _fingerDownY < StatusBar.ReservedHeight;
-                        Debug.WriteLine("[Touch] UP elapsed=" + elapsedMs + "ms dxdy=(" + dx + "," + dy + ") tap=" + isTap + " long=" + isLongPress + " swipe=" + isSwipe + " down=" + isSwipeDown);
-                        // Wake-tap consumption: any gesture whose finger-DOWN happened while
-                        // the screen was asleep is consumed by the wake itself, not dispatched
-                        // to the UI.
-                        if (_nav != null && _stateAtFingerDown == ScreenState.Active)
-                        {
-                            // Release the press-state first (button returns to normal), then the tap.
-                            var pressUp = _nav.Current as SpawnDev.UI.IPressable;
-                            if (pressUp != null) pressUp.OnRelease();
-                            // Touchscreen long-press no longer navigates home - the hardware back
-                            // button owns back/home (TJ 2026-07-04). isLongPress stays for logging.
-                            if (isSwipeDown) OpenQuickSettings(); // pull down from the status bar
-                            else if (isSwipe)
-                            {
-                                // Horizontal swipe pages the launcher's app drawer (the only IPageable
-                                // screen). There is NO screen carousel anymore - other screens ignore
-                                // horizontal swipes. Reach apps via the launcher, Settings via the
-                                // quick-settings SETTINGS shortcut, and go back with the BOOT button.
-                                var pageable = _nav.Current as SpawnDev.UI.IPageable;
-                                if (pageable != null) pageable.TryPage(dx < 0 ? 1 : -1); // left -> next page, right -> prev
-                            }
-                            else if (isTap)
-                            {
-                                long sinceLastTapMs = (nowTicks - _lastTapDispatchUtcTicks) / TimeSpan.TicksPerMillisecond;
-                                if (sinceLastTapMs >= TapDebounceMs)
-                                {
-                                    _lastTapDispatchUtcTicks = nowTicks;
-                                    _nav.HandleTap(_fingerLastX, _fingerLastY);
-                                }
-                                else
-                                {
-                                    Debug.WriteLine("[Touch] tap debounced (" + sinceLastTapMs + "ms since last)");
-                                }
-                            }
-                        }
-                    }
-                    } // end lock (_uiLock)
-
-                    // Wake the main loop so it picks up the new finger state and applies
-                    // the appropriate tick budget (16 ms while held, 1 s when idle).
-                    if (_eventLoop != null) _eventLoop.Wake();
-                };
+                touch.TouchEvent += (sender, snapshot) => OnTouch(snapshot.FingerCount, snapshot.X1, snapshot.Y1);
             }
             catch (Exception ex)
             {

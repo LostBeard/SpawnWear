@@ -3,6 +3,7 @@ using SpawnWear.Drivers.Imu;
 using SpawnWear.Drivers.Power;
 using System.Drawing;
 using SpawnDev.UI;
+using SpawnWear.Services;
 
 namespace SpawnWear.UI
 {
@@ -29,16 +30,20 @@ namespace SpawnWear.UI
         private readonly OpenPage _openGfxProbe;
         private readonly OpenPage _openStats;
         private readonly OpenPage _openAbout;
+        private readonly OpenPage _openTimeZone;
+        private readonly TimeService _time;
         private bool _bleOn;
         private bool _wifiOn;
         private int _motionThrottle;
+        private int _syncThrottle;
 
-        private readonly UIListRow _brightRow, _bleRow, _wifiRow, _motionRow;
+        private readonly UIListRow _brightRow, _bleRow, _wifiRow, _motionRow, _zoneRow, _syncRow;
         private static byte _currentBrightness = 0xFF;
 
         public SettingsScreen(Bitmap fb, int panelWidth, int panelHeight, RequestSleep requestSleep, Qmi8658Driver imu,
             ToggleAction bleToggle, bool bleOn, ToggleAction wifiToggle, bool wifiOn, OpenPage openCompanion,
-            OpenPage openUiKit, OpenPage openGfxProbe, OpenPage openStats, OpenPage openAbout)
+            OpenPage openUiKit, OpenPage openGfxProbe, OpenPage openStats, OpenPage openAbout,
+            TimeService time, OpenPage openTimeZone)
             : base(new WatchSurface(fb, panelWidth, panelHeight))
         {
             _requestSleep = requestSleep;
@@ -52,6 +57,8 @@ namespace SpawnWear.UI
             _openGfxProbe = openGfxProbe;
             _openStats = openStats;
             _openAbout = openAbout;
+            _time = time;
+            _openTimeZone = openTimeZone;
             var t = Theme.Current;
 
             var root = new UIPanel { X = 0, Y = 0, Width = panelWidth, Height = panelHeight, Background = t.Background };
@@ -77,6 +84,9 @@ namespace SpawnWear.UI
             _wifiRow = Row("WIFI", _wifiToggle != null ? OnOff(_wifiOn) : "N/A", ToggleWifi, rowH);
             _motionRow = Row("MOTION", _imu != null ? "----" : "N/A", null, rowH); // informational
             col.Add(_brightRow); col.Add(_bleRow); col.Add(_wifiRow); col.Add(_motionRow);
+            _zoneRow = Row("TIME ZONE", ZoneLabel(), OpenTimeZone, rowH);
+            _syncRow = Row("TIME SYNC", SyncLabel(), SyncTime, rowH); // tap = sync now
+            col.Add(_zoneRow); col.Add(_syncRow);
             col.Add(Row("STATS", ">", OpenStats, rowH));
             col.Add(Row("COMPANION", ">", OpenCompanion, rowH));
             col.Add(Row("UI KIT", ">", OpenUiKit, rowH));
@@ -96,8 +106,27 @@ namespace SpawnWear.UI
         public void SetPageDots(int index, int total) { }
         public void SetStatusBar(StatusBar bar) { }
 
+        public override void OnResume()
+        {
+            _zoneRow.Value = ZoneLabel(); // may have changed in the TIME ZONE picker
+            _syncRow.Value = SyncLabel();
+            base.OnResume();
+        }
+
         public override void Tick()
         {
+            // Zone: the TIME ZONE picker closes with a soft pop (no OnResume here), so notice the change
+            // on the next tick. Sync status (SYNCING -> last-sync time / FAILED) is throttled like MOTION.
+            if (_time != null && _time.Zone != _shownZone)
+            {
+                _zoneRow.Value = ZoneLabel();
+                Invalidate();
+            }
+            if ((++_syncThrottle & 0x07) == 0)
+            {
+                string v = SyncLabel();
+                if (_syncRow.Value != v) { _syncRow.Value = v; Invalidate(); }
+            }
             // Live orientation from the IMU, throttled to ~1/8 ticks. Repaint only when the label changes.
             if (_imu != null && (++_motionThrottle & 0x07) == 0)
             {
@@ -130,6 +159,16 @@ namespace SpawnWear.UI
         private void OpenGfxProbe() { if (_openGfxProbe != null) _openGfxProbe(); }
         private void OpenStats() { if (_openStats != null) _openStats(); }
         private void OpenAbout() { if (_openAbout != null) _openAbout(); }
+        private void OpenTimeZone() { if (_openTimeZone != null) _openTimeZone(); }
+        private void SyncTime() { if (_time != null) { _time.SyncNow(); _syncRow.Value = "SYNCING"; Invalidate(); } }
+        private int _shownZone = -1;
+        private string ZoneLabel()
+        {
+            if (_time == null) return "N/A";
+            _shownZone = _time.Zone;
+            return TimeService.ZoneName(_shownZone);
+        }
+        private string SyncLabel() { return _time != null ? _time.SyncStatus : "N/A"; }
 
         private void ToggleBle()
         {

@@ -27,10 +27,10 @@ namespace SpawnWear.Services
         readonly ILogger _logger;
         IDisplayBuffer _display;
 
-        public ServiceHost(Axp2101Driver axp, Pcf85063Driver rtc, WifiService wifi, ILogger logger)
+        public ServiceHost(Axp2101Driver axp, TimeService time, WifiService wifi, ILogger logger)
         {
             _power = new PowerServiceImpl(axp);
-            _rtc = new RtcServiceImpl(rtc);
+            _rtc = new RtcServiceImpl(time);
             _wifi = new WifiServiceImpl(wifi);
             // Phase 3 LoggerService is created in Program.Main and passed in; fall back to
             // the Debug.WriteLine shim if a caller does not supply one.
@@ -193,20 +193,21 @@ namespace SpawnWear.Services
     /// <summary>Reads RTC date/time. IsValid mirrors the OS (oscillator-stop) flag
     /// from the chip; when false the H/M/S/Y/M/D values fall through to a "last
     /// known good" snapshot from the most recent successful read.</summary>
+    /// <summary>App-facing clock: LOCAL time (the RTC keeps UTC; TimeService applies the user's zone).</summary>
     internal class RtcServiceImpl : IRtcService
     {
-        readonly Pcf85063Driver _rtc;
+        readonly TimeService _time;
         bool _isValid;
         int _year, _month, _day, _hour, _minute, _second, _weekday;
 
-        public RtcServiceImpl(Pcf85063Driver rtc) { _rtc = rtc; Refresh(); }
+        public RtcServiceImpl(TimeService time) { _time = time; Refresh(); }
 
         void Refresh()
         {
-            if (_rtc == null) { _isValid = false; return; }
+            if (_time == null) { _isValid = false; return; }
             try
             {
-                if (_rtc.TryRead(out var t))
+                if (_time.TryLocalNow(out var t))
                 {
                     _isValid = true;
                     _year = t.Year; _month = t.Month; _day = t.Day;

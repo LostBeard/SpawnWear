@@ -38,6 +38,7 @@
     <Compile Include="Services\WebRtcTransportService.cs" />
     <Compile Include="Services\LoggerService.cs" />
     <Compile Include="Services\ServiceHost.cs" />
+    <Compile Include="Services\TimeService.cs" />
     <Compile Include="UI\AboutScreen.cs" />
     <Compile Include="UI\CompanionScreen.cs" />
     <Compile Include="UI\UiKitDemoScreen.cs" />
@@ -56,6 +57,7 @@
     <Compile Include="UI\LauncherScreen.cs" />
     <Compile Include="UI\StatsScreen.cs" />
     <Compile Include="UI\SettingsScreen.cs" />
+    <Compile Include="UI\TimeZoneScreen.cs" />
     <Compile Include="UI\QuickSettingsScreen.cs" />
     <Compile Include="UI\PageDots.cs" />
     <Compile Include="UI\ScreenNavigator.cs" />

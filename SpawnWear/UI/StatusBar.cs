@@ -1,6 +1,6 @@
 using nanoFramework.UI;
 using SpawnWear.Drivers.Power;
-using SpawnWear.Drivers.Rtc;
+using SpawnWear.Services;
 using System;
 using System.Drawing;
 using SpawnDev.UI;
@@ -61,7 +61,7 @@ namespace SpawnWear.UI
         readonly Bitmap _fb;
         readonly int _panelWidth;
         readonly Axp2101Driver _axp;
-        readonly Pcf85063Driver _rtc;
+        readonly TimeService _time; // local time (RTC keeps UTC)
         // Optional - main loop sets this so the BLE icon mirrors the radio state.
         // We don't query the BluetoothLEServer directly to keep StatusBar driver-free.
         bool _bleAdvertising = false;
@@ -82,12 +82,12 @@ namespace SpawnWear.UI
         int _lastWifiBars = int.MinValue;
         int _lastCompanionConnected = -1; // 0/1; -1 = not yet read
 
-        public StatusBar(Bitmap fb, int panelWidth, Axp2101Driver axp, Pcf85063Driver rtc)
+        public StatusBar(Bitmap fb, int panelWidth, Axp2101Driver axp, TimeService time)
         {
             _fb = fb;
             _panelWidth = panelWidth;
             _axp = axp;
-            _rtc = rtc;
+            _time = time;
         }
 
         public void SetBleAdvertising(bool on) => _bleAdvertising = on;
@@ -118,9 +118,9 @@ namespace SpawnWear.UI
         {
             int hour = _lastHour;
             int minute = _lastMinute;
-            if (_rtc != null)
+            if (_time != null)
             {
-                if (_rtc.TryRead(out var t))
+                if (_time.TryLocalNow(out var t))
                 {
                     hour = t.Hour;
                     minute = t.Minute;

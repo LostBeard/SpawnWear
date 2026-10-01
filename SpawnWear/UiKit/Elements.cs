@@ -208,8 +208,23 @@ namespace SpawnDev.UI
             }
             if (total > 0) total -= Spacing;
             _contentHeight = total;
+            int requested = ScrollOffset;
             if (ScrollOffset > MaxScroll) ScrollOffset = MaxScroll;
             if (ScrollOffset < 0) ScrollOffset = 0;
+            // The rows were placed with the requested offset; if the clamp changed it, move them to match.
+            // Otherwise this frame is drawn at one position and the next layout (e.g. the press-state
+            // redraw before a tap) at another, and the tap lands on the neighbouring row.
+            int shift = requested - ScrollOffset;
+            if (shift != 0)
+            {
+                for (int i = 0; i < Children.Count; i++)
+                {
+                    var c = (UIElement)Children[i];
+                    if (!c.Visible) continue;
+                    c.Y += shift;
+                    c.Layout();
+                }
+            }
         }
 
         /// <summary>Scroll by a finger delta (drag down = fingerDy&gt;0 = content moves down / earlier rows).</summary>

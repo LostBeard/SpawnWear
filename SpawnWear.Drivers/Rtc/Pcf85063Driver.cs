@@ -103,6 +103,13 @@ namespace SpawnWear.Drivers.Rtc
         /// </summary>
         public void Set(RtcTime time)
         {
+            // One lock around the whole write (the per-register locks below re-enter it) so a reader on
+            // another thread never sees a half-updated time.
+            lock (BoardSetup.I2cLock) { SetLocked(time); }
+        }
+
+        void SetLocked(RtcTime time)
+        {
             byte ctrl1 = ReadReg(REG_CTRL1);
             WriteReg(REG_CTRL1, (byte)(ctrl1 | 0x20)); // STOP
 

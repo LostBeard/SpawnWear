@@ -59,6 +59,9 @@ namespace SpawnWear.Services
         public delegate void ButtonInjector();
         public TapInjector InjectTap;
         public ButtonInjector InjectBack;
+        public delegate void SwipeInjector(int x0, int y0, int x1, int y1);
+        /// <summary>POST /swipe: 8 bytes [x0 y0 x1 y1] u16 LE - a ~180 ms finger drag.</summary>
+        public SwipeInjector InjectSwipe;
         /// <summary>The UI lock (Program._uiLock), set by Program. /screenshot.bin holds it while it streams
         /// (~5 s) so the frame is one moment in time - otherwise a screen redrawing every second (a watch
         /// face) is captured as bands from different seconds. The UI pauses while a capture runs.</summary>
@@ -250,6 +253,16 @@ namespace SpawnWear.Services
             else if (path == "/touch" && method == "POST")
             {
                 ServeTouch(client, reqHeader, buf, n, headerEnd);
+            }
+            else if (path == "/swipe" && method == "POST")
+            {
+                byte[] b = ParseContentLength(reqHeader) == 8 ? ReadBody(client, 8, buf, n, headerEnd) : null;
+                if (b == null || InjectSwipe == null) ServeText(client, "400 Bad Request\r\n\r\nExpected 8 bytes [x0 y0 x1 y1] u16 LE");
+                else
+                {
+                    InjectSwipe(b[0] | (b[1] << 8), b[2] | (b[3] << 8), b[4] | (b[5] << 8), b[6] | (b[7] << 8));
+                    ServeText(client, "OK swipe");
+                }
             }
             else if (path == "/back" && method == "POST")
             {
