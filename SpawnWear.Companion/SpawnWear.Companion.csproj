@@ -8,6 +8,10 @@
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <RootNamespace>SpawnWear.Companion</RootNamespace>
     <AssemblyName>SpawnWear.Companion</AssemblyName>
+    <!-- Keep .NET's exception message strings. The Blazor WebAssembly SDK defaults this to true to save
+         download size, which turns every ex.Message the Companion shows into a resource KEY
+         ("TaskCanceledException_ctor_DefaultMessage" instead of "A task was canceled."). -->
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
   </PropertyGroup>
 
   <!-- Build timestamp - injected at compile time so the running app can prove
