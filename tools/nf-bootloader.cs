@@ -1,4 +1,4 @@
-#:package nanoFramework.Tools.Debugger.Net@2.4.42
+#:package nanoFramework.Tools.Debugger.Net@2.5.28
 
 // Reboot a running SpawnWear watch into the ESP32-S3 ROM download mode over the wire protocol - the
 // flasher's mode - so esptool can write firmware with NO BOOT-button dance.
@@ -9,7 +9,12 @@
 // The flag lives in the always-on domain: it survives the reset that follows, and a power cycle clears it.
 //
 // On that firmware the CLR's wire protocol and the ROM download mode are the SAME USB-Serial-JTAG port,
-// so the COM port does not change between "running" and "ready to flash".
+// so the COM port does not change between "running" and "ready to flash". tools\nf-flash-py313.bat does
+// not need this tool: esptool's own auto-reset reaches download mode through the USB-Serial-JTAG hardware.
+// This is the firmware route (what VS / nanoff use), verified on the watch 2026-10-01.
+//
+// 🔴 Connect with requestCapabilities: true. Without it the library never reads the target's capabilities,
+// sees SoftReboot = false, and silently sends NormalReboot instead (the watch just restarts the app).
 //
 // Usage:
 //   dotnet run tools/nf-bootloader.cs COM6        reboot into download mode
@@ -39,10 +44,14 @@ if (device == null)
 }
 Console.WriteLine($"Selected: {device.Description} ({device.ConnectionId})");
 
-if (!device.DebugEngine.Connect(5000, true)) { Console.WriteLine("Connect failed."); return 1; }
+if (!device.DebugEngine.Connect(5000, force: true, requestCapabilities: true)) { Console.WriteLine("Connect failed."); return 1; }
 
 Console.WriteLine($"Target: {device.TargetName} {device.Platform}  CLR {device.CLRVersion}");
 
-device.DebugEngine.RebootDevice(RebootOptions.EnterProprietaryBooter);
-Console.WriteLine("Reboot into ROM download mode requested. Flash it now with tools\\nf-flash-py313.bat " + port + ".");
-return 0;
+// The library only sends EnterProprietaryBooter when the target reports SoftReboot (or is in nanoBooter);
+// otherwise it silently substitutes NormalReboot - so report both, never assume.
+Console.WriteLine($"Capabilities.SoftReboot = {device.DebugEngine.Capabilities.SoftReboot}");
+bool ok = device.DebugEngine.RebootDevice(RebootOptions.EnterProprietaryBooter, new Progress<string>(m => Console.WriteLine($"  [debugger] {m}")));
+Console.WriteLine($"RebootDevice returned {ok}");
+await Task.Delay(500); // let the progress callbacks print
+return ok ? 0 : 1;
