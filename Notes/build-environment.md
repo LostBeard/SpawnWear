@@ -2,6 +2,18 @@
 
 To ship the QSPI display driver upstream, we build our own nf-interpreter image. This document captures the working build recipe on Windows so anyone (or any future agent) can reproduce it without re-deriving the paths.
 
+## 2026-10-01 update (supersedes the TL;DR below where they differ)
+
+- **Firmware branch** `feature/qspi-display-driver` is now nanoFramework **2.0** (upstream `develop` 2.0.0 + the SpawnWear commits).
+- **ESP-IDF v5.5.5** (`C:\Espressif\frameworks\esp-idf-v5.5.5`), with the LostBeard/libpeer `spawnwear` branch cloned into
+  its `components\libpeer` (no `idf_component.yml`; libsrtp/mbedtls/usrsctp submodules not initialized). Set
+  `ESP32_IDF_PATH` in `config/user-tools-repos.json` to it. All `tools\*.bat` call the 5.5.5 `export.bat`.
+- **Build**: `tools\nf-build-py313.bat ESP32_S3_BLE_QSPI` (run from PowerShell). If the build loops on
+  "[0/N] Re-running CMake...", a freshly installed IDF registry component (srtp, littlefs) has future mtimes:
+  `ninja -C build -d explain -n` names the file; touch it.
+- **Flash**: `tools\nf-flash-py313.bat COM6` - no BOOT button, the watch reboots into the new firmware by itself.
+- **Managed build**: needs the preview tooling - see CLAUDE.md and `tools\nf2-env.bat`.
+
 ## TL;DR — current state of the world (verified 2026-05-05)
 
 **Active build source**: `D:\users\tj\Projects\nf-interpreter\nf-interpreter\` on branch `feature/qspi-display-driver`. **NOT** the `_vendor-nf-interpreter\` checkout in the SpawnWear repo's parent folder — that one is a read-only reference clone.
