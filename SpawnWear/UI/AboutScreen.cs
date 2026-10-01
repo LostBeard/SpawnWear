@@ -104,7 +104,8 @@ namespace SpawnWear.UI
 
         string FormatHeap()
         {
-            try { return (nanoFramework.Runtime.Native.GC.Run(false) / 1024).ToString() + "KB"; }
+            // nf 2.0: GC.Run moved into mscorlib as an internal call; GetTotalMemory(false) is that same Run (free bytes)
+            try { return (System.GC.GetTotalMemory(false) / 1024).ToString() + "KB"; }
             catch { return "?"; }
         }
 

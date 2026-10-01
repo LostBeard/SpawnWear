@@ -20,6 +20,9 @@
     <Project Path="Apps/DiceApp/DiceApp/DiceApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="d4e5f6a7-b8c9-d0e1-f2a3-b4c5d6e7f8a9">
       <Deploy />
     </Project>
+    <Project Path="Apps/GenericsProbe/GenericsProbe/GenericsProbe.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="6e0f2a71-9c3d-4b85-a2e6-5d17c40b9f13">
+      <Deploy />
+    </Project>
     <Project Path="Apps/HelloWorldApp/HelloWorldApp/HelloWorldApp.nfproj" Type="11a8dd76-328b-46df-9f39-f559912d0360" Id="e1f2a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b">
       <Deploy />
     </Project>

@@ -121,9 +121,9 @@ namespace SpawnWear.Drivers.Touch
             // reserved byte; the register stride between FingerNum and X1H is 1.
             // Reading two-finger data needs two extra reads at 0x09..0x0C; we
             // issue them only if FingerNum >= 2.
-            SpanByte writeBuf = new byte[1];
+            Span<byte> writeBuf = new byte[1];
             writeBuf[0] = RegFingerNum;
-            SpanByte readBuf = new byte[6];
+            Span<byte> readBuf = new byte[6];
             lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, readBuf); }
 
             byte fingerCount = readBuf[0];
@@ -135,7 +135,7 @@ namespace SpawnWear.Drivers.Touch
             if (fingerCount >= 2)
             {
                 writeBuf[0] = RegX2PosH;
-                SpanByte t2 = new byte[4];
+                Span<byte> t2 = new byte[4];
                 lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, t2); }
                 x2 = Decode12Bit(t2[0], t2[1]);
                 y2 = Decode12Bit(t2[2], t2[3]);
@@ -156,16 +156,16 @@ namespace SpawnWear.Drivers.Touch
 
         byte ReadRegister(byte reg)
         {
-            SpanByte writeBuf = new byte[1];
+            Span<byte> writeBuf = new byte[1];
             writeBuf[0] = reg;
-            SpanByte readBuf = new byte[1];
+            Span<byte> readBuf = new byte[1];
             lock (BoardSetup.I2cLock) { _i2c.WriteRead(writeBuf, readBuf); }
             return readBuf[0];
         }
 
         void WriteRegister(byte reg, byte value)
         {
-            SpanByte buf = new byte[2];
+            Span<byte> buf = new byte[2];
             buf[0] = reg;
             buf[1] = value;
             lock (BoardSetup.I2cLock) { _i2c.Write(buf); }

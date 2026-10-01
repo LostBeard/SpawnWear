@@ -54,8 +54,13 @@ string[] vsRoots = new[]
     @"C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\Extensions",
     @"C:\Program Files\Microsoft Visual Studio\17\Professional\Common7\IDE\Extensions",
 };
-string dllPath = null;
-foreach (var root in vsRoots)
+// NF_DEBUG_LIBRARY: use a specific debugger DLL instead of the installed VS extension's. The nanoFramework
+// 2.0 (generics, NFMRK2) branch deploys with the PREVIEW extension's DLL, unpacked (not installed) to
+// SpawnWear\nf2-tooling\vsix\ - see tools\nf2-env.bat.
+string dllPath = Environment.GetEnvironmentVariable("NF_DEBUG_LIBRARY");
+if (!string.IsNullOrEmpty(dllPath) && !File.Exists(dllPath)) { Console.WriteLine($"NF_DEBUG_LIBRARY not found: {dllPath}"); return 1; }
+if (string.IsNullOrEmpty(dllPath)) dllPath = null;
+foreach (var root in dllPath == null ? vsRoots : Array.Empty<string>())
 {
     if (!Directory.Exists(root)) continue;
     var hit = Directory.GetFiles(root, "nanoFramework.Tools.DebugLibrary.Net.dll", SearchOption.AllDirectories).FirstOrDefault();
