@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <NanoFrameworkProjectSystemPath>$(MSBuildExtensionsPath)\nanoFramework\v1.0\</NanoFrameworkProjectSystemPath>
+  </PropertyGroup>
+  <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.Default.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.Default.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectTypeGuids>{11A8DD76-328B-46DF-9F39-F559912D0360};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <ProjectGuid>5d2e8a14-7b3c-4f60-9a1e-c4b8d02f6e37</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <FileAlignment>512</FileAlignment>
+    <RootNamespace>SpawnWear.Drivers</RootNamespace>
+    <AssemblyName>SpawnWear.Drivers</AssemblyName>
+    <TargetFrameworkVersion>v1.0</TargetFrameworkVersion>
+  </PropertyGroup>
+  <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.props" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.props')" />
+  <ItemGroup>
+    <Compile Include="BoardPins.cs" />
+    <Compile Include="BoardSetup.cs" />
+    <Compile Include="Imu\Qmi8658Driver.cs" />
+    <Compile Include="Power\Axp2101Driver.cs" />
+    <Compile Include="Rtc\Pcf85063Driver.cs" />
+    <Compile Include="SdCard\SdCardService.cs" />
+    <Compile Include="Touch\Ft3168Driver.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib">
+      <HintPath>..\packages\nanoFramework.CoreLibrary.2.0.0-preview.52\lib\netnano1.0\mscorlib.dll</HintPath>
+    </Reference>
+    <Reference Include="nanoFramework.Hardware.Esp32">
+      <HintPath>..\packages\nanoFramework.Hardware.Esp32.2.0.0-preview.12\lib\netnano1.0\nanoFramework.Hardware.Esp32.dll</HintPath>
+    </Reference>
+    <Reference Include="nanoFramework.Runtime.Events">
+      <HintPath>..\packages\nanoFramework.Runtime.Events.2.0.0-preview.13\lib\netnano1.0\nanoFramework.Runtime.Events.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Device.Gpio">
+      <HintPath>..\packages\nanoFramework.System.Device.Gpio.2.0.0-preview.18\lib\netnano1.0\System.Device.Gpio.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Device.I2c">
+      <HintPath>..\packages\nanoFramework.System.Device.I2c.2.0.0-preview.12\lib\netnano1.0\System.Device.I2c.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.FileSystem">
+      <HintPath>..\packages\nanoFramework.System.IO.FileSystem.2.0.0-preview.24\lib\netnano1.0\System.IO.FileSystem.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Threading">
+      <HintPath>..\packages\nanoFramework.System.Threading.2.0.0-preview.14\lib\netnano1.0\System.Threading.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <Import Project="$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets" Condition="Exists('$(NanoFrameworkProjectSystemPath)NFProjectSystem.CSharp.targets')" />
+  <ProjectExtensions>
+    <ProjectCapabilities>
+      <ProjectConfigurationsDeclaredAsItems />
+    </ProjectCapabilities>
+  </ProjectExtensions>
+</Project>

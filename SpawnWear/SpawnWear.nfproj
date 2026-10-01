@@ -25,13 +25,6 @@
     <Compile Include="PairingService.cs" />
     <Compile Include="WatchProfileService.cs" />
     <Compile Include="WifiConfigService.cs" />
-    <Compile Include="Drivers\BoardPins.cs" />
-    <Compile Include="Drivers\BoardSetup.cs" />
-    <Compile Include="Drivers\Imu\Qmi8658Driver.cs" />
-    <Compile Include="Drivers\Power\Axp2101Driver.cs" />
-    <Compile Include="Drivers\Rtc\Pcf85063Driver.cs" />
-    <Compile Include="Drivers\SdCard\SdCardService.cs" />
-    <Compile Include="Drivers\Touch\Ft3168Driver.cs" />
     <Compile Include="Drivers\Wifi\WifiService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -67,9 +60,7 @@
     <Compile Include="UI\PageDots.cs" />
     <Compile Include="UI\ScreenNavigator.cs" />
     <Compile Include="UI\StatusBar.cs" />
-    <Compile Include="UI\SegmentFont.cs" />
     <Compile Include="UI\SmallFont.cs" />
-    <Compile Include="UI\Watchface.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
@@ -140,6 +131,12 @@
     <ProjectReference Include="..\SpawnWear.AppContracts\SpawnWear.AppContracts.nfproj">
       <Project>{b2c3d4e5-f6a7-4901-b2c3-d4e5f6a78901}</Project>
       <Name>SpawnWear.AppContracts</Name>
+    </ProjectReference>
+    <!-- Board drivers live in their own assembly: SpawnWear.exe hit nanoFramework's 64 KB
+         bytecode-table limit (2026-10-01). -->
+    <ProjectReference Include="..\SpawnWear.Drivers\SpawnWear.Drivers.nfproj">
+      <Project>{5d2e8a14-7b3c-4f60-9a1e-c4b8d02f6e37}</Project>
+      <Name>SpawnWear.Drivers</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

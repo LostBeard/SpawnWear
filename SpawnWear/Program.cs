@@ -44,8 +44,10 @@ namespace SpawnWear
         static SdCardService _sd;
         static AppRepositoryService _appRepo;
         static LoadedAppScreen _loadedApp;
-        // loadedApp is the last entry in the navigator's screens array.
-        const int AppSlotIndex = 6;
+        // Indices into the navigator's screens array: { launcher, stats, settings, about, wifi, loadedApp }.
+        // (The built-in watchface was index 1 until 2026-10-01; faces are SD apps now.)
+        const int SettingsIndex = 2;
+        const int AppSlotIndex = 5;
         // The watch face loaded when no app has been launched yet: the digital Clock app (the analog
         // face is the "Analog" app). Faces are ordinary SD apps.
         const string DefaultFaceApp = "Clock";
@@ -239,7 +241,6 @@ namespace SpawnWear
                 // SD-card-loadable apps will receive this same instance.
                 var services = new ServiceHost(_axp, _rtc, _wifi, _logger);
 
-                var watchface = new Watchface(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp, _rtc);
                 var about = new AboutScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var wifiScreen = new WifiScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, services);
                 var stats = new StatsScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight, _axp);
@@ -286,7 +287,8 @@ namespace SpawnWear
                 var launcher = new LauncherScreen(fb, BoardPins.LcdWidth, BoardPins.LcdHeight,
                     BuildLauncherTiles, ActivateLauncherTile);
 
-                _nav = new ScreenNavigator(new IScreen[] { launcher, watchface, stats, settings, about, wifiScreen, loadedApp });
+                // Order must match SettingsIndex / AppSlotIndex.
+                _nav = new ScreenNavigator(new IScreen[] { launcher, stats, settings, about, wifiScreen, loadedApp });
                 _nav.SetFramebuffer(fb, BoardPins.LcdWidth, BoardPins.LcdHeight); // enable snapshot slide transitions
                 _nav.SetChrome(statusBar); // fixed chrome (status bar + page dots) over WidgetScreen pages
                 // Full app-manager wiring: loaded-app slot + navigator + slot index
@@ -297,7 +299,6 @@ namespace SpawnWear
                 // so no per-screen carousel dots are wired anymore (removed SetPageDots(i, 7)).
                 launcher.SetStatusBar(statusBar);
                 launcher.SetNavigator(_nav); // enables the animated horizontal slide between app-grid pages
-                watchface.SetStatusBar(statusBar);
                 stats.SetStatusBar(statusBar);
                 settings.SetStatusBar(statusBar);
                 about.SetStatusBar(statusBar);
@@ -721,11 +722,11 @@ namespace SpawnWear
         }
 
         // Opens the Settings screen from the quick-settings drop-down. GoTo clears the quick-settings
-        // overlay first, then switches to the Settings rotation screen (index 3 in the nav stack). With
-        // the launcher an apps-only drawer, this is the primary way into Settings.
+        // overlay first, then switches to the Settings rotation screen. With the launcher an apps-only
+        // drawer, this is the primary way into Settings.
         static void QsOpenSettings()
         {
-            if (_nav != null) _nav.GoTo(3);
+            if (_nav != null) _nav.GoTo(SettingsIndex);
         }
 
         static bool QsGetWifi() { return _wifi != null && _wifi.IsConnected; }

@@ -300,7 +300,7 @@ namespace SpawnWear.UI
 
         // Repaints ONE tile in place (press / release) and flushes just its rectangle - ~30 KB instead
         // of the full 411 KB frame. The rect covers the badge overhang above the tile and is snapped to
-        // the CO5300 even-start / odd-end address window (see Watchface's partial repaint) so no stale
+        // the CO5300 even-start / odd-end address window (Notes/co5300-quirks.md) so no stale
         // edge pixels survive. Tiles not on the current page are skipped.
         void RedrawTile(int idx)
         {
