@@ -239,14 +239,33 @@ namespace SpawnWear
             try
             {
                 var adapter = WifiAdapter.FindAllAdapters()[0];
-                adapter.ScanAsync();
+
+                // ScanAsync only STARTS the scan (esp_wifi_scan_start(..., block=false)); the results arrive with
+                // AvailableNetworksChanged (WIFI_EVENT_SCAN_DONE). Reading NetworkReport straight after ScanAsync
+                // returns an empty list. A passive scan is 500 ms per channel (~7 s STA, ~14 s AP+STA).
+                var done = new AutoResetEvent(false);
+                AvailableNetworksChangedEventHandler onDone = (s, e) => done.Set();
+                adapter.AvailableNetworksChanged += onDone;
+                WifiAvailableNetwork[] networks;
+                try
+                {
+                    adapter.ScanAsync();
+                    if (!done.WaitOne(25_000, false))
+                    {
+                        _debug.Log("[WiFi] Scan did not complete within 25 s");
+                    }
+                    networks = adapter.NetworkReport.AvailableNetworks;
+                }
+                finally
+                {
+                    adapter.AvailableNetworksChanged -= onDone;
+                }
 
                 // Build result string: one SSID per line with signal strength.
                 // Format: "SSID|RSSI\nSSID2|RSSI2\n..."
-                var report = adapter.NetworkReport;
                 var sb = new StringBuilder();
 
-                foreach (var network in report.AvailableNetworks)
+                foreach (var network in networks)
                 {
                     if (sb.Length > 0) sb.Append('\n');
                     sb.Append(network.Ssid);
@@ -255,7 +274,7 @@ namespace SpawnWear
                 }
 
                 var resultStr = sb.ToString();
-                _debug.Log("[WiFi] Scan complete. Found " + report.AvailableNetworks.Length + " networks");
+                _debug.Log("[WiFi] Scan complete. Found " + networks.Length + " networks");
 
                 if (_scanHasSubscribers)
                 {
